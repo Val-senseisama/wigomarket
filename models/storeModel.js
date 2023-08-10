@@ -25,6 +25,9 @@ var storeSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
+    address: {
+      type: String,
+    },
     balance: {
       type: Number,
       default: 0,

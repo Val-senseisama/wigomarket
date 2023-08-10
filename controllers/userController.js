@@ -560,7 +560,7 @@ const createOrder = asyncHandler(async (req, res) => {
                 product: item.product._id,
                 count: item.count,
                 profit: item.count * item.product.listedPrice,
-                created: Date.now(),
+                created: new Date.now(),
                 customer: orderFor.firstname + "" + orderFor.lastname,
               },
             },
@@ -582,7 +582,21 @@ const getOrders = asyncHandler(async (req, res) => {
   validateMongoDbId(_id);
   try {
     const userOrders = await Order.find({ orderedBy: _id })
-      .populate("products.product")
+      .populate({
+        path: "products.product",
+        select: "store",
+        model: "Product",
+        populate: {
+          path: "store",
+          select: "bankDetails, address, owner",
+          model: "Store",
+          populate: {
+            path: "owner",
+            select: "mobile, email",
+            model: "User",
+          },
+        },
+      })
       .exec();
     res.json(userOrders);
   } catch (error) {

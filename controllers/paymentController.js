@@ -33,19 +33,27 @@ const commissionHandler = asyncHandler(async (req, res) => {
         commissions.reduce(
           (fin, itm) => ({
             ...fin,
-            [itm.store]: {
+            [itm.store._id]: {
               ...itm.store,
               storeCommission:
-                (fin[itm.store]?.storeCommission || 0) + itm.storeCommission,
+                (fin[itm.store._id]?.storeCommission || 0) +
+                itm.storeCommission,
               gomarketCommission:
-                (fin[itm.store]?.gomarketCommission || 0) +
+                (fin[itm.store._id]?.gomarketCommission || 0) +
                 itm.gomarketCommission,
             },
           }),
           {}
         )
       );
-    res.json(blocks(commissions));
+    const payblocks = blocks(commissions).map((item) => {
+      return {
+        store: (item && item._doc) || null,
+        storeCommission: item && item.storeCommission,
+        gomarketCommission: item && item.gomarketCommission,
+      };
+    });
+    res.json(payblocks);
   } catch (error) {
     console.log(error);
   }

@@ -16,6 +16,7 @@ const createStore = asyncHandler(async (req, res) => {
       mobile: req.body.mobile,
       email: req.body.email,
       owner: user?._id,
+      address: req.body.address,
     });
     res.json(newStore);
   } else {
