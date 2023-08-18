@@ -35,10 +35,14 @@ var orderSchema = new mongoose.Schema(
     dispatch: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
+      dispatchCommission: {
+        type: Number,
+      },
     },
     deliveryMethod: {
       type: String,
       enum: ["pickup", "dispatch"],
+      required: true,
     },
     deliveryAddress: {
       type: String,

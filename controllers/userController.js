@@ -537,7 +537,7 @@ const createOrder = asyncHandler(async (req, res) => {
         currency: "NGN",
       },
       deliveryMethod: deliveryMethod,
-      deliveryAddress: deliveryAddress,
+      deliveryAddress: deliveryAddress ? deliveryAddress : req.user.address,
       orderedBy: user._id,
       orderStatus: "Not yet processed",
     }).save();

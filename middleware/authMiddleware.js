@@ -53,6 +53,7 @@ const isdispatch = asyncHandler(async (req, res, next) => {
   if (dispatchUser.role !== "dispatch") {
     throw new Error("You are not an dispatch");
   } else {
+    req.dispatch = user;
     next();
   }
 });

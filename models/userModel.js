@@ -1,7 +1,6 @@
 const mongoose = require("mongoose"); // Erase if already required
 const bcrypt = require("bcrypt");
 const crypto = require("crypto");
-const { boolean } = require("webidl-conversions");
 
 // Declare the Schema of the Mongo model
 var userSchema = new mongoose.Schema(
@@ -61,9 +60,9 @@ var userSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-    passwordChangedAt:Date,
-    passwordRefreshToken:String,
-    passwordResetExpiresAt:Date,
+    passwordChangedAt: Date,
+    passwordRefreshToken: String,
+    passwordResetExpiresAt: Date,
   },
   {
     timestamps: true,
@@ -79,7 +78,7 @@ userSchema.methods.isPasswordMatched = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
-userSchema.methods.createPasswordResetToken = async function(){
+userSchema.methods.createPasswordResetToken = async function () {
   const resetToken = crypto.randomBytes(32).toString("hex");
   this.passwordResetToken = crypto
     .createHash("sha256")
@@ -87,6 +86,6 @@ userSchema.methods.createPasswordResetToken = async function(){
     .digest("hex");
   this.passwordResetExpires = Date.now() + 30 * 60 * 10000; // 10 mins
   return resetToken;
-}
+};
 //Export the model
 module.exports = mongoose.model("User", userSchema);
