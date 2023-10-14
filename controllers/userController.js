@@ -643,7 +643,7 @@ module.exports = {
   getUserCart,
   emptyCart,
   removeFromCart,
-  verifyOtp,
+  // verifyOtp,
   updateCart,
   createOrder,
   updateOrderStatus,
