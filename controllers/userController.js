@@ -44,12 +44,12 @@ const createUser = asyncHandler(async (req, res) => {
   </p>`;
 
   if (!findUser) {
-    // Create new user
-    console.log(req.body);
+
+    try{
+      // Create new user
     const newUser = await User.create(req.body);
 
-    
-    // OTP Shit
+   // OTP Shit and welcome email
     //Twilio
     const client = new twilio(
       process.env.TWILIO_SID,
@@ -70,6 +70,10 @@ const createUser = asyncHandler(async (req, res) => {
     };
     sendEmail(data2);
      res.json(newUser);
+    }catch(error){
+      throw new Error(error);
+    };
+    
   } else {
     res.json({
       msg: "User already exists",
