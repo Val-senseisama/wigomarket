@@ -61,14 +61,14 @@ const createUser = asyncHandler(async (req, res) => {
     //   .services(verifySid)
     //   .verifications.create({ to: number, channel: "sms" });
 
-    // const data2 = {
-    //   to: email,
-    //   text: `Hey + + ${name}`,
-    //   subject: "Welcome to WigoMarket - Let's Shop!",
-    //   htm: welcome,
-    // };
-    // sendEmail(data2);
-    // res.json(newUser);
+    const data2 = {
+      to: email,
+      text: `Hey + + ${name}`,
+      subject: "Welcome to WigoMarket - Let's Shop!",
+      htm: welcome,
+    };
+    sendEmail(data2);
+     res.json(newUser);
   } else {
     res.json({
       msg: "User already exists",
