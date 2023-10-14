@@ -79,7 +79,7 @@ const createUser = asyncHandler(async (req, res) => {
   }
 });
 
-Verify OTP
+//Verify OTP
 const verifyOtp = asyncHandler(async (req, res) => {
   const otp = req.body.otp;
   const { num } = req.params;
