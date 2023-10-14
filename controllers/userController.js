@@ -12,7 +12,7 @@ const Product = require("../models/productModel");
 const Store = require("../models/storeModel");
 const twilio = require("twilio");
 const uniqid = require("uniqid");
-
+// omo
 // Create User
 const createUser = asyncHandler(async (req, res) => {
   const email = req.body.email;
@@ -102,7 +102,7 @@ const createUser = asyncHandler(async (req, res) => {
 //   } catch (error) {
 //     throw new Error(error);
 //   }
-});
+// });
 
 // Login User
 
