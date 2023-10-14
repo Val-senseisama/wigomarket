@@ -42,6 +42,6 @@ router.put("/update-cart", authMiddleware, updateCart);
 router.post("/add-cart", authMiddleware, addToCart2);
 router.post("/empty-cart", authMiddleware, emptyCart);
 router.post("/create-order", authMiddleware, createOrder);
-router.post("/:num", verifyOtp);
+// router.post("/:num", verifyOtp);
 
 module.exports = router;
