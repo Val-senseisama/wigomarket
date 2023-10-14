@@ -45,6 +45,7 @@ const createUser = asyncHandler(async (req, res) => {
 
   if (!findUser) {
     // Create new user
+    console.log(req.body);
     const newUser = await User.create(req.body);
     // OTP Shit
 
