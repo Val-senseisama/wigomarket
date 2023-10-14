@@ -68,7 +68,7 @@ const createUser = asyncHandler(async (req, res) => {
     //   htm: welcome,
     // };
     // sendEmail(data2);
-    res.json(newUser);
+    // res.json(newUser);
   } else {
     res.json({
       msg: "User already exists",
