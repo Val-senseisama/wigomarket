@@ -50,7 +50,7 @@ const createUser = asyncHandler(async (req, res) => {
 
     
     // OTP Shit
-    Twilio
+    //Twilio
     const client = new twilio(
       process.env.TWILIO_SID,
       process.env.TWILIO_AUTH_TOKEN
