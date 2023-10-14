@@ -49,16 +49,16 @@ const createUser = asyncHandler(async (req, res) => {
     // OTP Shit
 
     // Twilio
-    const client = new twilio(
-      process.env.TWILIO_SID,
-      process.env.TWILIO_AUTH_TOKEN
-    );
+    // const client = new twilio(
+    //   process.env.TWILIO_SID,
+    //   process.env.TWILIO_AUTH_TOKEN
+    // );
 
-    const verifySid = "VA96fe4719204f1b6a994bcff3212483ba";
+    // const verifySid = "VA96fe4719204f1b6a994bcff3212483ba";
 
-    client.verify.v2
-      .services(verifySid)
-      .verifications.create({ to: number, channel: "sms" });
+    // client.verify.v2
+    //   .services(verifySid)
+    //   .verifications.create({ to: number, channel: "sms" });
 
     const data2 = {
       to: email,
@@ -78,30 +78,30 @@ const createUser = asyncHandler(async (req, res) => {
 });
 
 // Verify OTP
-const verifyOtp = asyncHandler(async (req, res) => {
-  const otp = req.body.otp;
-  const { num } = req.params;
-  console.log(num);
-  const numb = num.replace(num[0], "+234");
-  console.log(numb);
-  try {
-    const client = twilio(
-      process.env.TWILIO_SID,
-      process.env.TWILIO_AUTH_TOKEN
-    );
-    client.verify.v2
-      .services(process.env.VERIFICATION_SID)
-      .verificationChecks.create({ to: numb, code: otp })
-      .then((verification_check) => {
-        if (verification_check.status === "approved") {
-          res.json({
-            msg: "Sucessful",
-          });
-        }
-      });
-  } catch (error) {
-    throw new Error(error);
-  }
+// const verifyOtp = asyncHandler(async (req, res) => {
+//   const otp = req.body.otp;
+//   const { num } = req.params;
+//   console.log(num);
+//   const numb = num.replace(num[0], "+234");
+//   console.log(numb);
+//   try {
+//     const client = twilio(
+//       process.env.TWILIO_SID,
+//       process.env.TWILIO_AUTH_TOKEN
+//     );
+//     client.verify.v2
+//       .services(process.env.VERIFICATION_SID)
+//       .verificationChecks.create({ to: numb, code: otp })
+//       .then((verification_check) => {
+//         if (verification_check.status === "approved") {
+//           res.json({
+//             msg: "Sucessful",
+//           });
+//         }
+//       });
+//   } catch (error) {
+//     throw new Error(error);
+//   }
 });
 
 // Login User
