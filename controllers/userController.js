@@ -52,15 +52,15 @@ const createUser = asyncHandler(async (req, res) => {
    // OTP Shit and welcome email
     //Twilio
     const client = new twilio(
-      process.env.TWILIO_SID,
-      process.env.TWILIO_AUTH_TOKEN
-    );
+    //   process.env.TWILIO_SID,
+    //   process.env.TWILIO_AUTH_TOKEN
+    // );
 
-    const verifySid = "VA96fe4719204f1b6a994bcff3212483ba";
+    // const verifySid = "VA96fe4719204f1b6a994bcff3212483ba";
 
-    client.verify.v2
-      .services(verifySid)
-      .verifications.create({ to: number, channel: "sms" });
+    // client.verify.v2
+    //   .services(verifySid)
+    //   .verifications.create({ to: number, channel: "sms" });
 
     const data2 = {
       to: email,
@@ -84,31 +84,31 @@ const createUser = asyncHandler(async (req, res) => {
 });
 
 //Verify OTP
-const verifyOtp = asyncHandler(async (req, res) => {
-  const otp = req.body.otp;
-  const { num } = req.params;
-  console.log(num);
-  const numb = num.replace(num[0], "+234");
-  console.log(numb);
-  try {
-    const client = twilio(
-      process.env.TWILIO_SID,
-      process.env.TWILIO_AUTH_TOKEN
-    );
-    client.verify.v2
-      .services(process.env.VERIFICATION_SID)
-      .verificationChecks.create({ to: numb, code: otp })
-      .then((verification_check) => {
-        if (verification_check.status === "approved") {
-          res.json({
-            msg: "Sucessful",
-          });
-        }
-      });
-  } catch (error) {
-    throw new Error(error);
-  }
-});
+// const verifyOtp = asyncHandler(async (req, res) => {
+//   const otp = req.body.otp;
+//   const { num } = req.params;
+//   console.log(num);
+//   const numb = num.replace(num[0], "+234");
+//   console.log(numb);
+//   try {
+//     const client = twilio(
+//       process.env.TWILIO_SID,
+//       process.env.TWILIO_AUTH_TOKEN
+//     );
+//     client.verify.v2
+//       .services(process.env.VERIFICATION_SID)
+//       .verificationChecks.create({ to: numb, code: otp })
+//       .then((verification_check) => {
+//         if (verification_check.status === "approved") {
+//           res.json({
+//             msg: "Sucessful",
+//           });
+//         }
+//       });
+//   } catch (error) {
+//     throw new Error(error);
+//   }
+// });
 
 
 
@@ -119,6 +119,7 @@ const loginUser = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   //   Check if user exists
   const findUser = await User.findOne({ email });
+  console.log("User:", findUser)
   if (findUser && (await findUser.isPasswordMatched(password))) {
     const refreshToken = await generateRefreshToken(findUser?._id);
     const updateUser = await User.findByIdAndUpdate(
@@ -130,6 +131,7 @@ const loginUser = asyncHandler(async (req, res) => {
       httpOnly: true,
       maxAge: 72 * 60 * 60 * 1000,
     });
+    console.log(updateUser)
     res.json({
       _id: findUser?._id,
       firstname: findUser?.firstname,
