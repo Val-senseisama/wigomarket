@@ -68,7 +68,7 @@ const createUser = asyncHandler(async (req, res) => {
       subject: "Welcome to WigoMarket - Let's Shop!",
       htm: welcome,
     };
-    sendEmail(data2);
+   // sendEmail(data2);
      res.json(newUser);
     }catch(error){
       throw new Error(error);
