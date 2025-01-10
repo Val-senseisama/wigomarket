@@ -49,8 +49,8 @@ const createUser = asyncHandler(async (req, res) => {
     ThrowError("Invalid Role");
   }
   number = Validate.formatPhone(number)
-  const findUser = await User.findOne({ email: email });
-  const mobileUser = await User.findOne({ mobile: number });
+  const findUser = await User.findOne({ email: email }, { firstname: 1 });
+  const mobileUser = await User.findOne({ mobile: number }, { firstname: 1 });
   const welcomeMessage = welcome();
 
   if (!findUser && !mobileUser) {
@@ -135,8 +135,17 @@ const verifyOtp = asyncHandler(async (req, res) => {
 
 const loginUser = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
+  if(!Validate.email(email)){
+    ThrowError("Invalid Email");
+  }
+
+  if(!Validate.string(password)){
+    ThrowError("Invalid Password");
+  }
+
+
   //   Check if user exists
-  const findUser = await User.findOne({ email });
+  const findUser = await User.findOne({ email }, {password: 1, status: 1, role: 1, _id: 1});
   console.log("User:", findUser)
   if (findUser && (await findUser.isPasswordMatched(password))) {
     const refreshToken = await generateRefreshToken(findUser?._id);
@@ -152,10 +161,8 @@ const loginUser = asyncHandler(async (req, res) => {
     console.log(updateUser)
     res.json({
       _id: findUser?._id,
-      firstname: findUser?.firstname,
-      lastname: findUser?.lastname,
-      email: findUser?.email,
-      mobile: findUser?.mobile,
+      status: findUser?.status,
+      role: findUser?.role,
       token: generateToken(findUser?._id),
     });
   } else {
