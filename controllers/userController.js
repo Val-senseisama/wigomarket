@@ -252,6 +252,14 @@ const updateAUser = asyncHandler(async (req, res) => {
   }
 
   try {
+    const mobileUser = await User.findOne({ mobile: mobile }, { _id: 1 });
+    if (mobileUser) {
+      res.json({
+        msg: "Mobile number already exists",
+        success: false,
+      });
+      throw new Error("Mobile number already exists");
+    }
     const updatedUser = await User.findByIdAndUpdate(
       id,
       {
