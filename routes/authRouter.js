@@ -18,6 +18,7 @@ const {
   getUserCart,
   updateCart,
   createOrder,
+  getUsersByStatus,
 } = require("../controllers/userController");
 const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
 const { commissionHandler } = require("../controllers/paymentController");
@@ -28,6 +29,7 @@ router.post("/forgot-password-token", forgotPasswordToken);
 router.put("/reset-password/:token", resetPassword);
 router.post("/login", loginUser);
 router.get("/all-users", getAllUsers);
+router.get("/status-users", authMiddleware, isAdmin ,getUsersByStatus);
 router.get("/refresh", handleRefreshToken);
 router.get("logout", logoutUser);
 router.get("/get-cart", authMiddleware, getUserCart);

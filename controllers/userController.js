@@ -283,7 +283,27 @@ const updateAUser = asyncHandler(async (req, res) => {
 
 const getAllUsers = asyncHandler(async (req, res) => {
   try {
-    const getUsers = await User.find();
+    const getUsers = await User.find(
+        { status: { $ne: 'pending' } }, // Filter for users whose status is not 'pending'
+        { _id: 1, image: 1, firstname: 1, lastname: 1, role: 1, mobile: 1, nickname: 1 } // Specify the fields to return
+    );
+    res.json(getUsers);
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
+const getUsersByStatus = asyncHandler(async (req, res) => {
+  const { status } = req.body; // Get the status from the request parameters
+  const  possibleStatusValues = ["active", "pending", "blocked"];
+  if (!possibleStatusValues.includes(status)) {
+    return res.status(400).json({ error: "Invalid status value" });
+  }
+  try {
+    const getUsers = await User.find(
+        { status: status }, // Filter for users with the specified status
+        { _id: 1, image: 1, firstname: 1, lastname: 1, role: 1, mobile: 1, nickname: 1 } // Specify the fields to return
+    );
     res.json(getUsers);
   } catch (error) {
     throw new Error(error);
@@ -379,7 +399,7 @@ const forgotPasswordToken = asyncHandler(async (req, res) => {
   try {
     const token = await user.createPasswordResetToken();
     await user.save();
-    const resetURL = `Hi, Please click on this link to reset your password. Be quick though because this link will expire in 10 minutes. <a href="http://localhost:5000/api/user/reset-password/${token}">Click Here</a>`;
+    const resetURL = `Hi, Please click on this link to reset your password. Be quick though because this link will expire in 10 minutes. <a href="https://wigomarket.onrender.com/api/user/reset-password/${token}">Click Here</a>`;
 
     const data = {
       to: email,
@@ -727,5 +747,6 @@ module.exports = {
   updateCart,
   createOrder,
   updateOrderStatus,
+  getUsersByStatus,
   getOrders,
 };
