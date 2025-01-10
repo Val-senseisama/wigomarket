@@ -38,6 +38,11 @@ var userSchema = new mongoose.Schema(
     image: {
       type: String,
     },
+    status: {
+      type: String,
+      enum: ["active", "pending", "blocked"],
+      default: "pending",
+    },
     isBlocked: {
       type: Boolean,
       default: false,

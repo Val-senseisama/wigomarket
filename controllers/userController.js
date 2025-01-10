@@ -1,4 +1,5 @@
 const User = require("../models/userModel");
+const Token = require("../models/tokensModel");
 const asyncHandler = require("express-async-handler");
 const { generateToken } = require("../config/jwt");
 const validateMongodbId = require("../utils/validateMongodbId");
@@ -10,64 +11,80 @@ const Cart = require("../models/cartModel");
 const Order = require("../models/orderModel");
 const Product = require("../models/productModel");
 const Store = require("../models/storeModel");
-const twilio = require("twilio");
 const uniqid = require("uniqid");
+const { welcome } = require("../templates/Emails");
+const { Validate } = require("../Helpers/Validate");
+const { ThrowError, MakeID } = require("../Helpers/Helpers");
 // omo
 // Create User
 const createUser = asyncHandler(async (req, res) => {
   const email = req.body.email;
-  const name = req.body.firstname;
-  const number = req.body.mobile.replace(req.body.mobile[0], "+234");
+  const firstname = req.body.firstname;
+  let number = req.body.mobile
+  const lastname = req.body.lastname
+  const password = req.body.password
+  const role = req.body.role
+
+  if (!Validate.email(email)) {
+    ThrowError("Invalid Email");
+  }
+
+  if (!Validate.string(name)) {
+    ThrowError("Invalid Name");
+  }
+
+  if (!Validate.string(number)) {
+    ThrowError("Invalid Mobile Number");
+  }
+
+  if (!Validate.string(lastname)) {
+    ThrowError("Invalid Lastname");
+  }
+
+  if (!Validate.string(password)) {
+    ThrowError("Invalid Password");
+  }
+  const roles = ["seller", "buyer", "dispatch", "admin"]
+  if (!Validate.string(role) || !roles.includes(role)) {
+    ThrowError("Invalid Role");
+  }
+  number = Validate.formatPhone(number)
   const findUser = await User.findOne({ email: email });
-  const welcome = `<p>
-     Welcome to WigoMarket! We are thrilled to have you as part of our vibrant community of buyers and sellers. As a new user of our multi-vendor ecommerce app, you are now on your way to discovering a world of incredible products, exceptional deals, and seamless transactions.
-      </p> 
-      <p>At WigoMarket, we pride ourselves on being the ultimate destination for all your shopping needs. Whether you're searching for fashion-forward clothing, cutting-edge electronics, unique handcrafted items, or anything in between, our diverse marketplace is sure to have something that suits your taste.</p>
-      <p>What makes WigoMarket stand out is our commitment to fostering a secure, user-friendly, and personalized shopping experience. With a wide range of trusted sellers offering their products, you can browse through an extensive catalog, read customer reviews, and make well-informed purchasing decisions.</p>
+  const mobileUser = await User.findOne({ mobile: number });
+  const welcome = welcome;
 
-<p>Here's a glimpse of what awaits you on WigoMarket:</p>
-<ul> 
-<li>Vast Product Selection: Explore an extensive assortment of products from various categories, ensuring you'll find exactly what you're looking for.</li>
+  if (!findUser && !mobileUser) {
 
-<li>Competitive Pricing: Discover amazing deals and enjoy competitive pricing from our sellers, helping you save money while shopping.</li>
-
-<li>Secure Transactions: Rest assured that your transactions are protected by advanced security measures and encryption technology.</li>
-
-<li>Customer Reviews: Make informed choices with the help of honest feedback and ratings provided by fellow shoppers.</li>
-</ul>
-      <br />
-      Prince
-      <br />
-      WigoMarket Team
-   
- <footer style="text-align:center;">©2023 Wigomarket Team with ♥</footer>
-  </p>`;
-
-  if (!findUser) {
-
+    const newUser = {
+      email,
+      firstname,
+      lastname,
+      mobile: number,
+      password,
+      role
+    }
+    const code = MakeID(6);
+    const token = {
+      email,
+      code
+    }
     try{
       // Create new user
-    const newUser = await User.create(req.body);
-
-   // OTP Shit and welcome email
-    //Twilio
-   // const client = new twilio(
-    //   process.env.TWILIO_SID,
-    //   process.env.TWILIO_AUTH_TOKEN
-    // );
-
-    // const verifySid = "VA96fe4719204f1b6a994bcff3212483ba";
-
-    // client.verify.v2
-    //   .services(verifySid)
-    //   .verifications.create({ to: number, channel: "sms" });
-
-    const data2 = {
+    const createUser = await User.create(newUser);
+    const createCode = await Token.create(token);
+    const data1 = {
       to: email,
-      text: `Hey + + ${name}`,
+      text: `Hey + + ${firstname} ${lastname}`,
       subject: "Welcome to WigoMarket - Let's Shop!",
       htm: welcome,
     };
+    const data2 = {
+      to: email,
+      text: ``,
+      subject: "Account Verification - WigoMarket",
+      htm: verificationCodeTemplate(firstname, code),
+    };
+   sendEmail(data1);
    sendEmail(data2);
      res.json(newUser);
     }catch(error){
@@ -82,34 +99,6 @@ const createUser = asyncHandler(async (req, res) => {
     throw new Error("User already exists");
   }
 });
-
-//Verify OTP
-// const verifyOtp = asyncHandler(async (req, res) => {
-//   const otp = req.body.otp;
-//   const { num } = req.params;
-//   console.log(num);
-//   const numb = num.replace(num[0], "+234");
-//   console.log(numb);
-//   try {
-//     const client = twilio(
-//       process.env.TWILIO_SID,
-//       process.env.TWILIO_AUTH_TOKEN
-//     );
-//     client.verify.v2
-//       .services(process.env.VERIFICATION_SID)
-//       .verificationChecks.create({ to: numb, code: otp })
-//       .then((verification_check) => {
-//         if (verification_check.status === "approved") {
-//           res.json({
-//             msg: "Sucessful",
-//           });
-//         }
-//       });
-//   } catch (error) {
-//     throw new Error(error);
-//   }
-// });
-
 
 
 
