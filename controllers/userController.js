@@ -100,7 +100,36 @@ const createUser = asyncHandler(async (req, res) => {
   }
 });
 
-
+const verifyOtp = asyncHandler(async (req, res) => {
+  const { email, code } = req.body;
+  if (!Validate.email(email)) {
+    ThrowError("Invalid Email");
+  }
+  if (!Validate.string(code)) {
+    ThrowError("Invalid Code");
+  }
+  const findUser = await User.findOne({ email: email });
+  const findToken = await Token.findOne({ email: email });
+  if (findToken.code === code) {
+    await User.findOneAndUpdate(
+      { email: email },
+      {
+        status: 'active',
+      }
+    );
+    await Token.findOneAndDelete({ email: email });
+    res.json({
+      msg: "User verified",
+      success: true,
+    });
+  } else {
+    res.json({
+      msg: "Invalid code",
+      success: false,
+    });
+    throw new Error("Invalid code");
+  }
+});
 
 // Login User
 
@@ -643,7 +672,7 @@ module.exports = {
   getUserCart,
   emptyCart,
   removeFromCart,
-  // verifyOtp,
+  verifyOtp,
   updateCart,
   createOrder,
   updateOrderStatus,
