@@ -29,7 +29,7 @@ const createUser = asyncHandler(async (req, res) => {
     ThrowError("Invalid Email");
   }
 
-  if (!Validate.string(name)) {
+  if (!Validate.string(firstname)) {
     ThrowError("Invalid Name");
   }
 

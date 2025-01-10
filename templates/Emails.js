@@ -1,4 +1,5 @@
-export const welcome = () =>{return `<p>
+export const welcome = () =>{
+    return `<p>
 Welcome to WigoMarket! We are thrilled to have you as part of our vibrant community of buyers and sellers. As a new user of our multi-vendor ecommerce app, you are now on your way to discovering a world of incredible products, exceptional deals, and seamless transactions.
  </p> 
  <p>At WigoMarket, we pride ourselves on being the ultimate destination for all your shopping needs. Whether you're searching for fashion-forward clothing, cutting-edge electronics, unique handcrafted items, or anything in between, our diverse marketplace is sure to have something that suits your taste.</p>
