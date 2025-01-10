@@ -215,6 +215,42 @@ const logoutUser = asyncHandler(async (req, res) => {
 const updateAUser = asyncHandler(async (req, res) => {
   const { id } = req.user;
   validateMongodbId(id);
+ const firstname = req?.body?.firstname
+ const lastname = req?.body?.lastname
+ const  email = req?.body?.email
+ const  mobile = req?.body?.mobile
+ const  address = req?.body?.addresss
+ const  image = req?.body?.image
+ const  nickname = req?.body?.nickname
+ 
+ if(!Validate.string(firstname)){
+    ThrowError("Invalid Firstname");
+  }
+
+  if(!Validate.string(lastname)){
+    ThrowError("Invalid Lastname");
+  } 
+
+  if(!Validate.email(email)){
+    ThrowError("Invalid Email");
+  }
+
+  if(!Validate.string(mobile)){
+    ThrowError("Invalid Mobile Number");
+  }
+
+  if(!Validate.string(address)){  
+    ThrowError("Invalid Address");
+  }
+
+  if(!Validate.string(nickname)){
+    ThrowError("Invalid Nickname");
+  }     
+
+  if(!Validate.string(image)){
+    ThrowError("Invalid Image");
+  }
+
   try {
     const updatedUser = await User.findByIdAndUpdate(
       id,
