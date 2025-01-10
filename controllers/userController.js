@@ -12,9 +12,9 @@ const Order = require("../models/orderModel");
 const Product = require("../models/productModel");
 const Store = require("../models/storeModel");
 const uniqid = require("uniqid");
-const { welcome } = require("../templates/Emails");
 const { Validate } = require("../Helpers/Validate");
 const { ThrowError, MakeID } = require("../Helpers/Helpers");
+const { verificationCodeTemplate, welcome } = require("../templates/Emails");
 // omo
 // Create User
 const createUser = asyncHandler(async (req, res) => {
@@ -51,7 +51,7 @@ const createUser = asyncHandler(async (req, res) => {
   number = Validate.formatPhone(number)
   const findUser = await User.findOne({ email: email });
   const mobileUser = await User.findOne({ mobile: number });
-  const welcome = welcome;
+  const welcomeMessage = welcome();
 
   if (!findUser && !mobileUser) {
 
@@ -76,7 +76,7 @@ const createUser = asyncHandler(async (req, res) => {
       to: email,
       text: `Hey + + ${firstname} ${lastname}`,
       subject: "Welcome to WigoMarket - Let's Shop!",
-      htm: welcome,
+      htm: welcomeMessage,
     };
     const data2 = {
       to: email,
