@@ -219,7 +219,7 @@ const updateAUser = asyncHandler(async (req, res) => {
  const lastname = req?.body?.lastname
  const  email = req?.body?.email
  const  mobile = req?.body?.mobile
- const  address = req?.body?.addresss
+ const  address = req?.body?.address
  const  image = req?.body?.image
  const  nickname = req?.body?.nickname
  
