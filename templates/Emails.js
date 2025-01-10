@@ -30,6 +30,7 @@ export const verificationCodeTemplate = (firstname, code) => {
         <div>
             <h1>Hello ${firstname},</h1>
             <p>Your verification code is <strong>${code}</strong>.</p>
+            <p>This code is valid for 10 minutes.</p>
             <p>You can use this code to verify your account.</p>
             <p>Thank you for choosing WigoMarket!</p>
         </div>
@@ -42,7 +43,7 @@ export const forgotPasswordTemplate = (firstname, code) => {
         <div>
             <h1>Hello ${firstname},</h1>
             <p>Your password reset code is <strong>${code}</strong>.</p>
-            <p>Please use this code to reset your password.</p>
+            <p>Please use this code to reset your password, it's valid for 10 minutes.</p>
             <p>If you did not request a password reset, please ignore this email.</p>
             <p>Thank you for using WigoMarket!</p>
         </div>

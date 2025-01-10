@@ -13,6 +13,14 @@ var tokenSchema = new mongoose.Schema({
         length:6,
         required:true,
     },
+    createdAt: {
+        type: Date,
+        default: Date.now,
+        expires: 600, // 10 minutes
+    },
+},
+{
+    timestamps: true,
 });
 
 //Export the model

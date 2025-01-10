@@ -14,7 +14,7 @@ const Store = require("../models/storeModel");
 const uniqid = require("uniqid");
 const { Validate } = require("../Helpers/Validate");
 const { ThrowError, MakeID } = require("../Helpers/Helpers");
-const { verificationCodeTemplate, welcome } = require("../templates/Emails");
+const { verificationCodeTemplate, welcome, forgotPasswordTemplate } = require("../templates/Emails");
 // omo
 // Create User
 const createUser = asyncHandler(async (req, res) => {
@@ -393,19 +393,27 @@ const updatePassword = asyncHandler(async (req, res) => {
 
 const forgotPasswordToken = asyncHandler(async (req, res) => {
   const { email } = req.body;
-  const user = await User.findOne({ email });
+  const user = await User.findOne({ email },{firstname: 1});
   if (!email) throw new Error("User not found with this email");
 
   try {
-    const token = await user.createPasswordResetToken();
-    await user.save();
-    const resetURL = `Hi, Please click on this link to reset your password. Be quick though because this link will expire in 10 minutes. <a href="https://wigomarket.onrender.com/api/user/reset-password/${token}">Click Here</a>`;
+    const token = MakeID(6);
+    
+    const newToken = await Token.create({
+      email,
+      code: token,
+    }, {
+      new: true,});
+   
+      if (!newToken) {
+        throw new Error("Token not created");
+      }
 
     const data = {
       to: email,
       text: "Hey User",
       subject: "Password Reset Link",
-      htm: resetURL,
+      htm: forgotPasswordTemplate(user?.firstname, token),
     };
     sendEmail(data);
     res.json(token);
@@ -415,17 +423,17 @@ const forgotPasswordToken = asyncHandler(async (req, res) => {
 });
 
 const resetPassword = asyncHandler(async (req, res) => {
-  const { password } = req.body;
-  const { token } = req.params;
+  const { password, token, email } = req.body;
   const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
   const user = await User.findOne({
-    passwordResetToken: hashedToken,
-    passwordResetExpires: { $gt: Date.now() },
+    email,}, {password: 1, _id: 1}
+  );
+  const tokenTime = await Token.findOne({
+    email,
+    code: hashedToken,
   });
-  if (!user) throw new Error("Token expired please try again later");
+  if (!user || !tokenTime) throw new Error("Token expired please try again later");
   user.password = password;
-  user.passwordResetToken = undefined;
-  user.passwordResetExpires = undefined;
   await user.save();
   res.json(user);
 });
