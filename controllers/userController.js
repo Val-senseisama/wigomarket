@@ -23,7 +23,7 @@ const createUser = asyncHandler(async (req, res) => {
   let number = req.body.mobile
   const lastname = req.body.lastname
   const password = req.body.password
-  const role = req.body.role
+  let role = req.body.role
 
   if (!Validate.email(email)) {
     ThrowError("Invalid Email");
@@ -48,6 +48,7 @@ const createUser = asyncHandler(async (req, res) => {
   if (!Validate.string(role) || !roles.includes(role)) {
     ThrowError("Invalid Role");
   }
+  
   number = Validate.formatPhone(number)
   const findUser = await User.findOne({ email: email }, { firstname: 1 });
   const mobileUser = await User.findOne({ mobile: number }, { firstname: 1 });
@@ -61,7 +62,7 @@ const createUser = asyncHandler(async (req, res) => {
       lastname,
       mobile: number,
       password,
-      role
+      role: [...role]
     }
     const code = MakeID(6);
     const token = {
@@ -435,7 +436,7 @@ const resetPassword = asyncHandler(async (req, res) => {
     email,
     code: hashedToken,
   });
-  if (!user || !tokenTime) throw new Error("Token expired please try again later");
+  if (!user || !tokenTime) throw new Error("Invalid Token");
   user.password = password;
   await user.save();
   await Token.deleteOne({ email });

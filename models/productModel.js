@@ -25,7 +25,8 @@ var productSchema = new mongoose.Schema(
       type: Number,
     },
     category: {
-      type: String,
+      type: mongoose.schema.Types.ObjectId,
+      ref: "Category",
       required: true,
     },
     brand: {

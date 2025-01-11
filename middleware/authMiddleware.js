@@ -22,40 +22,45 @@ const authMiddleware = asyncHandler(async (req, res, next) => {
   }
 });
 
-const isAdmin = asyncHandler(async (req, res, next) => {
-  const { email } = req.user;
-  const adminUser = await User.findOne({ email });
-
-  if (adminUser.role !== "admin") {
-    throw new Error("You are not an admin");
-  } else {
-    next();
-  }
-});
-
 const isSeller = asyncHandler(async (req, res, next) => {
   const { email } = req.user;
-  const sellerUser = await User.findOne({ email });
 
-  if (sellerUser.role !== "seller") {
+  // Fetch the user with the required fields
+  const sellerUser = await User.findOne({ email }).select('role');
+
+  if (!sellerUser || !sellerUser.role.includes("seller")) {
     throw new Error("You are not a seller");
-  } else {
-    const store = await Store.findOne({ owner: sellerUser.id });
-    req.store = store._id;
-    next();
   }
+
+  // Assign store ID if needed
+  const store = await Store.findOne({ owner: sellerUser._id }, "_id");
+  req.store = store ? store._id : null;
+  next();
 });
 
 const isdispatch = asyncHandler(async (req, res, next) => {
   const { email } = req.user;
-  const dispatchUser = await User.findOne({ email });
 
-  if (dispatchUser.role !== "dispatch") {
-    throw new Error("You are not an dispatch");
-  } else {
-    req.dispatch = user;
-    next();
+  // Fetch the user with the required fields
+  const dispatchUser = await User.findOne({ email }).select('role');
+
+  if (!dispatchUser || !dispatchUser.role.includes("dispatch")) {
+    throw new Error("You are not a dispatch user");
   }
+
+  next();
 });
 
+const isAdmin = asyncHandler(async (req, res, next) => {
+  const { email } = req.user;
+
+  // Fetch the user with the required fields
+  const adminUser = await User.findOne({ email }).select('role');
+
+  if (!adminUser || adminUser.role !== "admin") {
+    throw new Error("You are not an admin");
+  }
+
+  next();
+});
 module.exports = { authMiddleware, isAdmin, isdispatch, isSeller };

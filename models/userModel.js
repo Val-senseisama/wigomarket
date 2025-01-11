@@ -24,10 +24,11 @@ var userSchema = new mongoose.Schema(
       unique: true,
     },
     role: {
-      type: String,
-      enum: ["seller", "buyer", "dispatch", "admin"],
-      default: "buyer",
+      type: [String], // Array of strings
+      enum: ["seller", "buyer", "dispatch", "admin"], // Valid roles
+      default: ["buyer"], // Default role is 'buyer'
     },
+    
     password: {
       type: String,
       required: true,
