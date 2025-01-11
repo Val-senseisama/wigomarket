@@ -395,7 +395,7 @@ const forgotPasswordToken = asyncHandler(async (req, res) => {
   const { email } = req.body;
   const user = await User.findOne({ email },{firstname: 1});
   if (!email) throw new Error("User not found with this email");
-
+  const token = MakeID(6)
   try {
 
     const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
