@@ -45,6 +45,54 @@ const updateProductCategory = asyncHandler(async (req, res) => {
   }
 });
 
+const getProductsByCategory = asyncHandler(async (req, res) => {
+  const { categoryId } = req.body; 
+  // Validate the category ID
+  validateMongodbId(categoryId);
+
+  try {
+    const products = await Product.find({ category: categoryId }).populate("store", "name image mobile address"); // Find products by category ID
+    res.json(products);
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
+const deleteProductCategory = asyncHandler(async (req, res) => {
+  const { id } = req.body; // Assuming category ID is passed as a URL parameter
+
+  // Validate the category ID
+  validateMongodbId(id);
+
+  try {
+    // Optionally, you can delete all products associated with this category
+    await Product.deleteMany({ category: id });
+
+    const deletedCategory = await Category.findByIdAndDelete(id);
+    if (!deletedCategory) {
+      return res.status(404).json({ message: "Category not found" });
+    }
+
+    res.json({ message: "Category deleted successfully" });
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
+const getProductCategories = asyncHandler(async (req, res) => {
+
+  try {
+    const category = await Category.findById();
+    if (!category) {
+      return res.status(404).json({ message: "Category not found" });
+    }
+
+    res.json(category);
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
 const createProduct = asyncHandler(async (req, res) => {
   const { title, price, quantity, category, brand, description,  } = req.body;
   validateMongodbId(category);
