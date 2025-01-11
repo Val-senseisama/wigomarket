@@ -397,17 +397,20 @@ const forgotPasswordToken = asyncHandler(async (req, res) => {
   if (!email) throw new Error("User not found with this email");
 
   try {
-    const token = MakeID(6);
+
+    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+
+    // Upsert the token in the database
+    const newToken = await Token.findOneAndUpdate(
+      { email },
+      { code: hashedToken, createdAt: Date.now() },
+      { new: true, upsert: true }
+    );
+
+    if (!newToken) {
+      throw new Error("Token not created");
+    }
     
-    const newToken = await Token.create({
-      email,
-      code: token,
-    }, {
-      new: true,});
-   
-      if (!newToken) {
-        throw new Error("Token not created");
-      }
 
     const data = {
       to: email,
@@ -435,6 +438,7 @@ const resetPassword = asyncHandler(async (req, res) => {
   if (!user || !tokenTime) throw new Error("Token expired please try again later");
   user.password = password;
   await user.save();
+  await Token.deleteOne({ email });
   res.json(user);
 });
 

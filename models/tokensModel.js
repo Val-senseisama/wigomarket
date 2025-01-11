@@ -10,7 +10,6 @@ var tokenSchema = new mongoose.Schema({
     },
     code:{
         type:String,
-        length:6,
         required:true,
     },
     createdAt: {
