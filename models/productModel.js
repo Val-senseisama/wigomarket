@@ -25,7 +25,7 @@ var productSchema = new mongoose.Schema(
       type: Number,
     },
     category: {
-      type: mongoose.schema.Types.ObjectId,
+      type: mongoose.Schema.Types.ObjectId,
       ref: "Category",
       required: true,
     },
