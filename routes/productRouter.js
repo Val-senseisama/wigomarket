@@ -13,7 +13,7 @@ const router = express.Router();
 router.post("/create-category", authMiddleware, isAdmin, createProductCategory);
 router.put("/update-category", authMiddleware, isAdmin, updateProductCategory)
 router.post("/create-product", authMiddleware, isSeller, createProduct);
-router.get("/get-product/:id", getAProduct);
+router.get("/get-product", getAProduct);
 router.put("/:id", updateProduct);
 router.delete("/:id", authMiddleware, isSeller, deleteProduct);
 router.get("/get-product", getAllProducts);
