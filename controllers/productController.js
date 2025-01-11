@@ -190,6 +190,10 @@ const getAllProducts = asyncHandler(async (req, res) => {
         $project: {
           title: 1, // Include product title
           quantity: 1, // Include product quantity
+          listedPrice: 1, // Include product listed price
+          image: 1, // Include product image
+          description: 1, // Include product description
+          brand: 1, // Include product brand
           "storeDetails.name": 1, // Include store name
           "storeDetails.address": 1, // Include store address
           "storeDetails.mobile": 1 // Include store mobile
