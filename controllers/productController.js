@@ -165,7 +165,7 @@ const getAllProducts = asyncHandler(async (req, res) => {
     limit = 30;
   }
   try {
-    const totalProducts = await db.products.countDocuments({ quantity: { $gt: 0 } });
+    const totalProducts = await Product.countDocuments({ quantity: { $gt: 0 } });
     const totalPages = Math.ceil(totalProducts / limit);
     const findProduct = Product.aggregate([
       { $match: { quantity: { $gt: 0 } } }, // Match products with stock > 0
