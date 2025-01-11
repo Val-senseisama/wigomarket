@@ -135,11 +135,11 @@ const updateProduct = asyncHandler(async (req, res) => {
 });
 
 const deleteProduct = asyncHandler(async (req, res) => {
-  const id = req.params;
+  const {id} = req.body;
   try {
     const deleteProduct = await Product.findOneAndDelete(id);
     res.json({
-      message: "Product deleted",
+      message: "Product deleted successfully",
     });
   } catch (error) {
     throw new Error(error);
@@ -147,9 +147,9 @@ const deleteProduct = asyncHandler(async (req, res) => {
 });
 
 const getAProduct = asyncHandler(async (req, res) => {
-  const { id } = req.params;
+  const { id } = req.body;
   try {
-    const findProduct = await Product.findById(id);
+    const findProduct = await Product.findById(id).populate("store", "name image mobile address");
     res.json(findProduct);
   } catch (error) {
     throw new Error(error);
@@ -196,7 +196,8 @@ const getAllProducts = asyncHandler(async (req, res) => {
           brand: 1, // Include product brand
           "storeDetails.name": 1, // Include store name
           "storeDetails.address": 1, // Include store address
-          "storeDetails.mobile": 1 // Include store mobile
+          "storeDetails.mobile": 1,// Include store mobile
+          "storeDetails.image": 1
         }
       }
     ]);
