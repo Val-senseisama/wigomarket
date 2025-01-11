@@ -157,7 +157,7 @@ const getAProduct = asyncHandler(async (req, res) => {
 });
 
 const getAllProducts = asyncHandler(async (req, res) => {
-  const {page , limit} = req.body;
+  let {page , limit} = req.body;
   if (!Validate.integer(page) || page <= 0) {
     page = 1;
   }
