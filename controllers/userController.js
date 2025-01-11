@@ -12,7 +12,7 @@ const Order = require("../models/orderModel");
 const Product = require("../models/productModel");
 const Store = require("../models/storeModel");
 const uniqid = require("uniqid");
-const { Validate } = require("../Helpers/Validate");
+import Validate  from "../Helpers/Validate";
 const { ThrowError, MakeID } = require("../Helpers/Helpers");
 const { verificationCodeTemplate, welcome, forgotPasswordTemplate } = require("../templates/Emails");
 // omo
