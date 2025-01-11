@@ -167,7 +167,7 @@ const getAllProducts = asyncHandler(async (req, res) => {
   try {
     const totalProducts = await Product.countDocuments({ quantity: { $gt: 0 } });
     const totalPages = Math.ceil(totalProducts / limit);
-    const findProduct = Product.aggregate([
+    const findProduct = await Product.aggregate([
       { $match: { quantity: { $gt: 0 } } }, // Match products with stock > 0
       { $sort: { created_at: -1 } }, // Sort by creation date (descending)
       { $skip: (page - 1) * 30 }, // Skip previous pages
