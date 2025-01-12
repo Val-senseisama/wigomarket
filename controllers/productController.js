@@ -82,7 +82,7 @@ const deleteProductCategory = asyncHandler(async (req, res) => {
 const getProductCategories = asyncHandler(async (req, res) => {
 
   try {
-    const category = await Category.findById();
+    const category = await Category.find();
     if (!category) {
       return res.status(404).json({ message: "Category not found" });
     }
@@ -269,5 +269,8 @@ module.exports = {
   updateProduct,
   deleteProduct,
   createProductCategory,
-  updateProductCategory
+  updateProductCategory,
+  getProductsByCategory,
+  deleteProductCategory,
+  getProductCategories
 };
