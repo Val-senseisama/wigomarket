@@ -46,6 +46,16 @@ var orderSchema = new mongoose.Schema(
     },
     deliveryAddress: {
       type: String,
+      required: true,
+    },
+    paymentStatus: {
+      type: String,
+      default: "Not yet paid",
+      enum: ["Not yet paid", "Paid"],
+    },
+    paymentMethod: {
+      type: String,
+      enum: ["cash", "card", "bank"],
     },
   },
   {

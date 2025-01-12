@@ -54,11 +54,15 @@ var storeSchema = new mongoose.Schema(
       bankName: {
         type: String,
       },
-      aza: {
+      accountNumber: {
         type: Number,
         length: 10,
       },
     },
+    subAccountDetails:{
+      type: Object,
+      default: {}
+    }
   },
   {
     timestamps: true,

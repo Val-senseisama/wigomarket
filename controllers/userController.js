@@ -314,7 +314,7 @@ const getUsersByStatus = asyncHandler(async (req, res) => {
 // Get a Single User
 
 const getAUser = asyncHandler(async (req, res) => {
-  const { id } = req.params;
+  const { id } = req.body;
   validateMongodbId(id);
   try {
     const getUser = await User.findById(id);
@@ -327,7 +327,7 @@ const getAUser = asyncHandler(async (req, res) => {
 // Delete a  User
 
 const deleteAUser = asyncHandler(async (req, res) => {
-  const { id } = req.params;
+  const { id } = req.body;
   validateMongodbId(id);
   try {
     const deleteUser = await User.findByIdAndDelete(id);
@@ -340,7 +340,7 @@ const deleteAUser = asyncHandler(async (req, res) => {
 // Block User
 
 const blockUser = asyncHandler(async (req, res) => {
-  const { id } = req.params;
+  const { id } = req.body;
   validateMongodbId(id);
   try {
     const block = await User.findByIdAndUpdate(
@@ -360,7 +360,7 @@ const blockUser = asyncHandler(async (req, res) => {
 
 // Unblock User
 const unblockUser = asyncHandler(async (req, res) => {
-  const { id } = req.params;
+  const { id } = req.body;
   validateMongodbId(id);
   try {
     const unblock = await User.findByIdAndUpdate(
@@ -446,8 +446,7 @@ const resetPassword = asyncHandler(async (req, res) => {
 const addToCart2 = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   const { product } = req.body;
-  const user = await User.findById(_id);
-  const cartExists = await Cart.findOne({ owner: user._id });
+  const cartExists = await Cart.findOne({ owner: _id });
   try {
     const user = await User.findById(_id);
     if (cartExists) {
@@ -518,24 +517,29 @@ const removeFromCart = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   const { product } = req.body;
   validateMongodbId(_id);
-  const user = await User.findById(_id);
-  const cart = await Cart.findOne({ owner: user._id });
-  let cartBalance = cart.cartTotal;
-  let object = {};
-  object.product = product._id;
-  object.count = product.count;
-  object.color = product.color;
-  object.store = product.store;
-  let getPrice = product.price;
-  object.price = getPrice * object.count;
-  let newBalance = cartBalance - object.price;
-  const cartUpdate = await Cart.updateOne(
-    { owner: user._id },
-    {
-      $pop: { products: object },
-      $set: { cartTotal: newBalance },
-    }
-  );
+
+  try {
+    const cart = await Cart.findOne({ owner:_id });
+    let cartBalance = cart.cartTotal;
+    let object = {};
+    object.product = product._id;
+    object.count = product.count;
+    object.color = product.color;
+    object.store = product.store;
+    let getPrice = product.price;
+    object.price = getPrice * object.count;
+    let newBalance = cartBalance - object.price;
+    const cartUpdate = await Cart.updateOne(
+      { owner:_id },
+      {
+        $pop: { products: object },
+        $set: { cartTotal: newBalance },
+      }
+    );
+  } catch (error) {
+    console.log(error);
+    ThrowError(error);
+  }
   //const newCart =
 });
 
@@ -719,7 +723,7 @@ const getOrders = asyncHandler(async (req, res) => {
 
 const updateOrderStatus = asyncHandler(async (req, res) => {
   const { status } = req.body;
-  const { id } = req.params;
+  const { id } = req.body;
   validateMongoDbId(id);
   try {
     const updatedOrderStatus = await Order.findByIdAndUpdate(
