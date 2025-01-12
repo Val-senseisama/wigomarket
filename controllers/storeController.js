@@ -204,7 +204,7 @@ const updateBankDetails = asyncHandler(async (req, res) => {
   }
 
   try {
-    const myStore = await Store.findOne({ owner: _id }, { _id: 1, name: 1 });
+    const myStore = await Store.findOne({ owner: _id }, { _id: 1, name: 1,mobile: 1});
     
     const details = {
       account_bank: bankCode,
