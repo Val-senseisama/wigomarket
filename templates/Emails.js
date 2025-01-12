@@ -50,3 +50,38 @@ export const forgotPasswordTemplate = (firstname, code) => {
     `;
 };
 
+
+// Store Creation Success Template
+export const storeCreationSuccessTemplate = (storeName, address) => {
+    return `
+        <div>
+            <h1>Congratulations on Your New Store, ${storeName}!</h1>
+            <p>We are excited to inform you that your store has been successfully created.</p>
+            <p>Here are the details of your store:</p>
+            <ul>
+                <li><strong>Store Name:</strong> ${storeName}</li>
+                <li><strong>Address:</strong> ${address}</li>
+            </ul>
+            <p>Thank you for choosing WigoMarket! We look forward to supporting you on your journey as a seller.</p>
+        </div>
+    `;
+};
+
+
+// Store Account Update Success Template
+export const storeAccountUpdateSuccessTemplate = (bankName, accountNumber, accountName) => {
+    return `
+        <div>
+            <h1>Your Store Account Details Have Been Updated!</h1>
+            <p>We are pleased to inform you that your store account details have been successfully updated.</p>
+            <p>Here are the updated details:</p>
+            <ul>
+                <li><strong>Bank Name:</strong> ${bankName}</li>
+                <li><strong>Account Number:</strong> ${accountNumber}</li>
+                <li><strong>Account Name:</strong> ${accountName}</li>
+            </ul>
+            <p>If you did not make this change, we strongly recommend that you change your password immediately to ensure the security of your account.</p>
+            <p>Thank you for being a valued member of WigoMarket!</p>
+        </div>
+    `;
+};

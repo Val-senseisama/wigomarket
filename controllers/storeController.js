@@ -5,6 +5,8 @@ const validateMongodbId = require("../utils/validateMongodbId");
 const { Validate } = require("../Helpers/Validate");
 const { ThrowError } = require("../Helpers/Helpers");
 const Flutterwave = require('flutterwave-node-v3');
+const { storeCreationSuccessTemplate } = require("../templates/Emails");
+const sendEmail = require("./emailController");
 const flw = new Flutterwave(process.env.FLW_PUBLIC_KEY, process.env.FLW_SECRET_KEY);
 // Create Store
 const createStore = asyncHandler(async (req, res) => {
@@ -68,6 +70,14 @@ try {
           { new: true }
         )
       }
+      const emailData = storeCreationSuccessTemplate(name, address);
+      const data2 = {
+        to: email,
+        text: `Hello ${name}`,
+        subject: "Store Creation - WigoMarket",
+        htm: emailData,
+      };
+     sendEmail(data2);
       res.json(newStore);
     } else {
       res.json({
@@ -227,7 +237,14 @@ const updateBankDetails = asyncHandler(async (req, res) => {
         },
         { new: true }
       );
-
+      const emailData = storeAccountUpdateSuccessTemplate(bankName, accountNumber, accountName);
+      const data2 = {
+        to: email,
+        text: `Hello ${req.user?.firstname}`,
+        subject: "Store Account Update - WigoMarket",
+        htm: emailData,
+      };
+     sendEmail(data2);
     res.json(updatedStore);
   } catch (error) {
     console.log(error);
