@@ -204,13 +204,14 @@ const updateBankDetails = asyncHandler(async (req, res) => {
   }
 
   try {
-    const myStore = await Store.findOne({ owner: _id }, { _id: 1, name: 1,mobile: 1});
+    const myStore = await Store.findOne({ owner: _id }, { _id: 1, name: 1,mobile: 1, email: 1 });
     
     const details = {
       account_bank: bankCode,
       account_number: accountNumber,
       business_name: myStore.name,
       business_mobile: myStore.mobile,
+      business_email: myStore.email ?? req.user.email,
       country: "NG",
       split_type: "percentage",
       split_value: 0.05
