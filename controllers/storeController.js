@@ -191,9 +191,9 @@ const updateBankDetails = asyncHandler(async (req, res) => {
     ThrowError("Invalid Bank Name");
   }
 
-  // if(!Validate.string(accountNumber)){
-  //   ThrowError("Invalid Account Number");
-  // }
+  if(!Validate.string(accountNumber)){
+    ThrowError("Invalid Account Number");
+  }
 
   if(!Validate.string(accountName)){
     ThrowError("Invalid Account Name");
@@ -217,9 +217,7 @@ const updateBankDetails = asyncHandler(async (req, res) => {
       split_value: 0.05
       };
      const subAccount = await flw.Subaccount.create(details)
-      .then(console.log)
-      .catch(console.log);
-
+      
       if(!subAccount || subAccount.status !== "success") {
         ThrowError("Unable to create subaccount");
       }
