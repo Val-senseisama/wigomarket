@@ -204,7 +204,15 @@ const updateBankDetails = asyncHandler(async (req, res) => {
   }
 
   try {
-    const myStore = await Store.findOne({ owner: _id }, { _id: 1, name: 1,mobile: 1, email: 1 });
+    const myStore = await Store.findOne({ owner: _id }, { _id: 1, name: 1,mobile: 1, email: 1, subAccountDetails: 1 });
+
+    if(!myStore){
+      ThrowError("Store not found");
+    }
+
+    if(myStore.subAccountDetails.id){
+      flw.Subaccount.delete(myStore.subAccountDetails.id)
+    }
     
     const details = {
       account_bank: bankCode,
