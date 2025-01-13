@@ -211,7 +211,7 @@ const updateBankDetails = asyncHandler(async (req, res) => {
     }
 
     if(myStore.subAccountDetails.id){
-      flw.Subaccount.delete(myStore.subAccountDetails.id)
+      flw.Subaccount.delete(myStore.subAccountDetails)
     }
     
     const details = {
