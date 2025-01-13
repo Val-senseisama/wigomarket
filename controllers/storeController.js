@@ -239,7 +239,7 @@ const updateBankDetails = asyncHandler(async (req, res) => {
       );
       const emailData = storeAccountUpdateSuccessTemplate(bankName, accountNumber, accountName);
       const data2 = {
-        to: email,
+        to: myStore.email ?? req.user?.email,
         text: `Hello ${req.user?.firstname}`,
         subject: "Store Account Update - WigoMarket",
         htm: emailData,
