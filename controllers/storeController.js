@@ -211,7 +211,7 @@ const updateBankDetails = asyncHandler(async (req, res) => {
     }
 
     if(myStore.subAccountDetails.id){
-      flw.Subaccount.delete({
+    await flw.Subaccount.delete({
         id: myStore.subAccountDetails.id,
        // Authorization: "Bearer " + process.env.FLW_SECRET_KEY
       })
