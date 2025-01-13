@@ -6,7 +6,7 @@ const validateMongodbId = require("../utils/validateMongodbId");
 const { Validate } = require("../Helpers/Validate");
 const { ThrowError } = require("../Helpers/Helpers");
 const Flutterwave = require('flutterwave-node-v3');
-const { storeCreationSuccessTemplate } = require("../templates/Emails");
+const { storeCreationSuccessTemplate, storeAccountUpdateSuccessTemplate } = require("../templates/Emails");
 const sendEmail = require("./emailController");
 const flw = new Flutterwave(process.env.FLW_PUBLIC_KEY, process.env.FLW_SECRET_KEY);
 // Create Store
