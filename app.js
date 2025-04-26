@@ -8,8 +8,11 @@ const authRouter = require("./routes/authRouter");
 const productRouter = require("./routes/productRouter");
 const storeRouter = require("./routes/storeRouter");
 const { notFound, errorHandler } = require("./middleware/errorHandler");
+const { swaggerUi, specs } = require('./swagger');
 
 const app = express();
+
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: false }));

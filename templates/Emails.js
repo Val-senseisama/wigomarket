@@ -1,4 +1,4 @@
-export const welcome = () =>{
+ const welcome = () =>{
     return `<p>
 Welcome to WigoMarket! We are thrilled to have you as part of our vibrant community of buyers and sellers. As a new user of our multi-vendor ecommerce app, you are now on your way to discovering a world of incredible products, exceptional deals, and seamless transactions.
  </p> 
@@ -25,7 +25,7 @@ Welcome to WigoMarket! We are thrilled to have you as part of our vibrant commun
 
 
 // Verification Code Template
-export const verificationCodeTemplate = (firstname, code) => {
+ const verificationCodeTemplate = (firstname, code) => {
     return `
         <div>
             <h1>Hello ${firstname},</h1>
@@ -38,7 +38,7 @@ export const verificationCodeTemplate = (firstname, code) => {
 };
 
 // Forgot Password Code Template
-export const forgotPasswordTemplate = (firstname, code) => {
+ const forgotPasswordTemplate = (firstname, code) => {
     return `
         <div>
             <h1>Hello ${firstname},</h1>
@@ -52,7 +52,7 @@ export const forgotPasswordTemplate = (firstname, code) => {
 
 
 // Store Creation Success Template
-export const storeCreationSuccessTemplate = (storeName, address) => {
+ const storeCreationSuccessTemplate = (storeName, address) => {
     return `
         <div>
             <h1>Congratulations on Your New Store, ${storeName}!</h1>
@@ -69,7 +69,7 @@ export const storeCreationSuccessTemplate = (storeName, address) => {
 
 
 // Store Account Update Success Template
-export const storeAccountUpdateSuccessTemplate = (bankName, accountNumber, accountName) => {
+ const storeAccountUpdateSuccessTemplate = (bankName, accountNumber, accountName) => {
     return `
         <div>
             <h1>Your Store Account Details Have Been Updated!</h1>
@@ -85,3 +85,5 @@ export const storeAccountUpdateSuccessTemplate = (bankName, accountNumber, accou
         </div>
     `;
 };
+
+module.exports = { welcome, storeAccountUpdateSuccessTemplate, storeCreationSuccessTemplate, forgotPasswordTemplate, verificationCodeTemplate }

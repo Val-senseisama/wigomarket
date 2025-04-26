@@ -10,6 +10,25 @@ const { storeCreationSuccessTemplate, storeAccountUpdateSuccessTemplate } = requ
 const sendEmail = require("./emailController");
 const flw = new Flutterwave(process.env.FLW_PUBLIC_KEY, process.env.FLW_SECRET_KEY);
 // Create Store
+/**
+ * @function createStore
+ * @description Create a new store for a user
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {Object} req.user - Authenticated user information
+ * @param {string} req.user._id - User ID
+ * @param {string} req.user.mobile - User's mobile number
+ * @param {string} req.user.email - User's email
+ * @param {string[]} req.user.role - User's roles
+ * @param {Object} req.body - Store creation data
+ * @param {string} req.body.name - Store name (required)
+ * @param {string} req.body.address - Store address (required)
+ * @param {string} req.body.storeMobile - Store mobile number (required)
+ * @param {string} req.body.storeEmail - Store email (required)
+ * @param {string} req.body.storeImage - Store image URL (required)
+ * @returns {Object} - Created store information
+ * @throws {Error} - Throws error if validation fails, store already exists, or creation fails
+ */
 const createStore = asyncHandler(async (req, res) => {
 const { _id, mobile,role, email } = req.user;
 const { name, address, storeMobile, storeEmail, storeImage } = req.body;
@@ -92,7 +111,14 @@ try {
   ThrowError(error);
 }
 });
-
+/**
+ * @function getAllStores
+ * @description Get all stores with selected fields
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @returns {Array} - Array of store objects with selected fields
+ * @throws {Error} - Throws error if retrieval fails
+ */
 const getAllStores = asyncHandler(async (req, res) => {
   try {
     const getStores = await Store.find().select('name image email mobile address');
@@ -102,7 +128,15 @@ const getAllStores = asyncHandler(async (req, res) => {
   }
 });
 
-
+/**
+ * @function search
+ * @description Search for products and stores
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.query.search - Search keyword (optional)
+ * @returns {Object} - Search results containing products and stores
+ * @throws {Error} - Throws error if search fails
+ */
 const search = asyncHandler(async (req, res) => {
   const keyword = req.query.search
     ? {
@@ -162,7 +196,15 @@ const search = asyncHandler(async (req, res) => {
 });
 
 // Get a Single Store
-
+/**
+ * @function getAStore
+ * @description Get a single store by ID
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.body.id - Store ID (required)
+ * @returns {Object} - Store information
+ * @throws {Error} - Throws error if store not found or retrieval fails
+ */
 const getAStore = asyncHandler(async (req, res) => {
   const { id } = req.body;
   try {
@@ -172,7 +214,15 @@ const getAStore = asyncHandler(async (req, res) => {
     throw new Error(error);
   }
 });
-
+/**
+ * @function getMyStore
+ * @description Get the current user's store
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.user._id - User ID
+ * @returns {Object} - User's store information
+ * @throws {Error} - Throws error if store not found or retrieval fails
+ */
 const getMyStore = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   try {
@@ -182,7 +232,20 @@ const getMyStore = asyncHandler(async (req, res) => {
     throw new Error(error);
   }
 });
-
+/**
+ * @function updateBankDetails
+ * @description Update store's bank details and create subaccount
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.user._id - User ID
+ * @param {Object} req.body - Bank details
+ * @param {string} req.body.bankName - Bank name (required)
+ * @param {string} req.body.accountNumber - Account number (required)
+ * @param {string} req.body.accountName - Account name (required)
+ * @param {string} req.body.bankCode - Bank code (required)
+ * @returns {Object} - Updated store information with bank details
+ * @throws {Error} - Throws error if validation fails, store not found, or bank details update fails
+ */
 const updateBankDetails = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   const { bankName, accountNumber, accountName, bankCode } = req.body;
@@ -262,7 +325,16 @@ const updateBankDetails = asyncHandler(async (req, res) => {
     throw new Error(error);
   }
 });
-
+/**
+ * @function updateOrderStatus
+ * @description Update the status of an order
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.body.id - Order ID (required)
+ * @param {string} req.body.status - New order status (required)
+ * @returns {Object} - Updated order information
+ * @throws {Error} - Throws error if validation fails or order update fails
+ */
 const updateOrderStatus = asyncHandler(async (req, res) => {
   const { status } = req.body;
   const { id } = req.body;

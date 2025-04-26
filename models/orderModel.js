@@ -9,7 +9,11 @@ var orderSchema = new mongoose.Schema(
           type: mongoose.Schema.Types.ObjectId,
           ref: "Product",
         },
-        count: Number,
+        count: {
+          type: Number,
+          required: true,
+          min: 1 // Ensure count is at least 1
+        },
         stores: {
           type: mongoose.Schema.Types.ObjectId,
           ref: "Store",

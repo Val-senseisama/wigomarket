@@ -1,4 +1,4 @@
-export const Validate = {
+ const Validate = {
     email: (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email),
     URL: (url) => /^(ftp|http|https):\/\/[^ "]+$/.test(url),
     phone: (phone) => /^[0-9]+$/.test(phone),
@@ -26,4 +26,6 @@ export const Validate = {
             return inputString;
         }
     },
-};
+ };
+
+ module.exports= Validate

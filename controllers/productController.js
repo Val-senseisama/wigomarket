@@ -4,7 +4,15 @@ const slugify = require("slugify");
 const Category = require("../models/categoryModel");
 const validateMongodbId = require("../utils/validateMongodbId");
 const { Validate } = require("../Helpers/Validate");
-
+/**
+ * @function createProductCategory
+ * @description Create a new product category
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.body.name - Name of the category (required)
+ * @returns {Object} - Created category information
+ * @throws {Error} - Throws error if category already exists or validation fails
+ */
 const createProductCategory = asyncHandler(async (req, res) => {
   const name = req.body.name;
   if(!Validate.string(name)){
@@ -25,7 +33,15 @@ const createProductCategory = asyncHandler(async (req, res) => {
     throw new Error("Category already exists");
   }
 });
-
+/**
+ * @function deleteProductCategory
+ * @description Delete a product category and its associated products
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.body.id - Category ID (required)
+ * @returns {Object} - Deletion status message
+ * @throws {Error} - Throws error if category ID is invalid
+ */
 const updateProductCategory = asyncHandler(async (req, res) => {
   const { id, name } = req.body;
   validateMongodbId(id);
@@ -57,7 +73,15 @@ const getProductsByCategory = asyncHandler(async (req, res) => {
     throw new Error(error);
   }
 });
-
+/**
+ * @function deleteProductCategory
+ * @description Delete a product category and its associated products
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.body.id - Category ID (required)
+ * @returns {Object} - Deletion status message
+ * @throws {Error} - Throws error if category ID is invalid
+ */
 const deleteProductCategory = asyncHandler(async (req, res) => {
   const { id } = req.body; // Assuming category ID is passed as a URL parameter
 
@@ -78,7 +102,14 @@ const deleteProductCategory = asyncHandler(async (req, res) => {
     throw new Error(error);
   }
 });
-
+/**
+ * @function getProductCategories
+ * @description Get all product categories
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @returns {Array} - Array of all product categories
+ * @throws {Error} - Throws error if categories retrieval fails
+ */
 const getProductCategories = asyncHandler(async (req, res) => {
 
   try {
@@ -92,7 +123,20 @@ const getProductCategories = asyncHandler(async (req, res) => {
     throw new Error(error);
   }
 });
-
+/**
+ * @function createProduct
+ * @description Create a new product
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.body.title - Product title (required)
+ * @param {number} req.body.price - Product price (required)
+ * @param {number} req.body.quantity - Product quantity (required)
+ * @param {string} req.body.category - Category ID (required)
+ * @param {string} req.body.brand - Product brand (required)
+ * @param {string} req.body.description - Product description (required)
+ * @returns {Object} - Created product information with store details
+ * @throws {Error} - Throws error if validation fails or creation fails
+ */
 const createProduct = asyncHandler(async (req, res) => {
   const { title, price, quantity, category, brand, description,  } = req.body;
   validateMongodbId(category);
@@ -138,6 +182,22 @@ const createProduct = asyncHandler(async (req, res) => {
   }
 });
 
+/**
+ * @function updateProduct
+ * @description Update an existing product
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.params.id - Product ID (required)
+ * @param {Object} req.body - Product update data
+ * @param {string} [req.body.title] - Updated product title
+ * @param {number} [req.body.price] - Updated product price
+ * @param {number} [req.body.quantity] - Updated product quantity
+ * @param {string} [req.body.category] - Updated category ID
+ * @param {string} [req.body.brand] - Updated product brand
+ * @param {string} [req.body.description] - Updated product description
+ * @returns {Object} - Updated product information
+ * @throws {Error} - Throws error if validation fails or product not found
+ */
 const updateProduct = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
@@ -182,6 +242,15 @@ const updateProduct = asyncHandler(async (req, res) => {
   }
 });
 
+/**
+ * @function deleteProduct
+ * @description Delete a product
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.body.id - Product ID (required)
+ * @returns {Object} - Deletion status message
+ * @throws {Error} - Throws error if deletion fails
+ */
 const deleteProduct = asyncHandler(async (req, res) => {
   const {id} = req.body;
   try {
@@ -194,6 +263,15 @@ const deleteProduct = asyncHandler(async (req, res) => {
   }
 });
 
+/**
+ * @function getAProduct
+ * @description Get a single product by ID
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.body.id - Product ID (required)
+ * @returns {Object} - Product information with store details
+ * @throws {Error} - Throws error if product not found or retrieval fails
+ */
 const getAProduct = asyncHandler(async (req, res) => {
   const { id } = req.body;
   try {
@@ -203,7 +281,16 @@ const getAProduct = asyncHandler(async (req, res) => {
     throw new Error(error);
   }
 });
-
+/**
+ * @function getAllProducts
+ * @description Get paginated list of all products with store details
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {number} [req.body.page=1] - Page number
+ * @param {number} [req.body.limit=30] - Number of products per page
+ * @returns {Object} - Paginated list of products with store details
+ * @throws {Error} - Throws error if retrieval fails
+ */
 const getAllProducts = asyncHandler(async (req, res) => {
   let {page , limit} = req.body;
   if (!Validate.integer(page) || page <= 0) {

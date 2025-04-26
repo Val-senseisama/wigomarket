@@ -17,6 +17,20 @@ const { ThrowError, MakeID } = require("../Helpers/Helpers");
 const { verificationCodeTemplate, welcome, forgotPasswordTemplate } = require("../templates/Emails");
 // omo
 // Create User
+/**
+ * @function createUser
+ * @description Creates a new user account with email verification
+ * @param {Object} req - Express request object containing user data
+ * @param {Object} res - Express response object
+ * @param {string} req.body.email - User's email address (required)
+ * @param {string} req.body.firstname - User's first name (required)
+ * @param {string} req.body.lastname - User's last name (required)
+ * @param {string} req.body.mobile - User's mobile number (required)
+ * @param {string} req.body.password - User's password (required)
+ * @param {string} req.body.role - User's role (required, must be one of: 'seller', 'buyer', 'dispatch', 'admin')
+ * @returns {Object} - New user data or error message
+ * @throws {Error} - Throws error if validation fails or user already exists
+ */
 const createUser = asyncHandler(async (req, res) => {
   const email = req.body.email;
   const firstname = req.body.firstname;
@@ -101,6 +115,16 @@ const createUser = asyncHandler(async (req, res) => {
   }
 });
 
+/**
+ * @function verifyOtp
+ * @description Verifies user's email verification code
+ * @param {Object} req - Express request object containing email and code
+ * @param {Object} res - Express response object
+ * @param {string} req.body.email - User's email address (required)
+ * @param {string} req.body.code - Verification code (required)
+ * @returns {Object} - Verification status message
+ * @throws {Error} - Throws error if email or code is invalid
+ */
 const verifyOtp = asyncHandler(async (req, res) => {
   const { email, code } = req.body;
   if (!Validate.email(email)) {
@@ -133,7 +157,16 @@ const verifyOtp = asyncHandler(async (req, res) => {
 });
 
 // Login User
-
+/**
+ * @function loginUser
+ * @description Handles user login and token generation
+ * @param {Object} req - Express request object containing login credentials
+ * @param {Object} res - Express response object
+ * @param {string} req.body.email - User's email address (required)
+ * @param {string} req.body.password - User's password (required)
+ * @returns {Object} - User data and authentication tokens
+ * @throws {Error} - Throws error if credentials are invalid
+ */
 const loginUser = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   if(!Validate.email(email)){
@@ -172,6 +205,14 @@ const loginUser = asyncHandler(async (req, res) => {
 });
 
 // Handle Refresh Token
+/**
+ * @function handleRefreshToken
+ * @description Handles token refresh for authenticated users
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @returns {Object} - New access token
+ * @throws {Error} - Throws error if refresh token is invalid or missing
+ */
 const handleRefreshToken = asyncHandler(async (req, res) => {
   const cookie = req.cookies;
   if (!cookie?.refreshToken) throw new Error("No refresh token in cookies");
@@ -189,6 +230,14 @@ const handleRefreshToken = asyncHandler(async (req, res) => {
 });
 
 // Logout User
+/**
+ * @function logoutUser
+ * @description Logs out the user by clearing the refresh token cookie and updating the user's refresh token in the database
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @returns {void}
+ * @throws {Error} - Throws error if refresh token is invalid or missing
+ */
 const logoutUser = asyncHandler(async (req, res) => {
   const cookie = req.cookies;
   if (!cookie?.refreshToken) throw new Error("No refresh token in cookies");
@@ -212,7 +261,22 @@ const logoutUser = asyncHandler(async (req, res) => {
 });
 
 // Update a User
-
+/**
+ * @function updateAUser
+ * @description Updates user profile information
+ * @param {Object} req - Express request object containing user data
+ * @param {Object} res - Express response object
+ * @param {string} req.user.id - Authenticated user's ID (required)
+ * @param {string} req.body.firstname - User's first name
+ * @param {string} req.body.lastname - User's last name
+ * @param {string} req.body.email - User's email address
+ * @param {string} req.body.mobile - User's mobile number
+ * @param {string} req.body.address - User's address
+ * @param {string} req.body.image - User's profile image
+ * @param {string} req.body.nickname - User's nickname
+ * @returns {Object} - Updated user information
+ * @throws {Error} - Throws error if validation fails or mobile number already exists
+ */
 const updateAUser = asyncHandler(async (req, res) => {
   const { id } = req.user;
   validateMongodbId(id);
@@ -281,7 +345,14 @@ const updateAUser = asyncHandler(async (req, res) => {
 });
 
 // Get All Users
-
+/**
+ * @function getAllUsers
+ * @description Retrieves all active users (excluding pending users)
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @returns {Array} - Array of user objects with selected fields
+ * @throws {Error} - Throws error if database operation fails
+ */
 const getAllUsers = asyncHandler(async (req, res) => {
   try {
     const getUsers = await User.find(
@@ -293,7 +364,15 @@ const getAllUsers = asyncHandler(async (req, res) => {
     throw new Error(error);
   }
 });
-
+/**
+ * @function getUsersByStatus
+ * @description Retrieves users filtered by status
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.body.status - User status to filter by (required, must be: 'active', 'pending', or 'blocked')
+ * @returns {Object} - Array of users matching the status
+ * @throws {Error} - Throws error if invalid status value is provided
+ */
 const getUsersByStatus = asyncHandler(async (req, res) => {
   const { status } = req.body; // Get the status from the request parameters
   const  possibleStatusValues = ["active", "pending", "blocked"];
@@ -312,7 +391,15 @@ const getUsersByStatus = asyncHandler(async (req, res) => {
 });
 
 // Get a Single User
-
+/**
+ * @function getAUser
+ * @description Retrieves a specific user by ID
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.body.id - User ID to retrieve (required)
+ * @returns {Object} - User information
+ * @throws {Error} - Throws error if invalid MongoDB ID or database operation fails
+ */
 const getAUser = asyncHandler(async (req, res) => {
   const { id } = req.body;
   validateMongodbId(id);
@@ -325,7 +412,15 @@ const getAUser = asyncHandler(async (req, res) => {
 });
 
 // Delete a  User
-
+/**
+ * @function deleteAUser
+ * @description Deletes a user by ID
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.body.id - User ID to delete (required)
+ * @returns {Object} - Deleted user information
+ * @throws {Error} - Throws error if invalid MongoDB ID or database operation fails
+ */
 const deleteAUser = asyncHandler(async (req, res) => {
   const { id } = req.body;
   validateMongodbId(id);
@@ -338,7 +433,15 @@ const deleteAUser = asyncHandler(async (req, res) => {
 });
 
 // Block User
-
+/**
+ * @function blockUser
+ * @description Blocks a user by setting their isBlocked status to true
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.body.id - User ID to block (required)
+ * @returns {Object} - Updated user information with blocked status
+ * @throws {Error} - Throws error if invalid MongoDB ID or database operation fails
+ */
 const blockUser = asyncHandler(async (req, res) => {
   const { id } = req.body;
   validateMongodbId(id);
@@ -357,7 +460,15 @@ const blockUser = asyncHandler(async (req, res) => {
     throw new Error(error);
   }
 });
-
+/**
+ * @function unblockUser
+ * @description Unblocks a user by setting their isBlocked status to false
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.body.id - User ID to unblock (required)
+ * @returns {Object} - Updated user information with unblocked status
+ * @throws {Error} - Throws error if invalid MongoDB ID or database operation fails
+ */
 // Unblock User
 const unblockUser = asyncHandler(async (req, res) => {
   const { id } = req.body;
@@ -377,7 +488,16 @@ const unblockUser = asyncHandler(async (req, res) => {
     throw new Error(error);
   }
 });
-
+/**
+ * @function updatePassword
+ * @description Updates user's password
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.user._id - Authenticated user's ID (required)
+ * @param {string} req.body.password - New password to set
+ * @returns {Object} - Updated user information or original user info if no password provided
+ * @throws {Error} - Throws error if invalid MongoDB ID
+ */
 const updatePassword = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   const { password } = req.body;
@@ -391,7 +511,15 @@ const updatePassword = asyncHandler(async (req, res) => {
     res.json(user);
   }
 });
-
+/**
+ * @function forgotPasswordToken
+ * @description Generates and sends password reset token to user's email
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.body.email - User's email address (required)
+ * @returns {string} - Generated password reset token
+ * @throws {Error} - Throws error if user not found or token creation fails
+ */
 const forgotPasswordToken = asyncHandler(async (req, res) => {
   const { email } = req.body;
   const user = await User.findOne({ email },{firstname: 1});
@@ -425,7 +553,17 @@ const forgotPasswordToken = asyncHandler(async (req, res) => {
     throw new Error(error);
   }
 });
-
+/**
+ * @function resetPassword
+ * @description Resets user's password using reset token
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.body.password - New password to set (required)
+ * @param {string} req.body.token - Reset token (required)
+ * @param {string} req.body.email - User's email address (required)
+ * @returns {Object} - Updated user information
+ * @throws {Error} - Throws error if invalid token or user not found
+ */
 const resetPassword = asyncHandler(async (req, res) => {
   const { password, token, email } = req.body;
   const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
@@ -442,7 +580,16 @@ const resetPassword = asyncHandler(async (req, res) => {
   await Token.deleteOne({ email });
   res.json(user);
 });
-
+/**
+ * @function addToCart2
+ * @description Adds a product to user's cart
+ * @param {Object} req - Express request object containing product data
+ * @param {Object} res - Express response object
+ * @param {string} req.user._id - Authenticated user's ID
+ * @param {Object} req.body.product - Product details to add to cart
+ * @returns {Object} - Updated cart information
+ * @throws {Error} - Throws error if cart operation fails
+ */
 const addToCart2 = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   const { product } = req.body;
@@ -512,7 +659,21 @@ const addToCart2 = asyncHandler(async (req, res) => {
     throw new Error(error);
   }
 });
-
+/**
+ * @function removeFromCart
+ * @description Removes a product from user's cart
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.user._id - Authenticated user's ID (required)
+ * @param {Object} req.body.product - Product details to remove
+ * @param {string} req.body.product._id - Product ID
+ * @param {number} req.body.product.count - Product quantity
+ * @param {string} req.body.product.color - Product color
+ * @param {string} req.body.product.store - Product store
+ * @param {number} req.body.product.price - Product price
+ * @returns {void}
+ * @throws {Error} - Throws error if cart update fails
+ */
 const removeFromCart = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   const { product } = req.body;
@@ -542,7 +703,19 @@ const removeFromCart = asyncHandler(async (req, res) => {
   }
   //const newCart =
 });
-
+/**
+ * @function updateCart
+ * @description Updates product quantity in user's cart
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.user.id - Authenticated user's ID (required)
+ * @param {number} req.body.count - Current product count
+ * @param {number} req.body.newCount - New product count to set
+ * @param {string} req.body._id - Product ID in cart
+ * @param {Object} req.body.product - Product details
+ * @param {number} req.body.product.listedPrice - Product price
+ * @returns {Object} - Updated cart information
+ */
 const updateCart = asyncHandler(async (req, res) => {
   const { id } = req.user;
   const { count, newCount, _id, product } = req.body;
@@ -580,7 +753,15 @@ const updateCart = asyncHandler(async (req, res) => {
 
   res.json(cartUpdate);
 });
-
+/**
+ * @function getUserCart
+ * @description Retrieves user's cart with populated product details
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.user._id - Authenticated user's ID (required)
+ * @returns {Object} - User's cart with populated product details
+ * @throws {Error} - Throws error if cart retrieval fails
+ */
 const getUserCart = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   validateMongodbId(_id);
@@ -614,7 +795,15 @@ const getUserCart = asyncHandler(async (req, res) => {
     throw new Error(error);
   }
 });
-
+/**
+ * @function emptyCart
+ * @description Empties user's cart by removing it from the database
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.user._id - Authenticated user's ID (required)
+ * @returns {Object} - Removed cart information
+ * @throws {Error} - Throws error if cart removal fails
+ */
 const emptyCart = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   validateMongodbId(_id);
@@ -627,7 +816,18 @@ const emptyCart = asyncHandler(async (req, res) => {
     throw new Error(error);
   }
 });
-
+/**
+ * @function createOrder
+ * @description Creates a new order for the user
+ * @param {Object} req - Express request object containing order details
+ * @param {Object} res - Express response object
+ * @param {string} req.body.paymentIntent - Payment intent ID
+ * @param {string} req.body.deliveryMethod - Delivery method
+ * @param {Object} req.body.deliveryAddress - Delivery address details
+ * @param {string} req.user._id - Authenticated user's ID
+ * @returns {Object} - Created order details
+ * @throws {Error} - Throws error if order creation fails
+ */
 const createOrder = asyncHandler(async (req, res) => {
   const { paymentIntent, deliveryMethod, deliveryAddress } = req.body;
   const { _id } = req.user;
@@ -693,7 +893,15 @@ const createOrder = asyncHandler(async (req, res) => {
     throw new Error(error);
   }
 });
-
+/**
+ * @function getOrders
+ * @description Retrieves user's order history with detailed product and store information
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.user._id - Authenticated user's ID (required)
+ * @returns {Array} - Array of user's orders with populated product and store details
+ * @throws {Error} - Throws error if invalid MongoDB ID or database operation fails
+ */
 const getOrders = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   validateMongoDbId(_id);
@@ -720,7 +928,16 @@ const getOrders = asyncHandler(async (req, res) => {
     throw new Error(error);
   }
 });
-
+/**
+ * @function updateOrderStatus
+ * @description Updates the status of a specific order
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.body.status - New order status to set (required)
+ * @param {string} req.body.id - Order ID to update (required)
+ * @returns {Object} - Updated order information
+ * @throws {Error} - Throws error if invalid MongoDB ID or database operation fails
+ */
 const updateOrderStatus = asyncHandler(async (req, res) => {
   const { status } = req.body;
   const { id } = req.body;

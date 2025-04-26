@@ -1,19 +1,16 @@
-
-import { DateTime } from "luxon";
-import fs from 'fs';
-import path from 'path';
-
+const DateTime = require("luxon").DateTime;
+const fs = require("fs");
+const path = require("path");
 
 
-
-export const ThrowError = (message) => {
+ const ThrowError = (message) => {
 	throw new Error(message, {
 		extensions: { code: "USER" },
 	});
 };
 
 
-export const MakeID = (length) => {
+const MakeID = (length) => {
 	var result = "";
 	var characters = "ABCDEFGHJKLMNPQRTUVWXY346789";
 	var charactersLength = characters.length;
@@ -24,7 +21,7 @@ export const MakeID = (length) => {
 };
 
 // create a function to generate uuid v4
-export const uuid = () => {
+const uuid = () => {
 	return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
 		var r = (Math.random() * 16) | 0,
 			v = c == "x" ? r : (r & 0x3) | 0x8;
@@ -32,7 +29,7 @@ export const uuid = () => {
 	});
 };
 
-export const base64ToFile = (str, folder) => {
+const base64ToFile = (str, folder) => {
 	if (typeof str !== 'string') {
 		throw new Error('Input must be a string');
 	}
@@ -69,7 +66,7 @@ export const base64ToFile = (str, folder) => {
 	return folderPath + path;
 };
 
-export const emailBase64ToFile = (base64String, directory, filename) => {
+const emailBase64ToFile = (base64String, directory, filename) => {
 	if (typeof base64String !== 'string') {
 		throw new Error('Input must be a string');
 	}
@@ -96,7 +93,7 @@ export const emailBase64ToFile = (base64String, directory, filename) => {
 
 
 
-// export const SaveAuditTrail = async (data: AuditTrailType): Promise<void> => {
+// const SaveAuditTrail = async (data: AuditTrailType): Promise<void> => {
 // 	// Set default values for optional properties
 // 	data.ip_address = data.ip_address || "";
 // 	data.created_at = data.created_at || DateTime.now().toSQL();
@@ -124,3 +121,4 @@ export const emailBase64ToFile = (base64String, directory, filename) => {
 // 	}
 // };
 
+module.exports = {ThrowError, MakeID, emailBase64ToFile, base64ToFile, uuid}
