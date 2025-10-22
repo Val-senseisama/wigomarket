@@ -20,7 +20,6 @@ const LocationWebSocketServer = require('./websocket/locationWebSocket');
 
 const app = express();
 app.get("/", (req, res) => {
-  res.send("Welcome to the API");
   res.send(`<a href="/api-docs">API Docs</a>`);
 });
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
