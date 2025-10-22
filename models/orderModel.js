@@ -45,12 +45,37 @@ var orderSchema = new mongoose.Schema(
     },
     deliveryMethod: {
       type: String,
-      enum: ["pickup", "dispatch"],
+      enum: ["self_delivery", "delivery_agent"],
       required: true,
     },
     deliveryAddress: {
       type: String,
       required: true,
+    },
+    deliveryStatus: {
+      type: String,
+      enum: ["pending_assignment", "assigned", "picked_up", "in_transit", "delivered", "failed"],
+      default: "pending_assignment",
+    },
+    deliveryAgent: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: function() {
+        return this.deliveryMethod === "delivery_agent";
+      },
+    },
+    deliveryFee: {
+      type: Number,
+      default: 0,
+    },
+    estimatedDeliveryTime: {
+      type: Date,
+    },
+    actualDeliveryTime: {
+      type: Date,
+    },
+    deliveryNotes: {
+      type: String,
     },
     paymentStatus: {
       type: String,

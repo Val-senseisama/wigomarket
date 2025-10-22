@@ -15,96 +15,104 @@ const uniqid = require("uniqid");
 const { Validate } = require("../Helpers/Validate");
 const { ThrowError, MakeID } = require("../Helpers/Helpers");
 const { verificationCodeTemplate, welcome, forgotPasswordTemplate } = require("../templates/Emails");
-// omo
-// Create User
+// ==================== BUYER SIGNUP ====================
 /**
- * @function createUser
- * @description Creates a new user account with email verification
+ * @function createBuyer
+ * @description Creates a new buyer account with email verification
  * @param {Object} req - Express request object containing user data
  * @param {Object} res - Express response object
  * @param {string} req.body.email - User's email address (required)
- * @param {string} req.body.firstname - User's first name (required)
- * @param {string} req.body.lastname - User's last name (required)
  * @param {string} req.body.mobile - User's mobile number (required)
  * @param {string} req.body.password - User's password (required)
- * @param {string} req.body.role - User's role (required, must be one of: 'seller', 'buyer', 'dispatch', 'admin')
+ * @param {string} req.body.fullName - User's full name (optional)
+ * @param {string} req.body.residentialAddress - User's residential address (optional)
+ * @param {string} req.body.country - User's country (optional)
+ * @param {string} req.body.city - User's city (optional)
+ * @param {string} req.body.state - User's state (optional)
  * @returns {Object} - New user data or error message
  * @throws {Error} - Throws error if validation fails or user already exists
  */
-const createUser = asyncHandler(async (req, res) => {
+const createBuyer = asyncHandler(async (req, res) => {
   const email = req.body.email;
-  const firstname = req.body.firstname;
-  let number = req.body.mobile
-  const lastname = req.body.lastname
-  const password = req.body.password
-  let role = req.body.role
+  let number = req.body.mobile;
+  const password = req.body.password;
+  const fullName = req.body.fullName;
+  const residentialAddress = req.body.residentialAddress;
+  const country = req.body.country;
+  const city = req.body.city;
+  const state = req.body.state;
 
+  // Validate required fields
   if (!Validate.email(email)) {
     ThrowError("Invalid Email");
-  }
-
-  if (!Validate.string(firstname)) {
-    ThrowError("Invalid Name");
   }
 
   if (!Validate.string(number)) {
     ThrowError("Invalid Mobile Number");
   }
 
-  if (!Validate.string(lastname)) {
-    ThrowError("Invalid Lastname");
-  }
-
   if (!Validate.string(password)) {
     ThrowError("Invalid Password");
   }
-  const roles = ["seller", "buyer", "dispatch", "admin"]
-  if (!Validate.string(role) || !roles.includes(role)) {
-    ThrowError("Invalid Role");
-  }
   
-  number = Validate.formatPhone(number)
+  number = Validate.formatPhone(number);
   const findUser = await User.findOne({ email: email }, { firstname: 1 });
   const mobileUser = await User.findOne({ mobile: number }, { firstname: 1 });
   const welcomeMessage = welcome();
 
   if (!findUser && !mobileUser) {
-
     const newUser = {
       email,
-      firstname,
-      lastname,
       mobile: number,
       password,
-      role: [...role]
-    }
+      fullName: fullName || "",
+      residentialAddress: residentialAddress || "",
+      country: country || "",
+      city: city || "",
+      state: state || "",
+      role: ["buyer"] // Buyer role
+    };
+    
     const code = MakeID(6);
     const token = {
       email,
       code
-    }
-    try{
+    };
+    
+    try {
       // Create new user
     const createUser = await User.create(newUser);
     const createCode = await Token.create(token);
+      
     const data1 = {
       to: email,
-      text: `Hey + + ${firstname} ${lastname}`,
+        text: `Welcome to WigoMarket!`,
       subject: "Welcome to WigoMarket - Let's Shop!",
       htm: welcomeMessage,
     };
+      
     const data2 = {
       to: email,
       text: ``,
       subject: "Account Verification - WigoMarket",
-      htm: verificationCodeTemplate(firstname, code),
+        htm: verificationCodeTemplate(fullName || "User", code),
     };
+      
    sendEmail(data1);
    sendEmail(data2);
-     res.json(newUser);
-    }catch(error){
+      
+      res.json({
+        message: "User created successfully. Please check your email for verification code.",
+        success: true,
+        user: {
+          email: newUser.email,
+          mobile: newUser.mobile,
+          role: newUser.role
+        }
+      });
+    } catch (error) {
       throw new Error(error);
-    };
+    }
     
   } else {
     res.json({
@@ -156,6 +164,271 @@ const verifyOtp = asyncHandler(async (req, res) => {
   }
 });
 
+// ==================== SELLER SIGNUP ====================
+/**
+ * @function createSeller
+ * @description Creates a new seller account with email verification
+ * @param {Object} req - Express request object containing user data
+ * @param {Object} res - Express response object
+ * @param {string} req.body.email - User's email address (required)
+ * @param {string} req.body.mobile - User's mobile number (required)
+ * @param {string} req.body.password - User's password (required)
+ * @param {string} req.body.fullName - User's full name (optional)
+ * @param {string} req.body.residentialAddress - User's residential address (optional)
+ * @param {string} req.body.country - User's country (optional)
+ * @param {string} req.body.city - User's city (optional)
+ * @param {string} req.body.state - User's state (optional)
+ * @returns {Object} - New user data or error message
+ * @throws {Error} - Throws error if validation fails or user already exists
+ */
+const createSeller = asyncHandler(async (req, res) => {
+  const email = req.body.email;
+  let number = req.body.mobile;
+  const password = req.body.password;
+  const fullName = req.body.fullName;
+  const residentialAddress = req.body.residentialAddress;
+  const country = req.body.country;
+  const city = req.body.city;
+  const state = req.body.state;
+
+  // Validate required fields
+  if (!Validate.email(email)) {
+    ThrowError("Invalid Email");
+  }
+
+  if (!Validate.string(number)) {
+    ThrowError("Invalid Mobile Number");
+  }
+
+  if (!Validate.string(password)) {
+    ThrowError("Invalid Password");
+  }
+  
+  number = Validate.formatPhone(number);
+  const findUser = await User.findOne({ email: email }, { fullName: 1 });
+  const mobileUser = await User.findOne({ mobile: number }, { fullName: 1 });
+  const welcomeMessage = welcome();
+
+  if (!findUser && !mobileUser) {
+    const newUser = {
+      email,
+      mobile: number,
+      password,
+      fullName: fullName || "",
+      residentialAddress: residentialAddress || "",
+      country: country || "",
+      city: city || "",
+      state: state || "",
+      role: ["seller"] // Seller role
+    };
+    
+    const code = MakeID(6);
+    const token = {
+      email,
+      code
+    };
+    
+    try {
+      // Create new user
+      const createUser = await User.create(newUser);
+      const createCode = await Token.create(token);
+      
+      const data1 = {
+        to: email,
+        text: `Welcome to WigoMarket!`,
+        subject: "Welcome to WigoMarket - Start Selling!",
+        htm: welcomeMessage,
+      };
+      
+      const data2 = {
+        to: email,
+        text: ``,
+        subject: "Account Verification - WigoMarket",
+        htm: verificationCodeTemplate(fullName || "User", code),
+      };
+      
+      await sendEmail(data1);
+      await sendEmail(data2);
+      
+      res.json({
+        success: true,
+        message: "Seller account created successfully. Please check your email for verification code.",
+        data: {
+          user: {
+            _id: createUser._id,
+            email: createUser.email,
+            mobile: createUser.mobile,
+            fullName: createUser.fullName,
+            role: createUser.role,
+            status: createUser.status
+          },
+          verificationCode: code // For testing purposes
+        }
+      });
+    } catch (error) {
+      console.log(error);
+      throw new Error(error);
+    }
+  } else {
+    ThrowError("User Already Exists");
+  }
+});
+
+// ==================== DELIVERY AGENT SIGNUP ====================
+/**
+ * @function createDeliveryAgent
+ * @description Creates a new delivery agent account with email verification
+ * @param {Object} req - Express request object containing user data
+ * @param {Object} res - Express response object
+ * @param {string} req.body.email - User's email address (required)
+ * @param {string} req.body.mobile - User's mobile number (required)
+ * @param {string} req.body.password - User's password (required)
+ * @param {string} req.body.fullName - User's full name (optional)
+ * @param {string} req.body.residentialAddress - User's residential address (optional)
+ * @param {string} req.body.country - User's country (optional)
+ * @param {string} req.body.city - User's city (optional)
+ * @param {string} req.body.state - User's state (optional)
+ * @param {Object} req.body.nextOfKin - Next of kin information (required for delivery agents)
+ * @param {string} req.body.modeOfTransport - Mode of transport (required for delivery agents)
+ * @returns {Object} - New user data or error message
+ * @throws {Error} - Throws error if validation fails or user already exists
+ */
+const createDeliveryAgent = asyncHandler(async (req, res) => {
+  const email = req.body.email;
+  let number = req.body.mobile;
+  const password = req.body.password;
+  const fullName = req.body.fullName;
+  const residentialAddress = req.body.residentialAddress;
+  const country = req.body.country;
+  const city = req.body.city;
+  const state = req.body.state;
+  const nextOfKin = req.body.nextOfKin;
+  const modeOfTransport = req.body.modeOfTransport;
+
+  // Validate required fields
+  if (!Validate.email(email)) {
+    ThrowError("Invalid Email");
+  }
+
+  if (!Validate.string(number)) {
+    ThrowError("Invalid Mobile Number");
+  }
+
+  if (!Validate.string(password)) {
+    ThrowError("Invalid Password");
+  }
+
+  // Validate delivery agent specific fields
+  if (!nextOfKin || !nextOfKin.name || !nextOfKin.relationship || !nextOfKin.mobile) {
+    ThrowError("Next of kin information is required for delivery agents");
+  }
+
+  if (!modeOfTransport) {
+    ThrowError("Mode of transport is required for delivery agents");
+  }
+
+  const validTransportModes = ["bike", "motorcycle", "car", "van", "truck", "bicycle"];
+  if (!validTransportModes.includes(modeOfTransport)) {
+    ThrowError("Invalid mode of transport. Must be one of: " + validTransportModes.join(", "));
+  }
+
+  const validRelationships = ["spouse", "parent", "sibling", "child", "other"];
+  if (!validRelationships.includes(nextOfKin.relationship)) {
+    ThrowError("Invalid relationship. Must be one of: " + validRelationships.join(", "));
+  }
+  
+  number = Validate.formatPhone(number);
+  const findUser = await User.findOne({ email: email }, { fullName: 1 });
+  const mobileUser = await User.findOne({ mobile: number }, { fullName: 1 });
+  const welcomeMessage = welcome();
+
+  if (!findUser && !mobileUser) {
+    const newUser = {
+      email,
+      mobile: number,
+      password,
+      fullName: fullName || "",
+      residentialAddress: residentialAddress || "",
+      country: country || "",
+      city: city || "",
+      state: state || "",
+      role: ["dispatch"], // Delivery agent role
+      nextOfKin: {
+        name: nextOfKin.name,
+        relationship: nextOfKin.relationship,
+        mobile: nextOfKin.mobile,
+        email: nextOfKin.email || "",
+        address: nextOfKin.address || ""
+      },
+      modeOfTransport: modeOfTransport
+    };
+    
+    const code = MakeID(6);
+    const token = {
+      email,
+      code
+    };
+    
+    try {
+      // Create new user
+      const createUser = await User.create(newUser);
+      const createCode = await Token.create(token);
+      
+      const data1 = {
+        to: email,
+        text: `Welcome to WigoMarket!`,
+        subject: "Welcome to WigoMarket - Start Delivering!",
+        htm: welcomeMessage,
+      };
+      
+      const data2 = {
+        to: email,
+        text: ``,
+        subject: "Account Verification - WigoMarket",
+        htm: verificationCodeTemplate(fullName || "User", code),
+      };
+      
+      await sendEmail(data1);
+      await sendEmail(data2);
+      
+      res.json({
+        success: true,
+        message: "Delivery agent account created successfully. Please check your email for verification code.",
+        data: {
+          user: {
+            _id: createUser._id,
+            email: createUser.email,
+            mobile: createUser.mobile,
+            fullName: createUser.fullName,
+            role: createUser.role,
+            status: createUser.status,
+            nextOfKin: createUser.nextOfKin,
+            modeOfTransport: createUser.modeOfTransport
+          },
+          verificationCode: code // For testing purposes
+        }
+      });
+    } catch (error) {
+      console.log(error);
+      throw new Error(error);
+    }
+  } else {
+    ThrowError("User Already Exists");
+  }
+});
+
+// ==================== LEGACY CREATE USER (for backward compatibility) ====================
+/**
+ * @function createUser
+ * @description Legacy create user function - redirects to createBuyer
+ * @deprecated Use createBuyer, createSeller, or createDeliveryAgent instead
+ */
+const createUser = asyncHandler(async (req, res) => {
+  // Redirect to buyer signup for backward compatibility
+  req.body.role = "buyer";
+  return createBuyer(req, res);
+});
+
 // Login User
 /**
  * @function loginUser
@@ -179,7 +452,7 @@ const loginUser = asyncHandler(async (req, res) => {
 
 
   //   Check if user exists
-  const findUser = await User.findOne({ email }, {password: 1, status: 1, role: 1, _id: 1});
+  const findUser = await User.findOne({ email }, {password: 1, status: 1, role: 1, activeRole: 1, _id: 1});
   console.log("User:", findUser)
   if (findUser && (await findUser.isPasswordMatched(password))) {
     const refreshToken = await generateRefreshToken(findUser?._id);
@@ -197,6 +470,7 @@ const loginUser = asyncHandler(async (req, res) => {
       _id: findUser?._id,
       status: findUser?.status,
       role: findUser?.role,
+      activeRole: findUser?.activeRole,
       token: generateToken(findUser?._id),
     });
   } else {
@@ -513,23 +787,34 @@ const updatePassword = asyncHandler(async (req, res) => {
 });
 /**
  * @function forgotPasswordToken
- * @description Generates and sends password reset token to user's email
+ * @description Generates and sends 6-digit password reset token to user's email
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  * @param {string} req.body.email - User's email address (required)
- * @returns {string} - Generated password reset token
+ * @returns {Object} - Success message with token info
  * @throws {Error} - Throws error if user not found or token creation fails
  */
 const forgotPasswordToken = asyncHandler(async (req, res) => {
   const { email } = req.body;
-  const user = await User.findOne({ email },{firstname: 1});
-  if (!email) throw new Error("User not found with this email");
-  const token = MakeID(6)
-  try {
+  
+  if (!Validate.email(email)) {
+    ThrowError("Invalid Email");
+  }
 
+  const user = await User.findOne({ email }, { fullName: 1, email: 1 });
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      message: "User not found with this email"
+    });
+  }
+
+  const token = MakeID(6);
+  
+  try {
     const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
 
-    // Upsert the token in the database
+    // Upsert the token in the database with 15-minute expiry
     const newToken = await Token.findOneAndUpdate(
       { email },
       { code: hashedToken, createdAt: Date.now() },
@@ -539,46 +824,103 @@ const forgotPasswordToken = asyncHandler(async (req, res) => {
     if (!newToken) {
       throw new Error("Token not created");
     }
-    
 
     const data = {
       to: email,
-      text: "Hey User",
-      subject: "Password Reset Link",
-      htm: forgotPasswordTemplate(user?.firstname, token),
+      text: `Password Reset Code: ${token}`,
+      subject: "Password Reset Code - WigoMarket",
+      htm: forgotPasswordTemplate(user?.fullName || "User", token),
     };
+    
     sendEmail(data);
-    res.json(token);
+    
+    res.json({
+      success: true,
+      message: "Password reset code sent to your email. Please check your inbox.",
+      token: token, // For development/testing - remove in production
+      expiresIn: "15 minutes"
+    });
   } catch (error) {
     throw new Error(error);
   }
 });
 /**
  * @function resetPassword
- * @description Resets user's password using reset token
+ * @description Resets user's password using 6-digit reset token
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  * @param {string} req.body.password - New password to set (required)
- * @param {string} req.body.token - Reset token (required)
+ * @param {string} req.body.token - 6-digit reset token (required)
  * @param {string} req.body.email - User's email address (required)
- * @returns {Object} - Updated user information
+ * @returns {Object} - Success message
  * @throws {Error} - Throws error if invalid token or user not found
  */
 const resetPassword = asyncHandler(async (req, res) => {
   const { password, token, email } = req.body;
+  
+  // Validate input
+  if (!Validate.string(password)) {
+    ThrowError("Invalid Password");
+  }
+  
+  if (!Validate.string(token) || token.length !== 6) {
+    ThrowError("Invalid Token - Must be 6 digits");
+  }
+  
+  if (!Validate.email(email)) {
+    ThrowError("Invalid Email");
+  }
+
   const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
-  const user = await User.findOne({
-    email,}, {password: 1, _id: 1}
-  );
-  const tokenTime = await Token.findOne({
+  
+  // Find user and token
+  const user = await User.findOne({ email }, { password: 1, _id: 1, fullName: 1 });
+  const tokenRecord = await Token.findOne({
     email,
     code: hashedToken,
   });
-  if (!user || !tokenTime) throw new Error("Invalid Token");
+  
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      message: "User not found"
+    });
+  }
+  
+  if (!tokenRecord) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid or expired token"
+    });
+  }
+  
+  // Check if token is expired (15 minutes)
+  const tokenAge = Date.now() - tokenRecord.createdAt;
+  const fifteenMinutes = 15 * 60 * 1000;
+  
+  if (tokenAge > fifteenMinutes) {
+    await Token.deleteOne({ email });
+    return res.status(400).json({
+      success: false,
+      message: "Token has expired. Please request a new one."
+    });
+  }
+  
+  try {
+    // Update password
   user.password = password;
   await user.save();
+    
+    // Delete the used token
   await Token.deleteOne({ email });
-  res.json(user);
+    
+    res.json({
+      success: true,
+      message: "Password reset successfully. You can now login with your new password."
+    });
+  } catch (error) {
+    throw new Error(error);
+  }
 });
 /**
  * @function addToCart2
@@ -593,71 +935,87 @@ const resetPassword = asyncHandler(async (req, res) => {
 const addToCart2 = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   const { product } = req.body;
-  const cartExists = await Cart.findOne({ owner: _id });
-  try {
-    const user = await User.findById(_id);
-    if (cartExists) {
-      let object = {};
-      object.product = product._id;
-      object.count = product.count;
-      object.store = product.store._id;
-      object.color = product.color;
-      object.shopPrice = product.price;
-      let getPrice = product.listedPrice;
-      object.price = getPrice * object.count;
-      let newBalance = object.price + cartExists.cartTotal;
-      const cartUpdate1 = await Cart.updateOne(
-        { owner: user._id },
-        {
-          $push: { products: object },
-          $set: { cartTotal: newBalance },
-        }
-      );
-
-      const newCartTotal = await Cart.findOne({ owner: _id }).populate(
-        "products.product"
-      );
-
-      let cost = newCartTotal.products.map((item) => {
-        let f = item.product.listedPrice * item.count;
-        return f;
-      });
-
-      let totalCost = 0;
-      cost.forEach((num) => {
-        totalCost += num;
-      });
-      const cartUpdate = await Cart.updateOne(
-        { owner: _id },
-        {
-          $set: { cartTotal: totalCost },
-        }
-      );
-
-      res.json(cartUpdate);
-    } else {
-      let products = [];
-      let object = {};
-      object.product = product._id;
-      object.count = product.count;
-      object.store = product.store._id;
-      object.shopPrice = product.price;
-      object.color = product.color;
-      let getPrice = product.listedPrice;
-      object.price = getPrice * object.count;
-      products.push(object);
-      let cartTotal = object.price;
-      let newCart = await new Cart({
-        products,
-        cartTotal,
-        owner: user?._id,
-      }).save();
-      res.json(newCart);
-    }
-  } catch (error) {
-    console.log(error);
-    throw new Error(error);
+  
+  // Validate input
+  if (!product._id || !product.count || product.count <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid product data"
+    });
   }
+  
+  // Check if product exists and is in stock
+  const productExists = await Product.findById(product._id);
+  if (!productExists) {
+    return res.status(404).json({
+      success: false,
+      message: "Product not found"
+    });
+  }
+  
+  if (productExists.quantity < product.count) {
+    return res.status(400).json({
+      success: false,
+      message: "Insufficient stock available"
+    });
+  }
+  
+  // Find or create cart
+  let cart = await Cart.findOne({ owner: _id });
+  
+  if (!cart) {
+    cart = await Cart.create({ 
+      owner: _id, 
+      products: [], 
+      cartTotal: 0 
+    });
+  }
+  
+  // Check if product already exists in cart
+  const existingProductIndex = cart.products.findIndex(
+    item => item.product.toString() === product._id
+  );
+  
+  if (existingProductIndex > -1) {
+    // Update existing product quantity
+    const newQuantity = cart.products[existingProductIndex].count + product.count;
+    
+    // Check if new quantity exceeds stock
+    if (newQuantity > productExists.quantity) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot add more items than available in stock"
+      });
+    }
+    
+    cart.products[existingProductIndex].count = newQuantity;
+    cart.products[existingProductIndex].price = 
+      newQuantity * product.listedPrice;
+    } else {
+    // Add new product
+    cart.products.push({
+      product: product._id,
+      count: product.count,
+      price: product.count * product.listedPrice,
+      store: product.store._id
+    });
+  }
+  
+  // Recalculate total
+  cart.cartTotal = cart.products.reduce((total, item) => total + item.price, 0);
+  
+  await cart.save();
+  
+  // Populate and return
+  const populatedCart = await Cart.findById(cart._id)
+    .populate('products.product', 'title listedPrice images description brand')
+    .populate('products.store', 'name address mobile');
+  
+  res.json({
+    success: true,
+    message: "Product added to cart successfully",
+    data: populatedCart
+  });
 });
 /**
  * @function removeFromCart
@@ -665,43 +1023,69 @@ const addToCart2 = asyncHandler(async (req, res) => {
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  * @param {string} req.user._id - Authenticated user's ID (required)
- * @param {Object} req.body.product - Product details to remove
- * @param {string} req.body.product._id - Product ID
- * @param {number} req.body.product.count - Product quantity
- * @param {string} req.body.product.color - Product color
- * @param {string} req.body.product.store - Product store
- * @param {number} req.body.product.price - Product price
- * @returns {void}
+ * @param {string} req.body.productId - Product ID to remove
+ * @returns {Object} - Updated cart information
  * @throws {Error} - Throws error if cart update fails
  */
 const removeFromCart = asyncHandler(async (req, res) => {
   const { _id } = req.user;
-  const { product } = req.body;
+  const { productId } = req.body;
+  
+  // Validate input
+  if (!productId) {
+    return res.status(400).json({
+      success: false,
+      message: "Product ID is required"
+    });
+  }
+  
   validateMongodbId(_id);
+  validateMongodbId(productId);
 
   try {
-    const cart = await Cart.findOne({ owner:_id });
-    let cartBalance = cart.cartTotal;
-    let object = {};
-    object.product = product._id;
-    object.count = product.count;
-    object.color = product.color;
-    object.store = product.store;
-    let getPrice = product.price;
-    object.price = getPrice * object.count;
-    let newBalance = cartBalance - object.price;
-    const cartUpdate = await Cart.updateOne(
-      { owner:_id },
-      {
-        $pop: { products: object },
-        $set: { cartTotal: newBalance },
-      }
+    const cart = await Cart.findOne({ owner: _id });
+    
+    if (!cart) {
+      return res.status(404).json({
+        success: false,
+        message: "Cart not found"
+      });
+    }
+    
+    // Check if product exists in cart
+    const productIndex = cart.products.findIndex(
+      item => item.product.toString() === productId
     );
+    
+    if (productIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found in cart"
+      });
+    }
+    
+    // Remove product from array
+    cart.products.splice(productIndex, 1);
+    
+    // Recalculate total
+    cart.cartTotal = cart.products.reduce((total, item) => total + item.price, 0);
+    
+    await cart.save();
+    
+    // Populate and return updated cart
+    const updatedCart = await Cart.findById(cart._id)
+      .populate('products.product', 'title listedPrice images description brand')
+      .populate('products.store', 'name address mobile');
+    
+    res.json({
+      success: true,
+      message: "Product removed from cart successfully",
+      data: updatedCart
+    });
   } catch (error) {
     console.log(error);
-    ThrowError(error);
+    throw new Error(error);
   }
-  //const newCart =
 });
 /**
  * @function updateCart
@@ -717,41 +1101,94 @@ const removeFromCart = asyncHandler(async (req, res) => {
  * @returns {Object} - Updated cart information
  */
 const updateCart = asyncHandler(async (req, res) => {
-  const { id } = req.user;
-  const { count, newCount, _id, product } = req.body;
-  const newPrice = product.listedPrice * newCount;
+  const { _id } = req.user;
+  const { productId, newCount } = req.body;
+  
+  // Validate input
+  if (!productId) {
+    return res.status(400).json({
+      success: false,
+      message: "Product ID is required"
+    });
+  }
+  
+  if (newCount === undefined || newCount < 0) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid quantity"
+    });
+  }
+  
+  validateMongodbId(_id);
+  validateMongodbId(productId);
 
-  const updatedCart = await Cart.findOneAndUpdate(
-    { owner: id },
-    {
-      $set: { "products.$[el].count": newCount },
-      $set: { "products.$[el].price": newPrice },
-    },
-    {
-      arrayFilters: [{ "el._id": _id }],
-      new: true,
+  try {
+    const cart = await Cart.findOne({ owner: _id });
+    
+    if (!cart) {
+      return res.status(404).json({
+        success: false,
+        message: "Cart not found"
+      });
     }
-  );
-  const newCartTotal = await Cart.findOne({ owner: id }).populate(
-    "products.product"
-  );
-
-  let cost = newCartTotal.products.map((item) => {
-    let f = item.product.listedPrice * item.count;
-    return f;
-  });
-  let totalCost = 0;
-  cost.forEach((num) => {
-    totalCost += num;
-  });
-  const cartUpdate = await Cart.findOneAndUpdate(
-    { owner: id },
-    {
-      $set: { cartTotal: totalCost },
+    
+    // Find product in cart
+    const productIndex = cart.products.findIndex(
+      item => item.product.toString() === productId
+    );
+    
+    if (productIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found in cart"
+      });
     }
-  );
-
-  res.json(cartUpdate);
+    
+    // Get product details for price calculation
+    const productDetails = await Product.findById(productId);
+    if (!productDetails) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      });
+    }
+    
+    // Check stock availability
+    if (newCount > productDetails.quantity) {
+      return res.status(400).json({
+        success: false,
+        message: "Insufficient stock available"
+      });
+    }
+    
+    if (newCount === 0) {
+      // Remove product if quantity is 0
+      cart.products.splice(productIndex, 1);
+    } else {
+      // Update quantity and price
+      cart.products[productIndex].count = newCount;
+      cart.products[productIndex].price = newCount * productDetails.listedPrice;
+    }
+    
+    // Recalculate total
+    cart.cartTotal = cart.products.reduce((total, item) => total + item.price, 0);
+    
+    await cart.save();
+    
+    // Populate and return updated cart
+    const updatedCart = await Cart.findById(cart._id)
+      .populate('products.product', 'title listedPrice images description brand')
+      .populate('products.store', 'name address mobile');
+    
+    res.json({
+      success: true,
+      message: "Cart updated successfully",
+      data: updatedCart
+    });
+  } catch (error) {
+    console.log(error);
+    throw new Error(error);
+  }
 });
 /**
  * @function getUserCart
@@ -765,31 +1202,50 @@ const updateCart = asyncHandler(async (req, res) => {
 const getUserCart = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   validateMongodbId(_id);
+  
   try {
-    const newCartTotal = await Cart.findOne({ owner: _id }).populate(
-      "products.product"
-    );
-
-    let cost = newCartTotal.products.map((item) => {
-      let f = item.product.listedPrice * item.count;
-      return f;
-    });
-    console.log(cost);
+    const cart = await Cart.findOne({ owner: _id })
+      .populate('products.product', 'title listedPrice images description brand quantity')
+      .populate('products.store', 'name address mobile');
+    
+    if (!cart) {
+      return res.json({
+        success: true,
+        data: {
+          products: [],
+          cartTotal: 0,
+          owner: _id
+        }
+      });
+    }
+    
+    // Check if any products are out of stock or have been deleted
+    const validProducts = [];
     let totalCost = 0;
-    cost.forEach((num) => {
-      totalCost += num;
-    });
-    const cartUpdate = await Cart.updateOne(
-      { owner: _id },
-      {
-        $set: { cartTotal: totalCost },
+    
+    for (const item of cart.products) {
+      if (item.product && item.product.quantity > 0) {
+        // Update price if product price has changed
+        const currentPrice = item.product.listedPrice;
+        if (item.price !== currentPrice * item.count) {
+          item.price = currentPrice * item.count;
+        }
+        totalCost += item.price;
+        validProducts.push(item);
       }
-    );
-    const cart = await Cart.findOne({ owner: _id }).populate(
-      "products.product",
-      "_id title listedPrice store"
-    );
-    res.json(cart);
+    }
+    
+    // Update cart if products were removed
+    if (validProducts.length !== cart.products.length) {
+      cart.products = validProducts;
+      cart.cartTotal = totalCost;
+      await cart.save();
+    }
+    
+    res.json({
+      success: true,
+      data: cart
+    });
   } catch (error) {
     console.log(error);
     throw new Error(error);
@@ -801,16 +1257,37 @@ const getUserCart = asyncHandler(async (req, res) => {
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  * @param {string} req.user._id - Authenticated user's ID (required)
- * @returns {Object} - Removed cart information
+ * @returns {Object} - Success message
  * @throws {Error} - Throws error if cart removal fails
  */
 const emptyCart = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   validateMongodbId(_id);
+  
   try {
-    const user = await User.findOne({ _id });
-    const cart = await Cart.findOneAndRemove({ owner: user._id });
-    res.json(cart);
+    const cart = await Cart.findOneAndDelete({ owner: _id });
+    
+    if (!cart) {
+      return res.json({
+        success: true,
+        message: "Cart is already empty",
+        data: {
+          products: [],
+          cartTotal: 0,
+          owner: _id
+        }
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: "Cart emptied successfully",
+      data: {
+        products: [],
+        cartTotal: 0,
+        owner: _id
+      }
+    });
   } catch (error) {
     console.log(error);
     throw new Error(error);
@@ -828,68 +1305,161 @@ const emptyCart = asyncHandler(async (req, res) => {
  * @returns {Object} - Created order details
  * @throws {Error} - Throws error if order creation fails
  */
-const createOrder = asyncHandler(async (req, res) => {
-  const { paymentIntent, deliveryMethod, deliveryAddress } = req.body;
+const checkoutCart = asyncHandler(async (req, res) => {
+  const { paymentMethod, deliveryMethod, deliveryAddress, deliveryNotes } = req.body;
   const { _id } = req.user;
-  validateMongodbId(_id);
-  try {
-    if (!paymentIntent) throw new Error("Create order failed");
-    const user = await User.findById(_id);
-    let userCart = await Cart.findOne({ owner: user._id }).populate(
-      "products.product"
-    );
-    const stores = userCart.products.map((product) => {
-      return product.store;
+  
+  // Validate input
+  if (!paymentMethod || !deliveryMethod || !deliveryAddress) {
+    return res.status(400).json({
+      success: false,
+      message: "Payment method, delivery method, and delivery address are required"
     });
-    let finalAmount = 0;
-    finalAmount = userCart.cartTotal;
-    let newOrder = await new Order({
+  }
+  
+  if (!["self_delivery", "delivery_agent"].includes(deliveryMethod)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid delivery method. Must be 'self_delivery' or 'delivery_agent'"
+    });
+  }
+  
+  if (!["cash", "card", "bank"].includes(paymentMethod)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid payment method. Must be 'cash', 'card', or 'bank'"
+    });
+  }
+  
+  validateMongodbId(_id);
+  
+  try {
+    // Get user's cart
+    const userCart = await Cart.findOne({ owner: _id }).populate("products.product");
+    
+    if (!userCart || userCart.products.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Cart is empty"
+      });
+    }
+    
+    // Check stock availability
+    for (const item of userCart.products) {
+      if (item.product.quantity < item.count) {
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient stock for ${item.product.title}. Available: ${item.product.quantity}, Requested: ${item.count}`
+        });
+      }
+    }
+    
+    // Calculate delivery fee (if delivery agent is selected)
+    let deliveryFee = 0;
+    if (deliveryMethod === "delivery_agent") {
+      // Calculate delivery fee based on distance or fixed rate
+      deliveryFee = 500; // Base delivery fee in NGN
+    }
+    
+    const totalAmount = userCart.cartTotal + deliveryFee;
+    
+    // Create order
+    const newOrder = await Order.create({
       products: userCart.products,
       paymentIntent: {
         id: uniqid(),
-        method: paymentIntent,
-        amount: finalAmount,
+        method: paymentMethod,
+        amount: totalAmount,
         status: "unpaid",
         created: Date.now(),
         currency: "NGN",
       },
       deliveryMethod: deliveryMethod,
-      deliveryAddress: deliveryAddress ? deliveryAddress : req.user.address,
-      orderedBy: user._id,
+      deliveryAddress: deliveryAddress,
+      deliveryNotes: deliveryNotes || "",
+      deliveryFee: deliveryFee,
+      deliveryStatus: deliveryMethod === "delivery_agent" ? "pending_assignment" : "assigned",
+      orderedBy: _id,
       orderStatus: "Not yet processed",
-    }).save();
-    let update = userCart.products.map((item) => {
-      return {
-        updateOne: {
-          filter: { _id: item.product._id },
-          update: { $inc: { quantity: -item.count, sold: +item.count } },
-        },
-      };
+      paymentStatus: "Not yet paid",
+      paymentMethod: paymentMethod,
     });
-    let orderFor = await User.findById(_id).populate("firstname lastname");
-    let historyUpdate = userCart.products.map((item) => {
-      return {
+    
+    // Update product quantities and sold counts
+    const productUpdates = userCart.products.map((item) => ({
         updateOne: {
-          filter: { _id: item.product.store },
+        filter: { _id: item.product._id },
           update: {
-            $push: {
-              history: {
-                product: item.product._id,
-                count: item.count,
-                profit: item.count * item.product.listedPrice,
-                created: new Date.now(),
-                customer: orderFor.firstname + "" + orderFor.lastname,
-              },
-            },
-          },
-          options: { safe: true, upsert: true, new: true },
+          $inc: { 
+            quantity: -item.count, 
+            sold: +item.count 
+          } 
         },
-      };
+      },
+    }));
+    
+    await Product.bulkWrite(productUpdates);
+    
+    // Clear user's cart
+    await Cart.findOneAndDelete({ owner: _id });
+    
+    // Populate order details
+    const populatedOrder = await Order.findById(newOrder._id)
+      .populate('products.product', 'title listedPrice images brand')
+      .populate('products.store', 'name address mobile')
+      .populate('orderedBy', 'fullName email mobile');
+    
+    // Send notifications
+    try {
+      const { sendNotificationToUser, sendDeliveryAgentNotification } = require('./notificationController');
+      
+      // Notify customer
+      await sendNotificationToUser(
+        _id,
+        "Order Created Successfully",
+        `Your order #${newOrder.paymentIntent.id} has been created. ${deliveryMethod === "delivery_agent" ? "Waiting for delivery agent assignment." : "Ready for pickup."}`,
+        {
+          orderId: newOrder._id.toString(),
+          orderNumber: newOrder.paymentIntent.id,
+          totalAmount: totalAmount.toString(),
+          deliveryMethod: deliveryMethod
+        },
+        'orderUpdates'
+      );
+      
+      // Notify delivery agents if delivery method is delivery_agent
+      if (deliveryMethod === "delivery_agent") {
+        await sendDeliveryAgentNotification(
+          'new_order_available',
+          `New delivery order available: Order #${newOrder.paymentIntent.id}`,
+          {
+            orderId: newOrder._id.toString(),
+            orderNumber: newOrder.paymentIntent.id,
+            deliveryAddress: deliveryAddress,
+            totalAmount: totalAmount.toString()
+          }
+        );
+      }
+    } catch (notificationError) {
+      console.log('Notification error:', notificationError);
+      // Don't fail the order creation if notifications fail
+    }
+    
+    res.json({
+      success: true,
+      message: "Order created successfully",
+      data: {
+        order: populatedOrder,
+        totalAmount: totalAmount,
+        deliveryFee: deliveryFee,
+        deliveryMethod: deliveryMethod,
+        nextStep: deliveryMethod === "delivery_agent" 
+          ? "Waiting for delivery agent assignment" 
+          : "Ready for pickup"
+      }
     });
-    const updated = await Product.bulkWrite(update, {});
-    const updatedStores = await Store.bulkWrite(historyUpdate, {});
-    res.json({ message: "success" });
   } catch (error) {
+    console.log(error);
     throw new Error(error);
   }
 });
@@ -959,8 +1529,245 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
   }
 });
 
+/**
+ * @function getCurrentUser
+ * @description Get current authenticated user's information
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {Object} req.user - Authenticated user from middleware
+ * @returns {Object} - Current user information
+ * @throws {Error} - Throws error if user not found
+ */
+const getCurrentUser = asyncHandler(async (req, res) => {
+  try {
+    const user = req.user;
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    // Populate related data based on user roles
+    let populatedUser = { ...user.toObject() };
+    
+    // If user is a seller, populate store information
+    if (user.role.includes("seller")) {
+      const store = await Store.findOne({ owner: user._id })
+        .select('name image address balance status');
+      populatedUser.store = store;
+    }
+    
+    // If user is dispatch, populate dispatch profile
+    if (user.role.includes("dispatch")) {
+      const DispatchProfile = require("../models/dispatchProfileModel");
+      const dispatchProfile = await DispatchProfile.findOne({ user: user._id })
+        .select('vehicleInfo availability rating earnings status isActive');
+      populatedUser.dispatchProfile = dispatchProfile;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        user: populatedUser,
+        roles: user.role,
+        activeRole: user.activeRole,
+        permissions: {
+          canSell: user.role.includes("seller"),
+          canDispatch: user.role.includes("dispatch"),
+          isAdmin: user.role.includes("admin"),
+          isBuyer: user.role.includes("buyer")
+        }
+      }
+    });
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
+/**
+ * @function changeActiveRole
+ * @description Change the user's active role
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {Object} req.user - Authenticated user from middleware
+ * @param {string} req.body.role - New active role to set
+ * @returns {Object} - Success message with updated user data
+ * @throws {Error} - Throws error if role is invalid or user doesn't have that role
+ */
+const changeActiveRole = asyncHandler(async (req, res) => {
+  try {
+    const { role } = req.body;
+    const user = req.user;
+    
+    if (!role) {
+      return res.status(400).json({
+        success: false,
+        message: "Role is required"
+      });
+    }
+
+    // Validate role
+    const validRoles = ["seller", "buyer", "dispatch", "admin"];
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid role. Must be one of: " + validRoles.join(", ")
+      });
+    }
+
+    // Check if user has this role
+    if (!user.role.includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: "You don't have permission to switch to this role"
+      });
+    }
+
+    // Update active role
+    const updatedUser = await User.findByIdAndUpdate(
+      user._id,
+      { activeRole: role },
+      { new: true }
+    ).select('-password -refreshToken -passwordResetToken -passwordResetExpires');
+
+    res.json({
+      success: true,
+      message: "Active role updated successfully",
+      data: {
+        user: updatedUser,
+        activeRole: updatedUser.activeRole,
+        roles: updatedUser.role
+      }
+    });
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
+/**
+ * @function googleAuth
+ * @description Authenticate user with Google using Firebase ID token
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.body.idToken - Firebase ID token from Google
+ * @returns {Object} - User data and authentication tokens
+ * @throws {Error} - Throws error if token is invalid
+ */
+const googleAuth = asyncHandler(async (req, res) => {
+  const { idToken } = req.body;
+
+  if (!idToken) {
+    return res.status(400).json({
+      success: false,
+      message: "ID token is required"
+    });
+  }
+
+  try {
+    // Import Firebase Admin SDK
+    const admin = require('firebase-admin');
+    
+    // Verify the Firebase ID token
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const { uid, email, name, picture } = decodedToken;
+
+    // Check if user exists in MongoDB by Firebase UID
+    let user = await User.findOne({ firebaseUid: uid });
+    
+    if (!user) {
+      // Check if user exists by email (for existing users who might link Google)
+      const existingUser = await User.findOne({ email: email });
+      
+      if (existingUser) {
+        // Link Firebase UID to existing user
+        existingUser.firebaseUid = uid;
+        existingUser.fullName = existingUser.fullName || name;
+        existingUser.image = existingUser.image || picture;
+        await existingUser.save();
+        user = existingUser;
+      } else {
+        // Create new user with Google authentication
+        user = await User.create({
+          firebaseUid: uid,
+          email: email,
+          fullName: name,
+          image: picture,
+          role: ["buyer"], // Default role for Google auth users
+          activeRole: "buyer",
+          status: "active", // Auto-activate Google auth users
+          password: null // No password for Google auth users
+        });
+      }
+    }
+
+    // Check if user is blocked
+    if (user.isBlocked) {
+      return res.status(403).json({
+        success: false,
+        message: "User account is blocked"
+      });
+    }
+
+    // Generate JWT token
+    const token = generateToken(user._id);
+    
+    // Generate refresh token
+    const refreshToken = await generateRefreshToken(user._id);
+    
+    // Update user's refresh token
+    await User.findByIdAndUpdate(
+      user._id,
+      { refreshToken: refreshToken },
+      { new: true }
+    );
+
+    // Set refresh token cookie
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      maxAge: 72 * 60 * 60 * 1000, // 3 days
+    });
+
+    res.json({
+      success: true,
+      message: "Google authentication successful",
+      data: {
+        _id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        image: user.image,
+        role: user.role,
+        activeRole: user.activeRole,
+        status: user.status,
+        token: token,
+        isGoogleAuth: true
+      }
+    });
+
+  } catch (error) {
+    console.error('Google auth error:', error);
+    
+    if (error.code === 'auth/invalid-id-token') {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid Google ID token"
+      });
+    }
+    
+    return res.status(500).json({
+      success: false,
+      message: "Google authentication failed",
+      error: error.message
+    });
+  }
+});
+
 module.exports = {
   createUser,
+  createBuyer,
+  createSeller,
+  createDeliveryAgent,
   loginUser,
   getAllUsers,
   getAUser,
@@ -979,8 +1786,11 @@ module.exports = {
   removeFromCart,
   verifyOtp,
   updateCart,
-  createOrder,
+  checkoutCart,
   updateOrderStatus,
   getUsersByStatus,
   getOrders,
+  getCurrentUser,
+  changeActiveRole,
+  googleAuth,
 };

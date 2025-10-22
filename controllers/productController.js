@@ -2,8 +2,29 @@ const Product = require("../models/productModel");
 const asyncHandler = require("express-async-handler");
 const slugify = require("slugify");
 const Category = require("../models/categoryModel");
+const Order = require("../models/orderModel");
+const Cart = require("../models/cartModel");
 const validateMongodbId = require("../utils/validateMongodbId");
 const { Validate } = require("../Helpers/Validate");
+const Redis = require("ioredis");
+
+// Redis client setup with ioredis
+const redisClient = new Redis({
+  host: process.env.REDIS_HOST || 'localhost',
+  port: process.env.REDIS_PORT || 6379,
+  password: process.env.REDIS_PASSWORD || undefined,
+  retryDelayOnFailover: 100,
+  enableReadyCheck: false,
+  maxRetriesPerRequest: null,
+});
+
+redisClient.on('error', (err) => {
+  console.log('Redis Client Error', err);
+});
+
+redisClient.on('connect', () => {
+  console.log('Redis connected successfully');
+});
 /**
  * @function createProductCategory
  * @description Create a new product category
@@ -349,6 +370,388 @@ const getAllProducts = asyncHandler(async (req, res) => {
   }
 });
 
+/**
+ * @function getProducts
+ * @description Get products with advanced filtering, sorting, and pagination
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {number} [req.query.page=1] - Page number
+ * @param {number} [req.query.limit=20] - Items per page
+ * @param {string} [req.query.category] - Category ID filter
+ * @param {string} [req.query.store] - Store ID filter
+ * @param {number} [req.query.minPrice] - Minimum price filter
+ * @param {number} [req.query.maxPrice] - Maximum price filter
+ * @param {string} [req.query.brand] - Brand filter
+ * @param {string} [req.query.search] - Search term
+ * @param {string} [req.query.sort=newest] - Sort option
+ * @param {boolean} [req.query.inStock=true] - In stock filter
+ * @returns {Object} - Paginated products with filters
+ */
+const getProducts = asyncHandler(async (req, res) => {
+  const {
+    page = 1,
+    limit = 20,
+    category,
+    store,
+    minPrice,
+    maxPrice,
+    brand,
+    search,
+    sort = 'newest',
+    inStock = true
+  } = req.query;
+
+  // Create cache key
+  const cacheKey = `products:${JSON.stringify(req.query)}`;
+  
+  try {
+    // Try to get from cache first
+    const cachedData = await redisClient.get(cacheKey);
+    if (cachedData) {
+      return res.json(JSON.parse(cachedData));
+    }
+
+    // Build filter object
+    const filters = {};
+    if (category) {
+      validateMongodbId(category);
+      filters.category = category;
+    }
+    if (store) {
+      validateMongodbId(store);
+      filters.store = store;
+    }
+    if (minPrice || maxPrice) {
+      filters.listedPrice = {};
+      if (minPrice) filters.listedPrice.$gte = parseFloat(minPrice);
+      if (maxPrice) filters.listedPrice.$lte = parseFloat(maxPrice);
+    }
+    if (brand) filters.brand = new RegExp(brand, 'i');
+    if (search) {
+      filters.$or = [
+        { title: new RegExp(search, 'i') },
+        { description: new RegExp(search, 'i') },
+        { brand: new RegExp(search, 'i') }
+      ];
+    }
+    if (inStock === 'true') filters.quantity = { $gt: 0 };
+
+    // Build sort object
+    const sortOptions = {};
+    switch (sort) {
+      case 'price_asc': sortOptions.listedPrice = 1; break;
+      case 'price_desc': sortOptions.listedPrice = -1; break;
+      case 'newest': sortOptions.createdAt = -1; break;
+      case 'oldest': sortOptions.createdAt = 1; break;
+      case 'popular': sortOptions.sold = -1; break;
+      case 'rating': sortOptions['rating.average'] = -1; break;
+      case 'views': sortOptions.views = -1; break;
+      default: sortOptions.createdAt = -1;
+    }
+
+    // Execute query with pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const products = await Product.find(filters)
+      .populate('category', 'name')
+      .populate('store', 'name address mobile image')
+      .sort(sortOptions)
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await Product.countDocuments(filters);
+
+    // Get filter options for response
+    const categories = await Category.find({}, 'name').limit(10);
+    const brands = await Product.distinct('brand', filters);
+    const priceRange = await Product.aggregate([
+      { $match: filters },
+      { $group: { _id: null, min: { $min: '$listedPrice' }, max: { $max: '$listedPrice' } } }
+    ]);
+
+    const response = {
+      success: true,
+      data: {
+        products,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(total / parseInt(limit)),
+          totalProducts: total,
+          hasNext: page < Math.ceil(total / parseInt(limit)),
+          hasPrev: page > 1
+        },
+        filters: {
+          categories,
+          brands: brands.filter(b => b),
+          priceRange: priceRange[0] || { min: 0, max: 0 }
+        }
+      }
+    };
+
+    // Cache for 1 hour
+    await redisClient.setex(cacheKey, 3600, JSON.stringify(response));
+
+    // Track search analytics
+    if (search) {
+      await redisClient.lPush('search_analytics', JSON.stringify({
+        query: search,
+        timestamp: new Date(),
+        resultsCount: total
+      }));
+    }
+
+    res.json(response);
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
+/**
+ * @function getPersonalizedSuggestions
+ * @description Get personalized product suggestions based on user's history
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.user._id - Authenticated user's ID
+ * @param {number} [req.query.limit=10] - Number of suggestions
+ * @returns {Object} - Personalized product suggestions
+ */
+const getPersonalizedSuggestions = asyncHandler(async (req, res) => {
+  const { _id } = req.user;
+  const { limit = 10 } = req.query;
+  
+  const cacheKey = `personalized:${_id}:${limit}`;
+  
+  try {
+    // Try to get from cache first
+    const cachedData = await redisClient.get(cacheKey);
+    if (cachedData) {
+      return res.json(JSON.parse(cachedData));
+    }
+
+    // Get user's order history
+    const userOrders = await Order.find({ orderedBy: _id })
+      .populate('products.product')
+      .sort({ createdAt: -1 })
+      .limit(10);
+
+    // Get user's cart items
+    const userCart = await Cart.findOne({ owner: _id })
+      .populate('products.product');
+
+    // Extract user preferences
+    const userPreferences = {
+      categories: [...new Set(userOrders.flatMap(order => 
+        order.products.map(item => item.product?.category).filter(Boolean)
+      ))],
+      brands: [...new Set(userOrders.flatMap(order => 
+        order.products.map(item => item.product?.brand).filter(Boolean)
+      ))],
+      stores: [...new Set(userOrders.flatMap(order => 
+        order.products.map(item => item.product?.store).filter(Boolean)
+      ))]
+    };
+
+    // Get suggested products based on preferences
+    let suggestions = [];
+    
+    if (userPreferences.categories.length > 0 || userPreferences.brands.length > 0) {
+      const suggestionFilters = {
+        quantity: { $gt: 0 }
+      };
+
+      if (userPreferences.categories.length > 0 || userPreferences.brands.length > 0) {
+        suggestionFilters.$or = [];
+        if (userPreferences.categories.length > 0) {
+          suggestionFilters.$or.push({ category: { $in: userPreferences.categories } });
+        }
+        if (userPreferences.brands.length > 0) {
+          suggestionFilters.$or.push({ brand: { $in: userPreferences.brands } });
+        }
+      }
+
+      suggestions = await Product.find(suggestionFilters)
+        .populate('category', 'name')
+        .populate('store', 'name address')
+        .sort({ 'rating.average': -1, sold: -1 })
+        .limit(parseInt(limit));
+    }
+
+    // If no personalized suggestions, get trending products
+    if (suggestions.length === 0) {
+      suggestions = await Product.find({ quantity: { $gt: 0 } })
+        .populate('category', 'name')
+        .populate('store', 'name address')
+        .sort({ sold: -1, views: -1 })
+        .limit(parseInt(limit));
+    }
+
+    const response = {
+      success: true,
+      data: suggestions
+    };
+
+    // Cache for 30 minutes
+    await redisClient.setex(cacheKey, 1800, JSON.stringify(response));
+
+    res.json(response);
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
+/**
+ * @function getTrendingProducts
+ * @description Get trending products based on sales and views
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {number} [req.query.limit=10] - Number of trending products
+ * @param {string} [req.query.timeframe=7d] - Timeframe for trending (24h, 7d, 30d)
+ * @returns {Object} - Trending products
+ */
+const getTrendingProducts = asyncHandler(async (req, res) => {
+  const { limit = 10, timeframe = '7d' } = req.query;
+  
+  const cacheKey = `trending:${timeframe}:${limit}`;
+  
+  try {
+    // Try to get from cache first
+    const cachedData = await redisClient.get(cacheKey);
+    if (cachedData) {
+      return res.json(JSON.parse(cachedData));
+    }
+
+    let dateFilter = {};
+    const now = new Date();
+    
+    switch (timeframe) {
+      case '24h':
+        dateFilter = { createdAt: { $gte: new Date(now - 24 * 60 * 60 * 1000) } };
+        break;
+      case '7d':
+        dateFilter = { createdAt: { $gte: new Date(now - 7 * 24 * 60 * 60 * 1000) } };
+        break;
+      case '30d':
+        dateFilter = { createdAt: { $gte: new Date(now - 30 * 24 * 60 * 60 * 1000) } };
+        break;
+    }
+
+    const trending = await Product.find({
+      ...dateFilter,
+      quantity: { $gt: 0 }
+    })
+    .populate('category', 'name')
+    .populate('store', 'name address')
+    .sort({ sold: -1, views: -1, 'rating.average': -1 })
+    .limit(parseInt(limit));
+
+    const response = {
+      success: true,
+      data: trending
+    };
+
+    // Cache for 2 hours
+    await redisClient.setex(cacheKey, 7200, JSON.stringify(response));
+
+    res.json(response);
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
+/**
+ * @function getCategorySuggestions
+ * @description Get product suggestions for a specific category
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.params.categoryId - Category ID
+ * @param {number} [req.query.limit=10] - Number of suggestions
+ * @returns {Object} - Category-based product suggestions
+ */
+const getCategorySuggestions = asyncHandler(async (req, res) => {
+  const { categoryId } = req.params;
+  const { limit = 10 } = req.query;
+  
+  validateMongodbId(categoryId);
+  
+  const cacheKey = `category_suggestions:${categoryId}:${limit}`;
+  
+  try {
+    // Try to get from cache first
+    const cachedData = await redisClient.get(cacheKey);
+    if (cachedData) {
+      return res.json(JSON.parse(cachedData));
+    }
+
+    // Get category details
+    const category = await Category.findById(categoryId);
+    if (!category) {
+      return res.status(404).json({
+        success: false,
+        message: "Category not found"
+      });
+    }
+
+    // Get products in this category
+    const suggestions = await Product.find({
+      category: categoryId,
+      quantity: { $gt: 0 }
+    })
+    .populate('category', 'name')
+    .populate('store', 'name address')
+    .sort({ 'rating.average': -1, sold: -1, views: -1 })
+    .limit(parseInt(limit));
+
+    const response = {
+      success: true,
+      data: {
+        category: {
+          _id: category._id,
+          name: category.name
+        },
+        suggestions
+      }
+    };
+
+    // Cache for 1 hour
+    await redisClient.setex(cacheKey, 3600, JSON.stringify(response));
+
+    res.json(response);
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
+/**
+ * @function trackProductView
+ * @description Track product view for analytics
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.params.id - Product ID
+ * @returns {Object} - Success message
+ */
+const trackProductView = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  try {
+    // Increment view count
+    await Product.findByIdAndUpdate(id, { $inc: { views: 1 } });
+    
+    // Track in analytics
+    await redisClient.lPush('product_views', JSON.stringify({
+      productId: id,
+      timestamp: new Date(),
+      userAgent: req.get('User-Agent'),
+      ip: req.ip
+    }));
+
+    res.json({
+      success: true,
+      message: "View tracked successfully"
+    });
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
 module.exports = {
   createProduct,
   getAProduct,
@@ -359,5 +762,10 @@ module.exports = {
   updateProductCategory,
   getProductsByCategory,
   deleteProductCategory,
-  getProductCategories
+  getProductCategories,
+  getProducts,
+  getPersonalizedSuggestions,
+  getTrendingProducts,
+  getCategorySuggestions,
+  trackProductView
 };

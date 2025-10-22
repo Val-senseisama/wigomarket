@@ -1,6 +1,9 @@
 const express = require("express");
 const {
   createUser,
+  createBuyer,
+  createSeller,
+  createDeliveryAgent,
   loginUser,
   getAllUsers,
   getAUser,
@@ -17,8 +20,11 @@ const {
   forgotPasswordToken,
   getUserCart,
   updateCart,
-  createOrder,
+  checkoutCart,
   getUsersByStatus,
+  getCurrentUser,
+  changeActiveRole,
+  googleAuth,
 } = require("../controllers/userController");
 const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
 const { commissionHandler } = require("../controllers/paymentController");
@@ -88,6 +94,350 @@ const router = express.Router();
  *         description: Validation error or user already exists
  */
 router.post("/register", createUser);
+
+// ==================== ROLE-SPECIFIC SIGNUP ROUTES ====================
+
+/**
+ * @swagger
+ * /register/buyer:
+ *   post:
+ *     summary: Register as a buyer
+ *     description: Create a new buyer account with email verification
+ *     tags:
+ *       - Authentication
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - mobile
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User's email address
+ *                 example: "buyer@example.com"
+ *               mobile:
+ *                 type: string
+ *                 description: User's mobile number
+ *                 example: "+2348012345678"
+ *               password:
+ *                 type: string
+ *                 minLength: 6
+ *                 description: User's password
+ *                 example: "password123"
+ *               fullName:
+ *                 type: string
+ *                 description: User's full name (optional)
+ *                 example: "John Doe"
+ *               residentialAddress:
+ *                 type: string
+ *                 description: User's residential address (optional)
+ *                 example: "123 Main Street, Lagos"
+ *               country:
+ *                 type: string
+ *                 description: User's country (optional)
+ *                 example: "Nigeria"
+ *               city:
+ *                 type: string
+ *                 description: User's city (optional)
+ *                 example: "Lagos"
+ *               state:
+ *                 type: string
+ *                 description: User's state (optional)
+ *                 example: "Lagos State"
+ *     responses:
+ *       201:
+ *         description: Buyer account created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Buyer account created successfully. Please check your email for verification code."
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     user:
+ *                       type: object
+ *                       properties:
+ *                         _id:
+ *                           type: string
+ *                         email:
+ *                           type: string
+ *                         mobile:
+ *                           type: string
+ *                         fullName:
+ *                           type: string
+ *                         role:
+ *                           type: array
+ *                           items:
+ *                             type: string
+ *                           example: ["buyer"]
+ *                         status:
+ *                           type: string
+ *                           example: "pending"
+ *                     verificationCode:
+ *                       type: string
+ *                       description: "For testing purposes only"
+ *       400:
+ *         description: Validation error or user already exists
+ */
+router.post("/register/buyer", createBuyer);
+
+/**
+ * @swagger
+ * /register/seller:
+ *   post:
+ *     summary: Register as a seller
+ *     description: Create a new seller account with email verification
+ *     tags:
+ *       - Authentication
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - mobile
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User's email address
+ *                 example: "seller@example.com"
+ *               mobile:
+ *                 type: string
+ *                 description: User's mobile number
+ *                 example: "+2348012345678"
+ *               password:
+ *                 type: string
+ *                 minLength: 6
+ *                 description: User's password
+ *                 example: "password123"
+ *               fullName:
+ *                 type: string
+ *                 description: User's full name (optional)
+ *                 example: "Jane Smith"
+ *               residentialAddress:
+ *                 type: string
+ *                 description: User's residential address (optional)
+ *                 example: "456 Business Street, Lagos"
+ *               country:
+ *                 type: string
+ *                 description: User's country (optional)
+ *                 example: "Nigeria"
+ *               city:
+ *                 type: string
+ *                 description: User's city (optional)
+ *                 example: "Lagos"
+ *               state:
+ *                 type: string
+ *                 description: User's state (optional)
+ *                 example: "Lagos State"
+ *     responses:
+ *       201:
+ *         description: Seller account created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Seller account created successfully. Please check your email for verification code."
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     user:
+ *                       type: object
+ *                       properties:
+ *                         _id:
+ *                           type: string
+ *                         email:
+ *                           type: string
+ *                         mobile:
+ *                           type: string
+ *                         fullName:
+ *                           type: string
+ *                         role:
+ *                           type: array
+ *                           items:
+ *                             type: string
+ *                           example: ["seller"]
+ *                         status:
+ *                           type: string
+ *                           example: "pending"
+ *                     verificationCode:
+ *                       type: string
+ *                       description: "For testing purposes only"
+ *       400:
+ *         description: Validation error or user already exists
+ */
+router.post("/register/seller", createSeller);
+
+/**
+ * @swagger
+ * /register/delivery:
+ *   post:
+ *     summary: Register as a delivery agent
+ *     description: Create a new delivery agent account with email verification
+ *     tags:
+ *       - Authentication
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - mobile
+ *               - password
+ *               - nextOfKin
+ *               - modeOfTransport
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User's email address
+ *                 example: "delivery@example.com"
+ *               mobile:
+ *                 type: string
+ *                 description: User's mobile number
+ *                 example: "+2348012345678"
+ *               password:
+ *                 type: string
+ *                 minLength: 6
+ *                 description: User's password
+ *                 example: "password123"
+ *               fullName:
+ *                 type: string
+ *                 description: User's full name (optional)
+ *                 example: "Mike Johnson"
+ *               residentialAddress:
+ *                 type: string
+ *                 description: User's residential address (optional)
+ *                 example: "789 Delivery Street, Lagos"
+ *               country:
+ *                 type: string
+ *                 description: User's country (optional)
+ *                 example: "Nigeria"
+ *               city:
+ *                 type: string
+ *                 description: User's city (optional)
+ *                 example: "Lagos"
+ *               state:
+ *                 type: string
+ *                 description: User's state (optional)
+ *                 example: "Lagos State"
+ *               nextOfKin:
+ *                 type: object
+ *                 required:
+ *                   - name
+ *                   - relationship
+ *                   - mobile
+ *                 properties:
+ *                   name:
+ *                     type: string
+ *                     description: Next of kin's full name
+ *                     example: "Sarah Johnson"
+ *                   relationship:
+ *                     type: string
+ *                     enum: [spouse, parent, sibling, child, other]
+ *                     description: Relationship to the delivery agent
+ *                     example: "spouse"
+ *                   mobile:
+ *                     type: string
+ *                     description: Next of kin's mobile number
+ *                     example: "+2348098765432"
+ *                   email:
+ *                     type: string
+ *                     format: email
+ *                     description: Next of kin's email (optional)
+ *                     example: "sarah@example.com"
+ *                   address:
+ *                     type: string
+ *                     description: Next of kin's address (optional)
+ *                     example: "123 Family Street, Lagos"
+ *               modeOfTransport:
+ *                 type: string
+ *                 enum: [bike, motorcycle, car, van, truck, bicycle]
+ *                 description: Mode of transport for delivery
+ *                 example: "motorcycle"
+ *     responses:
+ *       201:
+ *         description: Delivery agent account created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Delivery agent account created successfully. Please check your email for verification code."
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     user:
+ *                       type: object
+ *                       properties:
+ *                         _id:
+ *                           type: string
+ *                         email:
+ *                           type: string
+ *                         mobile:
+ *                           type: string
+ *                         fullName:
+ *                           type: string
+ *                         role:
+ *                           type: array
+ *                           items:
+ *                             type: string
+ *                           example: ["dispatch"]
+ *                         status:
+ *                           type: string
+ *                           example: "pending"
+ *                         nextOfKin:
+ *                           type: object
+ *                           properties:
+ *                             name:
+ *                               type: string
+ *                             relationship:
+ *                               type: string
+ *                             mobile:
+ *                               type: string
+ *                             email:
+ *                               type: string
+ *                             address:
+ *                               type: string
+ *                         modeOfTransport:
+ *                           type: string
+ *                     verificationCode:
+ *                       type: string
+ *                       description: "For testing purposes only"
+ *       400:
+ *         description: Validation error, missing required fields, or user already exists
+ */
+router.post("/register/delivery", createDeliveryAgent);
 
 /**
  * @swagger
@@ -203,6 +553,10 @@ router.put("/reset-password", resetPassword);
  *                 status:
  *                   type: string
  *                 role:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                 activeRole:
  *                   type: string
  *                 token:
  *                   type: string
@@ -1017,7 +1371,7 @@ router.post("/empty-cart", authMiddleware, emptyCart);
 *       400:
 *         description: Order creation fails
 */
-router.post("/create-order", authMiddleware, createOrder);
+router.post("/checkout", authMiddleware, checkoutCart);
 /**
  * @swagger
  * /verify:
@@ -1056,5 +1410,296 @@ router.post("/create-order", authMiddleware, createOrder);
  *         description: Invalid email or code
  */
 router.post("/verify", verifyOtp);
+
+/**
+ * @swagger
+ * /me:
+ *   get:
+ *     summary: Get current authenticated user's information
+ *     description: Get current authenticated user's information with role-based data
+ *     tags:
+ *       - Users
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Current user information with roles and permissions
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     user:
+ *                       type: object
+ *                       properties:
+ *                         _id:
+ *                           type: string
+ *                         fullName:
+ *                           type: string
+ *                         email:
+ *                           type: string
+ *                         mobile:
+ *                           type: string
+ *                         role:
+ *                           type: array
+ *                           items:
+ *                             type: string
+ *                         residentialAddress:
+ *                           type: string
+ *                         country:
+ *                           type: string
+ *                         city:
+ *                           type: string
+ *                         state:
+ *                           type: string
+ *                         image:
+ *                           type: string
+ *                         status:
+ *                           type: string
+ *                         balance:
+ *                           type: number
+ *                         store:
+ *                           type: object
+ *                           description: Store information (if user is a seller)
+ *                         dispatchProfile:
+ *                           type: object
+ *                           description: Dispatch profile (if user is dispatch)
+ *                     roles:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                     activeRole:
+ *                       type: string
+ *                       description: Currently active role
+ *                       example: "buyer"
+ *                     permissions:
+ *                       type: object
+ *                       properties:
+ *                         canSell:
+ *                           type: boolean
+ *                         canDispatch:
+ *                           type: boolean
+ *                         isAdmin:
+ *                           type: boolean
+ *                         isBuyer:
+ *                           type: boolean
+ *       404:
+ *         description: User not found
+ *       401:
+ *         description: Unauthorized
+ */
+router.get("/me", authMiddleware, getCurrentUser);
+
+/**
+ * @swagger
+ * /change-role:
+ *   put:
+ *     summary: Change user's active role
+ *     description: Change the user's currently active role to one of their assigned roles
+ *     tags:
+ *       - Users
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - role
+ *             properties:
+ *               role:
+ *                 type: string
+ *                 enum: [seller, buyer, dispatch, admin]
+ *                 description: New active role to set
+ *                 example: "seller"
+ *     responses:
+ *       200:
+ *         description: Active role updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Active role updated successfully"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     user:
+ *                       type: object
+ *                       properties:
+ *                         _id:
+ *                           type: string
+ *                         fullName:
+ *                           type: string
+ *                         email:
+ *                           type: string
+ *                         mobile:
+ *                           type: string
+ *                         role:
+ *                           type: array
+ *                           items:
+ *                             type: string
+ *                         activeRole:
+ *                           type: string
+ *                     activeRole:
+ *                       type: string
+ *                     roles:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *       400:
+ *         description: Invalid role or user doesn't have permission for that role
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "You don't have permission to switch to this role"
+ *       401:
+ *         description: Unauthorized
+ */
+router.put("/change-role", authMiddleware, changeActiveRole);
+
+/**
+ * @swagger
+ * /google-auth:
+ *   post:
+ *     summary: Authenticate with Google using Firebase ID token
+ *     description: Authenticate user with Google using Firebase ID token verification
+ *     tags:
+ *       - Authentication
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - idToken
+ *             properties:
+ *               idToken:
+ *                 type: string
+ *                 description: Firebase ID token from Google authentication
+ *                 example: "eyJhbGciOiJSUzI1NiIsImtpZCI6IjE2NzEwMjQ4NzQ..."
+ *     responses:
+ *       200:
+ *         description: Google authentication successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Google authentication successful"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     _id:
+ *                       type: string
+ *                       example: "64f8a1b2c3d4e5f6a7b8c9d0"
+ *                     fullName:
+ *                       type: string
+ *                       example: "John Doe"
+ *                     email:
+ *                       type: string
+ *                       example: "john.doe@gmail.com"
+ *                     image:
+ *                       type: string
+ *                       example: "https://lh3.googleusercontent.com/a/..."
+ *                     role:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                       example: ["buyer"]
+ *                     activeRole:
+ *                       type: string
+ *                       example: "buyer"
+ *                     status:
+ *                       type: string
+ *                       example: "active"
+ *                     token:
+ *                       type: string
+ *                       example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *                     isGoogleAuth:
+ *                       type: boolean
+ *                       example: true
+ *       400:
+ *         description: Missing ID token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "ID token is required"
+ *       401:
+ *         description: Invalid Google ID token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Invalid Google ID token"
+ *       403:
+ *         description: User account is blocked
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "User account is blocked"
+ *       500:
+ *         description: Google authentication failed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Google authentication failed"
+ *                 error:
+ *                   type: string
+ *                   example: "Error details"
+ */
+router.post("/google-auth", googleAuth);
 
 module.exports = router;

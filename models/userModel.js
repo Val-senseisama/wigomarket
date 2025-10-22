@@ -5,13 +5,8 @@ const crypto = require("crypto");
 // Declare the Schema of the Mongo model
 var userSchema = new mongoose.Schema(
   {
-    firstname: {
+    fullName: {
       type: String,
-      required: true,
-    },
-    lastname: {
-      type: String,
-      required: true,
     },
     email: {
       type: String,
@@ -20,13 +15,24 @@ var userSchema = new mongoose.Schema(
     },
     mobile: {
       type: String,
-      required: true,
+      required: false, // Made optional for Google auth users
       unique: true,
+      sparse: true, // Allows multiple null values
+    },
+    firebaseUid: {
+      type: String,
+      unique: true,
+      sparse: true, // Allows multiple null values
     },
     role: {
       type: [String], // Array of strings
       enum: ["seller", "buyer", "dispatch", "admin"], // Valid roles
       default: ["buyer"], // Default role is 'buyer'
+    },
+    activeRole: {
+      type: String,
+      enum: ["seller", "buyer", "dispatch", "admin"],
+      default: "buyer", // Default active role
     },
     
     password: {
@@ -34,6 +40,18 @@ var userSchema = new mongoose.Schema(
       required: true,
     },
     address: {
+      type: String,
+    },
+    residentialAddress: {
+      type: String,
+    },
+    country: {
+      type: String,
+    },
+    city: {
+      type: String,
+    },
+    state: {
       type: String,
     },
     image: {
@@ -62,10 +80,61 @@ var userSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Store",
     },
+    dispatchProfile: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "DispatchProfile",
+    },
+    // Delivery agent specific fields
+    nextOfKin: {
+      name: {
+        type: String,
+      },
+      relationship: {
+        type: String,
+        enum: ["spouse", "parent", "sibling", "child", "other"],
+      },
+      mobile: {
+        type: String,
+      },
+      email: {
+        type: String,
+      },
+      address: {
+        type: String,
+      },
+    },
+    modeOfTransport: {
+      type: String,
+      enum: ["bike", "motorcycle", "car", "van", "truck", "bicycle"],
+    },
     balance: {
       type: Number,
       default: 0,
     },
+    // FCM tokens for push notifications
+    fcmTokens: [{
+      token: {
+        type: String,
+        required: true
+      },
+      deviceType: {
+        type: String,
+        enum: ["android", "ios", "web"],
+        required: true
+      },
+      deviceId: {
+        type: String,
+        required: true
+      },
+      lastUsed: {
+        type: Date,
+        default: Date.now
+      },
+      isActive: {
+        type: Boolean,
+        default: true
+      }
+    }],
     passwordChangedAt: Date,
     passwordRefreshToken: String,
     passwordResetExpiresAt: Date,

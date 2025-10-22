@@ -10,8 +10,25 @@ const authMiddleware = asyncHandler(async (req, res, next) => {
     try {
       if (token) {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await User.findById(decoded?.id);
+        const user = await User.findById(decoded?.id).select('-password -refreshToken');
+        
+        if (!user) {
+          throw new Error("User not found");
+        }
+        
+        if (user.isBlocked) {
+          throw new Error("User account is blocked");
+        }
+        
+        if (user.status !== 'active') {
+          throw new Error("User account is not active");
+        }
+        
+        // Add user info to request
         req.user = user;
+        req.userId = user._id;
+        req.userRoles = user.role;
+        req.activeRole = user.activeRole;
         next();
       }
     } catch (error) {
@@ -23,28 +40,22 @@ const authMiddleware = asyncHandler(async (req, res, next) => {
 });
 
 const isSeller = asyncHandler(async (req, res, next) => {
-  const { email } = req.user;
+  const userRoles = req.userRoles;
 
-  // Fetch the user with the required fields
-  const sellerUser = await User.findOne({ email }).select('role');
-
-  if (!sellerUser || !sellerUser.role.includes("seller")) {
+  if (!userRoles || !userRoles.includes("seller")) {
     throw new Error("You are not a seller");
   }
 
   // Assign store ID if needed
-  const store = await Store.findOne({ owner: sellerUser._id }, "_id");
+  const store = await Store.findOne({ owner: req.userId }, "_id");
   req.store = store ? store._id : null;
   next();
 });
 
-const isdispatch = asyncHandler(async (req, res, next) => {
-  const { email } = req.user;
+const isDispatch = asyncHandler(async (req, res, next) => {
+  const userRoles = req.userRoles;
 
-  // Fetch the user with the required fields
-  const dispatchUser = await User.findOne({ email }).select('role');
-
-  if (!dispatchUser || !dispatchUser.role.includes("dispatch")) {
+  if (!userRoles || !userRoles.includes("dispatch")) {
     throw new Error("You are not a dispatch user");
   }
 
@@ -52,15 +63,12 @@ const isdispatch = asyncHandler(async (req, res, next) => {
 });
 
 const isAdmin = asyncHandler(async (req, res, next) => {
-  const { email } = req.user;
+  const userRoles = req.userRoles;
 
-  // Fetch the user with the required fields
-  const adminUser = await User.findOne({ email }).select('role');
-
-  if (!adminUser || adminUser.role !== "admin") {
+  if (!userRoles || !userRoles.includes("admin")) {
     throw new Error("You are not an admin");
   }
 
   next();
 });
-module.exports = { authMiddleware, isAdmin, isdispatch, isSeller };
+module.exports = { authMiddleware, isAdmin, isDispatch, isSeller };

@@ -10,6 +10,11 @@ const {
   getProductsByCategory,
   deleteProductCategory,
   getProductCategories,
+  getProducts,
+  getPersonalizedSuggestions,
+  getTrendingProducts,
+  getCategorySuggestions,
+  trackProductView,
 } = require("../controllers/productController");
 const { authMiddleware, isSeller, isAdmin } = require("../middleware/authMiddleware");
 const router = express.Router();
@@ -515,5 +520,269 @@ router.delete("/category", authMiddleware, isAdmin, deleteProductCategory); // D
 */
 router.get("/categories", getProductCategories); // Get all product categories
 
+// New product endpoints with advanced features
+/**
+ * @swagger
+ * /products:
+ *   get:
+ *     summary: Get products with advanced filtering and pagination
+ *     description: Get products with advanced filtering, sorting, and pagination
+ *     tags:
+ *       - Products
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *         description: Items per page
+ *       - in: query
+ *         name: category
+ *         schema:
+ *           type: string
+ *         description: Category ID filter
+ *       - in: query
+ *         name: store
+ *         schema:
+ *           type: string
+ *         description: Store ID filter
+ *       - in: query
+ *         name: minPrice
+ *         schema:
+ *           type: number
+ *         description: Minimum price filter
+ *       - in: query
+ *         name: maxPrice
+ *         schema:
+ *           type: number
+ *         description: Maximum price filter
+ *       - in: query
+ *         name: brand
+ *         schema:
+ *           type: string
+ *         description: Brand filter
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: Search term
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *           enum: [newest, oldest, price_asc, price_desc, popular, rating, views]
+ *           default: newest
+ *         description: Sort option
+ *       - in: query
+ *         name: inStock
+ *         schema:
+ *           type: boolean
+ *           default: true
+ *         description: In stock filter
+ *     responses:
+ *       200:
+ *         description: Paginated products with filters
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     products:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                     pagination:
+ *                       type: object
+ *                       properties:
+ *                         currentPage:
+ *                           type: number
+ *                         totalPages:
+ *                           type: number
+ *                         totalProducts:
+ *                           type: number
+ *                         hasNext:
+ *                           type: boolean
+ *                         hasPrev:
+ *                           type: boolean
+ *                     filters:
+ *                       type: object
+ *                       properties:
+ *                         categories:
+ *                           type: array
+ *                         brands:
+ *                           type: array
+ *                         priceRange:
+ *                           type: object
+ *                           properties:
+ *                             min:
+ *                               type: number
+ *                             max:
+ *                               type: number
+ */
+router.get("/products", getProducts);
+
+/**
+ * @swagger
+ * /products/suggestions/personalized:
+ *   get:
+ *     summary: Get personalized product suggestions
+ *     description: Get personalized product suggestions based on user's history
+ *     tags:
+ *       - Products
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Number of suggestions
+ *     responses:
+ *       200:
+ *         description: Personalized product suggestions
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ */
+router.get("/products/suggestions/personalized", authMiddleware, getPersonalizedSuggestions);
+
+/**
+ * @swagger
+ * /products/suggestions/trending:
+ *   get:
+ *     summary: Get trending products
+ *     description: Get trending products based on sales and views
+ *     tags:
+ *       - Products
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Number of trending products
+ *       - in: query
+ *         name: timeframe
+ *         schema:
+ *           type: string
+ *           enum: [24h, 7d, 30d]
+ *           default: 7d
+ *         description: Timeframe for trending
+ *     responses:
+ *       200:
+ *         description: Trending products
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ */
+router.get("/products/suggestions/trending", getTrendingProducts);
+
+/**
+ * @swagger
+ * /products/suggestions/category/{categoryId}:
+ *   get:
+ *     summary: Get category-based product suggestions
+ *     description: Get product suggestions for a specific category
+ *     tags:
+ *       - Products
+ *     parameters:
+ *       - in: path
+ *         name: categoryId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Category ID
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Number of suggestions
+ *     responses:
+ *       200:
+ *         description: Category-based product suggestions
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     category:
+ *                       type: object
+ *                       properties:
+ *                         _id:
+ *                           type: string
+ *                         name:
+ *                           type: string
+ *                     suggestions:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *       404:
+ *         description: Category not found
+ */
+router.get("/products/suggestions/category/:categoryId", getCategorySuggestions);
+
+/**
+ * @swagger
+ * /products/track-view/{id}:
+ *   post:
+ *     summary: Track product view for analytics
+ *     description: Track product view for analytics
+ *     tags:
+ *       - Products
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Product ID
+ *     responses:
+ *       200:
+ *         description: View tracked successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ */
+router.post("/products/track-view/:id", trackProductView);
 
 module.exports = router;
