@@ -11,14 +11,12 @@ const axios = require("axios");
 const Redis = require("ioredis");
 
 // Redis client for real-time location caching
-const redisClient = new Redis({
-  host: process.env.REDIS_HOST || 'localhost',
-  port: process.env.REDIS_PORT || 6379,
-  password: process.env.REDIS_PASSWORD || undefined,
+const redisClient = new Redis(process.env.REDIS_URL || "redis://localhost:6379", {
   retryDelayOnFailover: 100,
   enableReadyCheck: false,
   maxRetriesPerRequest: null,
 });
+
 
 // Here Maps API configuration
 const HERE_API_KEY = process.env.HERE_API_KEY;

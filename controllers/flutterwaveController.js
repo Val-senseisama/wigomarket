@@ -6,14 +6,12 @@ const { Validate } = require("../Helpers/Validate");
 const { ThrowError } = require("../Helpers/Helpers");
 
 // Redis client for caching
-const redisClient = new Redis({
-  host: process.env.REDIS_HOST || 'localhost',
-  port: process.env.REDIS_PORT || 6379,
-  password: process.env.REDIS_PASSWORD || undefined,
+const redisClient = new Redis(process.env.REDIS_URL || "redis://localhost:6379", {
   retryDelayOnFailover: 100,
   enableReadyCheck: false,
   maxRetriesPerRequest: null,
 });
+
 
 // Flutterwave API configuration
 const FLUTTERWAVE_BASE_URL = "https://api.flutterwave.com/v3";
