@@ -3,6 +3,7 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const cookieParser = require("cookie-parser");
 const morgan = require("morgan");
+const cors = require("cors");
 const dbConnect = require("./config/dbConnect");
 const authRouter = require("./routes/authRouter");
 const productRouter = require("./routes/productRouter");
@@ -19,6 +20,15 @@ const { swaggerUi, specs } = require('./swagger');
 const LocationWebSocketServer = require('./websocket/locationWebSocket');
 
 const app = express();
+
+// CORS configuration - allowing all origins for development
+app.use(cors({
+  origin: true, // Allow all origins in development
+  credentials: true, // Allow cookies and authorization headers
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
+
 app.get("/", (req, res) => {
   res.send(`<a href="/api-docs">API Docs</a>`);
 });

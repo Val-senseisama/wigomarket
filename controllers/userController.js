@@ -26,7 +26,6 @@ const { verificationCodeTemplate, welcome, forgotPasswordTemplate } = require(".
  * @param {string} req.body.password - User's password (required)
  * @param {string} req.body.fullName - User's full name (optional)
  * @param {string} req.body.residentialAddress - User's residential address (optional)
- * @param {string} req.body.country - User's country (optional)
  * @param {string} req.body.city - User's city (optional)
  * @param {string} req.body.state - User's state (optional)
  * @returns {Object} - New user data or error message
@@ -38,7 +37,6 @@ const createBuyer = asyncHandler(async (req, res) => {
   const password = req.body.password;
   const fullName = req.body.fullName;
   const residentialAddress = req.body.residentialAddress;
-  const country = req.body.country;
   const city = req.body.city;
   const state = req.body.state;
 
@@ -67,7 +65,6 @@ const createBuyer = asyncHandler(async (req, res) => {
       password,
       fullName: fullName || "",
       residentialAddress: residentialAddress || "",
-      country: country || "",
       city: city || "",
       state: state || "",
       role: ["buyer"] // Buyer role
@@ -175,7 +172,6 @@ const verifyOtp = asyncHandler(async (req, res) => {
  * @param {string} req.body.password - User's password (required)
  * @param {string} req.body.fullName - User's full name (optional)
  * @param {string} req.body.residentialAddress - User's residential address (optional)
- * @param {string} req.body.country - User's country (optional)
  * @param {string} req.body.city - User's city (optional)
  * @param {string} req.body.state - User's state (optional)
  * @returns {Object} - New user data or error message
@@ -187,7 +183,6 @@ const createSeller = asyncHandler(async (req, res) => {
   const password = req.body.password;
   const fullName = req.body.fullName;
   const residentialAddress = req.body.residentialAddress;
-  const country = req.body.country;
   const city = req.body.city;
   const state = req.body.state;
 
@@ -216,7 +211,6 @@ const createSeller = asyncHandler(async (req, res) => {
       password,
       fullName: fullName || "",
       residentialAddress: residentialAddress || "",
-      country: country || "",
       city: city || "",
       state: state || "",
       role: ["seller"] // Seller role
@@ -285,7 +279,6 @@ const createSeller = asyncHandler(async (req, res) => {
  * @param {string} req.body.password - User's password (required)
  * @param {string} req.body.fullName - User's full name (optional)
  * @param {string} req.body.residentialAddress - User's residential address (optional)
- * @param {string} req.body.country - User's country (optional)
  * @param {string} req.body.city - User's city (optional)
  * @param {string} req.body.state - User's state (optional)
  * @param {Object} req.body.nextOfKin - Next of kin information (required for delivery agents)
@@ -299,7 +292,6 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
   const password = req.body.password;
   const fullName = req.body.fullName;
   const residentialAddress = req.body.residentialAddress;
-  const country = req.body.country;
   const city = req.body.city;
   const state = req.body.state;
   const nextOfKin = req.body.nextOfKin;
@@ -349,7 +341,6 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
       password,
       fullName: fullName || "",
       residentialAddress: residentialAddress || "",
-      country: country || "",
       city: city || "",
       state: state || "",
       role: ["dispatch"], // Delivery agent role

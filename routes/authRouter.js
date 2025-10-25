@@ -138,10 +138,6 @@ router.post("/register", createUser);
  *                 type: string
  *                 description: User's residential address (optional)
  *                 example: "123 Main Street, Lagos"
- *               country:
- *                 type: string
- *                 description: User's country (optional)
- *                 example: "Nigeria"
  *               city:
  *                 type: string
  *                 description: User's city (optional)
@@ -235,10 +231,6 @@ router.post("/register/buyer", createBuyer);
  *                 type: string
  *                 description: User's residential address (optional)
  *                 example: "456 Business Street, Lagos"
- *               country:
- *                 type: string
- *                 description: User's country (optional)
- *                 example: "Nigeria"
  *               city:
  *                 type: string
  *                 description: User's city (optional)
@@ -334,10 +326,6 @@ router.post("/register/seller", createSeller);
  *                 type: string
  *                 description: User's residential address (optional)
  *                 example: "789 Delivery Street, Lagos"
- *               country:
- *                 type: string
- *                 description: User's country (optional)
- *                 example: "Nigeria"
  *               city:
  *                 type: string
  *                 description: User's city (optional)
@@ -1450,8 +1438,6 @@ router.post("/verify", verifyOtp);
  *                           items:
  *                             type: string
  *                         residentialAddress:
- *                           type: string
- *                         country:
  *                           type: string
  *                         city:
  *                           type: string

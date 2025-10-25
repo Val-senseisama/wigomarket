@@ -45,9 +45,6 @@ var userSchema = new mongoose.Schema(
     residentialAddress: {
       type: String,
     },
-    country: {
-      type: String,
-    },
     city: {
       type: String,
     },
