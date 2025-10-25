@@ -102,6 +102,14 @@ const options = {
         name: 'Receipts',
         description: 'PDF receipt and document generation',
       },
+      {
+        name: 'Wishlist',
+        description: 'User wishlist and saved products management',
+      },
+      {
+        name: 'Seller Discovery',
+        description: 'Popular sellers and location-based seller discovery',
+      },
     ],
   },
   apis: [
@@ -115,7 +123,9 @@ const options = {
     './routes/ratingRouter.js',
     './routes/flutterwaveRouter.js',
     './routes/walletRouter.js',
-    './routes/websocketRouter.js'
+    './routes/websocketRouter.js',
+    './routes/wishlistRouter.js',
+    './routes/sellerDiscoveryRouter.js'
   ], // Path to your API route files
 };
 

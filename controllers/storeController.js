@@ -1,6 +1,7 @@
 const Product = require("../models/productModel");
 const Store = require("../models/storeModel");
 const User = require("../models/userModel");
+const Order = require("../models/orderModel");
 const asyncHandler = require("express-async-handler");
 const validateMongodbId = require("../utils/validateMongodbId");
 const { Validate } = require("../Helpers/Validate");
@@ -354,6 +355,412 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
   }
 });
 
+/**
+ * @function getPopularSellers
+ * @description Get popular sellers based on sales, ratings, and activity
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {number} [req.query.limit=10] - Number of sellers to return
+ * @param {string} [req.query.category] - Filter by category
+ * @returns {Object} - Array of popular sellers with metrics
+ */
+const getPopularSellers = asyncHandler(async (req, res) => {
+  const { limit = 10, category } = req.query;
+  const limitNum = parseInt(limit);
+
+  try {
+    // Build aggregation pipeline for popular sellers
+    const pipeline = [
+      // Match stores that have products
+      {
+        $match: {
+          status: "active",
+          ...(category && { "products.category": category })
+        }
+      },
+      // Lookup products for each store
+      {
+        $lookup: {
+          from: "products",
+          localField: "_id",
+          foreignField: "store",
+          as: "products"
+        }
+      },
+      // Lookup orders for each store's products
+      {
+        $lookup: {
+          from: "orders",
+          let: { storeId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $in: ["$$storeId", "$products.store"]
+                },
+                status: { $in: ["delivered", "completed"] }
+              }
+            }
+          ],
+          as: "orders"
+        }
+      },
+      // Lookup ratings for each store
+      {
+        $lookup: {
+          from: "ratings",
+          localField: "_id",
+          foreignField: "store",
+          as: "ratings"
+        }
+      },
+      // Calculate metrics
+      {
+        $addFields: {
+          totalSales: {
+            $sum: {
+              $map: {
+                input: "$orders",
+                as: "order",
+                in: {
+                  $sum: {
+                    $map: {
+                      input: {
+                        $filter: {
+                          input: "$$order.products",
+                          as: "product",
+                          cond: { $eq: ["$$product.store", "$_id"] }
+                        }
+                      },
+                      as: "item",
+                      in: { $multiply: ["$$item.count", "$$item.price"] }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          totalOrders: { $size: "$orders" },
+          totalProducts: { $size: "$products" },
+          averageRating: {
+            $cond: {
+              if: { $gt: [{ $size: "$ratings" }, 0] },
+              then: { $avg: "$ratings.rating" },
+              else: 0
+            }
+          },
+          totalRatings: { $size: "$ratings" },
+          // Calculate popularity score
+          popularityScore: {
+            $add: [
+              { $multiply: ["$totalSales", 0.4] },
+              { $multiply: ["$totalOrders", 10] },
+              { $multiply: ["$averageRating", 20] },
+              { $multiply: ["$totalProducts", 0.1] }
+            ]
+          }
+        }
+      },
+      // Sort by popularity score
+      { $sort: { popularityScore: -1 } },
+      // Limit results
+      { $limit: limitNum },
+      // Project final fields
+      {
+        $project: {
+          _id: 1,
+          name: 1,
+          address: 1,
+          storeImage: 1,
+          storeMobile: 1,
+          storeEmail: 1,
+          status: 1,
+          totalSales: 1,
+          totalOrders: 1,
+          totalProducts: 1,
+          averageRating: { $round: ["$averageRating", 2] },
+          totalRatings: 1,
+          popularityScore: { $round: ["$popularityScore", 2] },
+          createdAt: 1
+        }
+      }
+    ];
+
+    const popularSellers = await Store.aggregate(pipeline);
+
+    res.json({
+      success: true,
+      message: "Popular sellers retrieved successfully",
+      data: {
+        sellers: popularSellers,
+        total: popularSellers.length,
+        limit: limitNum
+      }
+    });
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
+/**
+ * @function getNearbySellers
+ * @description Get sellers near a specific location
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {number} req.query.lat - Latitude of user location
+ * @param {number} req.query.lng - Longitude of user location
+ * @param {number} [req.query.radius=10] - Search radius in kilometers
+ * @param {number} [req.query.limit=20] - Number of sellers to return
+ * @returns {Object} - Array of nearby sellers with distances
+ */
+const getNearbySellers = asyncHandler(async (req, res) => {
+  const { lat, lng, radius = 10, limit = 20 } = req.query;
+  const radiusNum = parseFloat(radius);
+  const limitNum = parseInt(limit);
+
+  if (!lat || !lng) {
+    ThrowError("Latitude and longitude are required");
+  }
+
+  const userLat = parseFloat(lat);
+  const userLng = parseFloat(lng);
+
+  try {
+    // Build aggregation pipeline for nearby sellers
+    const pipeline = [
+      // Match active stores
+      {
+        $match: {
+          status: "active",
+          "address.coordinates": { $exists: true }
+        }
+      },
+      // Add distance calculation
+      {
+        $addFields: {
+          distance: {
+            $multiply: [
+              6371, // Earth's radius in kilometers
+              {
+                $acos: {
+                  $add: [
+                    {
+                      $multiply: [
+                        { $sin: { $multiply: [{ $divide: [userLat, 180] }, Math.PI] } },
+                        { $sin: { $multiply: [{ $divide: ["$address.coordinates.lat", 180] }, Math.PI] } }
+                      ]
+                    },
+                    {
+                      $multiply: [
+                        { $cos: { $multiply: [{ $divide: [userLat, 180] }, Math.PI] } },
+                        { $cos: { $multiply: [{ $divide: ["$address.coordinates.lat", 180] }, Math.PI] } },
+                        { $cos: { $multiply: [{ $subtract: [{ $divide: [userLng, 180] }, { $divide: ["$address.coordinates.lng", 180] }] }, Math.PI] } }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      // Filter by radius
+      {
+        $match: {
+          distance: { $lte: radiusNum }
+        }
+      },
+      // Lookup products count
+      {
+        $lookup: {
+          from: "products",
+          localField: "_id",
+          foreignField: "store",
+          as: "products"
+        }
+      },
+      // Lookup ratings
+      {
+        $lookup: {
+          from: "ratings",
+          localField: "_id",
+          foreignField: "store",
+          as: "ratings"
+        }
+      },
+      // Add metrics
+      {
+        $addFields: {
+          totalProducts: { $size: "$products" },
+          averageRating: {
+            $cond: {
+              if: { $gt: [{ $size: "$ratings" }, 0] },
+              then: { $avg: "$ratings.rating" },
+              else: 0
+            }
+          },
+          totalRatings: { $size: "$ratings" }
+        }
+      },
+      // Sort by distance
+      { $sort: { distance: 1 } },
+      // Limit results
+      { $limit: limitNum },
+      // Project final fields
+      {
+        $project: {
+          _id: 1,
+          name: 1,
+          address: 1,
+          storeImage: 1,
+          storeMobile: 1,
+          storeEmail: 1,
+          status: 1,
+          distance: { $round: ["$distance", 2] },
+          totalProducts: 1,
+          averageRating: { $round: ["$averageRating", 2] },
+          totalRatings: 1,
+          createdAt: 1
+        }
+      }
+    ];
+
+    const nearbySellers = await Store.aggregate(pipeline);
+
+    res.json({
+      success: true,
+      message: "Nearby sellers retrieved successfully",
+      data: {
+        sellers: nearbySellers,
+        total: nearbySellers.length,
+        userLocation: {
+          lat: userLat,
+          lng: userLng
+        },
+        searchRadius: radiusNum,
+        limit: limitNum
+      }
+    });
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
+/**
+ * @function getSellerStats
+ * @description Get detailed statistics for a specific seller
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.params.storeId - Store ID
+ * @returns {Object} - Detailed seller statistics
+ */
+const getSellerStats = asyncHandler(async (req, res) => {
+  const { storeId } = req.params;
+
+  if (!validateMongodbId(storeId)) {
+    ThrowError("Invalid store ID");
+  }
+
+  try {
+    const store = await Store.findById(storeId);
+    if (!store) {
+      ThrowError("Store not found");
+    }
+
+    // Get comprehensive stats
+    const [
+      products,
+      orders,
+      ratings,
+      recentOrders
+    ] = await Promise.all([
+      Product.find({ store: storeId }).countDocuments(),
+      Order.find({ 
+        "products.store": storeId,
+        status: { $in: ["delivered", "completed"] }
+      }).countDocuments(),
+      Store.aggregate([
+        { $match: { _id: store._id } },
+        {
+          $lookup: {
+            from: "ratings",
+            localField: "_id",
+            foreignField: "store",
+            as: "ratings"
+          }
+        },
+        {
+          $project: {
+            averageRating: { $avg: "$ratings.rating" },
+            totalRatings: { $size: "$ratings" },
+            ratingDistribution: {
+              $map: {
+                input: [1, 2, 3, 4, 5],
+                as: "rating",
+                in: {
+                  rating: "$$rating",
+                  count: {
+                    $size: {
+                      $filter: {
+                        input: "$ratings",
+                        as: "r",
+                        cond: { $eq: ["$$r.rating", "$$rating"] }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]),
+      Order.find({ 
+        "products.store": storeId 
+      })
+      .populate('orderedBy', 'fullName email mobile')
+      .sort({ createdAt: -1 })
+      .limit(5)
+    ]);
+
+    const stats = ratings[0] || { averageRating: 0, totalRatings: 0, ratingDistribution: [] };
+
+    res.json({
+      success: true,
+      message: "Seller statistics retrieved successfully",
+      data: {
+        store: {
+          _id: store._id,
+          name: store.name,
+          address: store.address,
+          storeImage: store.storeImage,
+          status: store.status,
+          createdAt: store.createdAt
+        },
+        statistics: {
+          totalProducts: products,
+          totalOrders: orders,
+          averageRating: Math.round(stats.averageRating * 100) / 100,
+          totalRatings: stats.totalRatings,
+          ratingDistribution: stats.ratingDistribution
+        },
+        recentOrders: recentOrders.map(order => ({
+          _id: order._id,
+          customer: {
+            name: order.orderedBy.fullName,
+            email: order.orderedBy.email,
+            mobile: order.orderedBy.mobile
+          },
+          status: order.status,
+          totalAmount: order.totalAmount,
+          createdAt: order.createdAt
+        }))
+      }
+    });
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
 module.exports = {
   createStore,
   getAStore,
@@ -362,4 +769,7 @@ module.exports = {
   getMyStore,
   updateBankDetails,
   updateOrderStatus,
+  getPopularSellers,
+  getNearbySellers,
+  getSellerStats,
 };

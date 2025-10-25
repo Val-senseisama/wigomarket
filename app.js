@@ -15,6 +15,8 @@ const ratingRouter = require("./routes/ratingRouter");
 const notificationRouter = require("./routes/notificationRouter");
 const flutterwaveRouter = require("./routes/flutterwaveRouter");
 const walletRouter = require("./routes/walletRouter");
+const wishlistRouter = require("./routes/wishlistRouter");
+const sellerDiscoveryRouter = require("./routes/sellerDiscoveryRouter");
 const { notFound, errorHandler } = require("./middleware/errorHandler");
 const { swaggerUi, specs } = require('./swagger');
 const LocationWebSocketServer = require('./websocket/locationWebSocket');
@@ -50,6 +52,8 @@ app.use("/api/rating", ratingRouter);
 app.use("/api/notifications", notificationRouter);
 app.use("/api/flutterwave", flutterwaveRouter);
 app.use("/api", walletRouter);
+app.use("/api/wishlist", wishlistRouter);
+app.use("/api/sellers", sellerDiscoveryRouter);
 
 app.use(notFound);
 app.use(errorHandler);
