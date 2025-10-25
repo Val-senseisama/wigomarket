@@ -20,7 +20,7 @@ const { authMiddleware, isSeller, isAdmin } = require("../middleware/authMiddlew
 const router = express.Router();
 /**
  * @swagger
- * /create-category:
+ * /api/product/create-category:
  *   post:
  *     summary: Create a new product category
  *     description: Create a new product category
@@ -58,7 +58,7 @@ const router = express.Router();
 router.post("/create-category", authMiddleware, isAdmin, createProductCategory);
 /**
  * @swagger
- * /update-category:
+ * /api/product/update-category:
  *   put:
  *     summary: Update an existing product category
  *     description: Update an existing product category
@@ -100,7 +100,7 @@ router.post("/create-category", authMiddleware, isAdmin, createProductCategory);
 router.put("/update-category", authMiddleware, isAdmin, updateProductCategory)
 /**
  * @swagger
- * /create-product:
+ * /api/product/create-product:
  *   post:
  *     summary: Create a new product
  *     description: Create a new product
@@ -177,7 +177,7 @@ router.put("/update-category", authMiddleware, isAdmin, updateProductCategory)
 router.post("/create-product", authMiddleware, isSeller, createProduct);
 /**
  * @swagger
- * /get-product:
+ * /api/product/get-product:
  *   get:
  *     summary: Get a single product by ID
  *     description: Get a single product by ID
@@ -232,7 +232,7 @@ router.post("/create-product", authMiddleware, isSeller, createProduct);
 router.get("/get-product", getAProduct);
 /**
  * @swagger
- * /update/:id:
+ * /api/product/update/:id:
  *   put:
  *     summary: Update an existing product
  *     description: Update an existing product
@@ -309,7 +309,7 @@ router.get("/get-product", getAProduct);
 router.put("/:id", updateProduct);
 /**
  * @swagger
- * /delete/:id:
+ * /api/product/delete/:id:
  *   delete:
  *     summary: Delete a product
  *     description: Delete a product
@@ -340,7 +340,7 @@ router.put("/:id", updateProduct);
 router.delete("/:id", authMiddleware, isSeller, deleteProduct);
 /**
  * @swagger
- * /get-products:
+ * /api/product/get-products:
  *   get:
  *     summary: Get paginated list of all products with store details
  *     description: Get paginated list of all products with store details
@@ -407,7 +407,7 @@ router.delete("/:id", authMiddleware, isSeller, deleteProduct);
 router.get("/get-products", getAllProducts);
 /**
  * @swagger
- * /products/category:
+ * /api/product/products/category:
  *   get:
  *     summary: Get products by category
  *     description: Get products by category
@@ -459,7 +459,7 @@ router.get("/get-products", getAllProducts);
 router.get("/products/category", getProductsByCategory); // Get products by category
 /**
  * @swagger
- * /category:
+ * /api/product/category:
  *   delete:
  *     summary: Delete a product category and its associated products
  *     description: Delete a product category and its associated products
@@ -495,7 +495,7 @@ router.get("/products/category", getProductsByCategory); // Get products by cate
 router.delete("/category", authMiddleware, isAdmin, deleteProductCategory); // Delete product category
 /**
  * @swagger
- * /categories:
+ * /api/product/categories:
  *   get:
  *     summary: Get all product categories
  *     description: Get all product categories
@@ -523,7 +523,7 @@ router.get("/categories", getProductCategories); // Get all product categories
 // New product endpoints with advanced features
 /**
  * @swagger
- * /products:
+ * /api/product/products:
  *   get:
  *     summary: Get products with advanced filtering and pagination
  *     description: Get products with advanced filtering, sorting, and pagination
@@ -634,7 +634,7 @@ router.get("/products", getProducts);
 
 /**
  * @swagger
- * /products/suggestions/personalized:
+ * /api/product/products/suggestions/personalized:
  *   get:
  *     summary: Get personalized product suggestions
  *     description: Get personalized product suggestions based on user's history
@@ -668,7 +668,7 @@ router.get("/products/suggestions/personalized", authMiddleware, getPersonalized
 
 /**
  * @swagger
- * /products/suggestions/trending:
+ * /api/product/products/suggestions/trending:
  *   get:
  *     summary: Get trending products
  *     description: Get trending products based on sales and views
@@ -707,7 +707,7 @@ router.get("/products/suggestions/trending", getTrendingProducts);
 
 /**
  * @swagger
- * /products/suggestions/category/{categoryId}:
+ * /api/product/products/suggestions/category/{categoryId}:
  *   get:
  *     summary: Get category-based product suggestions
  *     description: Get product suggestions for a specific category
@@ -757,7 +757,7 @@ router.get("/products/suggestions/category/:categoryId", getCategorySuggestions)
 
 /**
  * @swagger
- * /products/track-view/{id}:
+ * /api/product/products/track-view/{id}:
  *   post:
  *     summary: Track product view for analytics
  *     description: Track product view for analytics

@@ -16,7 +16,7 @@ const router = express.Router();
 
 /**
  * @swagger
- * /notifications:
+ * /api/notifications/notifications:
  *   get:
  *     summary: Get user notifications
  *     description: Get paginated notifications for the authenticated user
@@ -74,7 +74,7 @@ router.get("/", authMiddleware, getNotifications);
 
 /**
  * @swagger
- * /notifications/read:
+ * /api/notifications/notifications/read:
  *   post:
  *     summary: Mark notification as read
  *     description: Mark a specific notification as read
@@ -104,7 +104,7 @@ router.post("/read", authMiddleware, markAsRead);
 
 /**
  * @swagger
- * /notifications/read-all:
+ * /api/notifications/notifications/read-all:
  *   post:
  *     summary: Mark all notifications as read
  *     description: Mark all notifications as read for the authenticated user
@@ -120,7 +120,7 @@ router.post("/read-all", authMiddleware, markAllAsRead);
 
 /**
  * @swagger
- * /notifications/{notificationId}:
+ * /api/notifications/notifications/{notificationId}:
  *   delete:
  *     summary: Delete notification
  *     description: Delete a specific notification
@@ -145,7 +145,7 @@ router.delete("/:notificationId", authMiddleware, deleteNotification);
 
 /**
  * @swagger
- * /notifications/unread-count:
+ * /api/notifications/notifications/unread-count:
  *   get:
  *     summary: Get unread notification count
  *     description: Get count of unread notifications for the authenticated user
@@ -173,7 +173,7 @@ router.get("/unread-count", authMiddleware, getUnreadCount);
 
 /**
  * @swagger
- * /notifications/preferences:
+ * /api/notifications/notifications/preferences:
  *   get:
  *     summary: Get notification preferences
  *     description: Get user's notification preferences
@@ -274,7 +274,7 @@ router.get("/preferences", authMiddleware, getNotificationPreferences);
 
 /**
  * @swagger
- * /notifications/preferences:
+ * /api/notifications/notifications/preferences:
  *   put:
  *     summary: Update notification preferences
  *     description: Update user's notification preferences
@@ -377,7 +377,7 @@ router.put("/preferences", authMiddleware, updateNotificationPreferences);
 
 /**
  * @swagger
- * /notifications/fcm/register:
+ * /api/notifications/notifications/fcm/register:
  *   post:
  *     summary: Register FCM token
  *     description: Register FCM token for push notifications
@@ -418,7 +418,7 @@ router.post("/fcm/register", authMiddleware, registerFCMToken);
 
 /**
  * @swagger
- * /notifications/fcm/unregister:
+ * /api/notifications/notifications/fcm/unregister:
  *   post:
  *     summary: Unregister FCM token
  *     description: Unregister FCM token for push notifications
@@ -450,7 +450,7 @@ router.post("/fcm/unregister", authMiddleware, unregisterFCMToken);
 
 /**
  * @swagger
- * /notifications/test:
+ * /api/notifications/notifications/test:
  *   post:
  *     summary: Send test notification
  *     description: Send a test notification to the current user

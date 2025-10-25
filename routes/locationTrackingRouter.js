@@ -11,7 +11,7 @@ const router = express.Router();
 
 /**
  * @swagger
- * /location/update:
+ * /api/location/location/update:
  *   post:
  *     summary: Update delivery agent location
  *     description: Update current location of delivery agent
@@ -88,7 +88,7 @@ router.post("/update", authMiddleware, isDispatch, updateLocation);
 
 /**
  * @swagger
- * /location/route:
+ * /api/location/location/route:
  *   post:
  *     summary: Get optimized delivery route
  *     description: Get optimized route for delivery using Here Maps
@@ -158,7 +158,7 @@ router.post("/route", authMiddleware, isDispatch, getRoute);
 
 /**
  * @swagger
- * /location/current/{orderId}:
+ * /api/location/location/current/{orderId}:
  *   get:
  *     summary: Get current location
  *     description: Get current location of delivery agent for an order
@@ -209,7 +209,7 @@ router.get("/current/:orderId", authMiddleware, getCurrentLocation);
 
 /**
  * @swagger
- * /location/history/{orderId}:
+ * /api/location/location/history/{orderId}:
  *   get:
  *     summary: Get tracking history
  *     description: Get location tracking history for an order
@@ -278,7 +278,7 @@ router.get("/history/:orderId", authMiddleware, getTrackingHistory);
 
 /**
  * @swagger
- * /location/status:
+ * /api/location/location/status:
  *   put:
  *     summary: Update delivery status
  *     description: Update delivery status and location

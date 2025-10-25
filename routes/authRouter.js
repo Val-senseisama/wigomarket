@@ -31,7 +31,7 @@ const { commissionHandler } = require("../controllers/paymentController");
 const router = express.Router();
 /**
  * @swagger
- * /register:
+ * /api/user/register:
  *   post:
  *     summary: Register a new user account
  *     description: Register a new user account
@@ -99,7 +99,7 @@ router.post("/register", createUser);
 
 /**
  * @swagger
- * /register/buyer:
+ * /api/user/register/buyer:
  *   post:
  *     summary: Register as a buyer
  *     description: Create a new buyer account with email verification
@@ -192,7 +192,7 @@ router.post("/register/buyer", createBuyer);
 
 /**
  * @swagger
- * /register/seller:
+ * /api/user/register/seller:
  *   post:
  *     summary: Register as a seller
  *     description: Create a new seller account with email verification
@@ -285,7 +285,7 @@ router.post("/register/seller", createSeller);
 
 /**
  * @swagger
- * /register/delivery:
+ * /api/user/register/delivery:
  *   post:
  *     summary: Register as a delivery agent
  *     description: Create a new delivery agent account with email verification
@@ -429,7 +429,7 @@ router.post("/register/delivery", createDeliveryAgent);
 
 /**
  * @swagger
- * /forgot-password-token:
+ * /api/user/forgot-password-token:
  *   post:
  *     summary: Generate password reset token and send to user's email
  *     description: Generate password reset token and send to user's email
@@ -460,7 +460,7 @@ router.post("/register/delivery", createDeliveryAgent);
 router.post("/forgot-password-token", forgotPasswordToken);
 /**
  * @swagger
- * /reset-password:
+ * /api/user/reset-password:
  *   put:
  *     summary: Reset user's password using reset token
  *     description: Reset user's password using reset token
@@ -506,7 +506,7 @@ router.post("/forgot-password-token", forgotPasswordToken);
 router.put("/reset-password", resetPassword);
 /**
  * @swagger
- * /login:
+ * /api/user/login:
  *   post:
  *     summary: Authenticate user and generate tokens
  *     description: Authenticate user and generate tokens
@@ -554,7 +554,7 @@ router.put("/reset-password", resetPassword);
 router.post("/login", loginUser);
 /**
  * @swagger
- * /all-users:
+ * /api/user/all-users:
  *   get:
  *     summary: Get all active users (excluding pending users)
  *     description: Get all active users (excluding pending users)
@@ -590,7 +590,7 @@ router.post("/login", loginUser);
 router.get("/all-users", getAllUsers);
 /**
  * @swagger
- * /status-users:
+ * /api/user/status-users:
  *   get:
  *     summary: Get users filtered by status
  *     description: Get users filtered by status
@@ -641,7 +641,7 @@ router.get("/all-users", getAllUsers);
 router.get("/status-users", authMiddleware, isAdmin, getUsersByStatus);
 /**
  * @swagger
- * /refresh:
+ * /api/user/refresh:
  *   get:
  *     summary: Get new access token using refresh token
  *     description: Get new access token using refresh token
@@ -663,7 +663,7 @@ router.get("/status-users", authMiddleware, isAdmin, getUsersByStatus);
 router.get("/refresh", handleRefreshToken);
 /**
  * @swagger
- * /logout:
+ * /api/user/logout:
  *   get:
  *     summary: Logout user by clearing refresh token cookie and updating user's refresh token
  *     description: Logout user by clearing refresh token cookie and updating user's refresh token
@@ -677,10 +677,10 @@ router.get("/refresh", handleRefreshToken);
  *       400:
  *         description: Invalid refresh token
  */
-router.get("logout", logoutUser);
+router.get("/logout", logoutUser);
 /**
  * @swagger
- * /get-cart:
+ * /api/user/get-cart:
  *   get:
  *     summary: Get user's cart with populated product details
  *     description: Get user's cart with populated product details
@@ -740,7 +740,7 @@ router.get("logout", logoutUser);
 router.get("/get-cart", authMiddleware, getUserCart);
 /**
  * @swagger
- * /:id:
+ * /api/user/:id:
  *   get:
  *     summary: Get user details by ID
  *     description: Get user details by ID
@@ -785,7 +785,7 @@ router.get("/get-cart", authMiddleware, getUserCart);
 router.get("/:id", authMiddleware, isAdmin, getAUser);
 /**
  * @swagger
- * /edit-user:
+ * /api/user/edit-user:
  *   put:
  *     summary: Update user profile information
  *     description: Update user profile information
@@ -851,7 +851,7 @@ router.get("/:id", authMiddleware, isAdmin, getAUser);
 router.put("/edit-user", authMiddleware, updateAUser);
 /**
  * @swagger
- * /pay:
+ * /api/user/pay:
  *   post:
  *     summary: Handle payment processing
  *     description: Handle payment processing
@@ -878,13 +878,12 @@ router.post("/pay", authMiddleware, commissionHandler);
  * @description Delete user by ID
  * @access Private, Admin only
  * @param {string} req.params.id - User ID to delete (required)
- * @returns {Object} - Payment processing result
- * @throws {Error} - Throws error if payment processing fails
+ * @returns {Object} - Deletion result
+ * @throws {Error} - Throws error if deletion fails
  */
-router.post("/pay", authMiddleware, commissionHandler);
 /**
  * @swagger
- * /delete/:id:
+ * /api/user/delete/:id:
  *   delete:
  *     summary: Delete user by ID
  *     description: Delete user by ID
@@ -917,7 +916,7 @@ router.post("/pay", authMiddleware, commissionHandler);
 router.delete("/:id", deleteAUser);
 /**
  * @swagger
- * /block-user/:id:
+ * /api/user/block-user/:id:
  *   put:
  *     summary: Block user by setting their isBlocked status to true
  *     description: Block user by setting their isBlocked status to true
@@ -960,7 +959,7 @@ router.delete("/:id", deleteAUser);
 router.put("/block-user/:id", authMiddleware, isAdmin, blockUser);
 /**
  * @swagger
- * /unblock-user/:id:
+ * /api/user/unblock-user/:id:
  *   put:
  *     summary: Unblock user by setting their isBlocked status to false
  *     description: Unblock user by setting their isBlocked status to false
@@ -995,15 +994,15 @@ router.put("/block-user/:id", authMiddleware, isAdmin, blockUser);
 *                   type: string
 *                 role:
 *                   type: string
-*                 isBlocked:
-*                   type: boolean
-*       400:
-*         description: Invalid MongoDB ID or database operation fails
-*/
+ *                 isBlocked:
+ *                   type: boolean
+ *       400:
+ *         description: Invalid MongoDB ID or database operation fails
+ */
 router.put("/unblock-user/:id", authMiddleware, isAdmin, unblockUser);
 /**
  * @swagger
- * /get-cart:
+ * /api/user/get-cart:
  *   get:
  *     summary: Get user's cart with populated product details
  *     description: Get user's cart with populated product details
@@ -1063,7 +1062,7 @@ router.put("/unblock-user/:id", authMiddleware, isAdmin, unblockUser);
 router.get("/get-cart", authMiddleware, getUserCart);
 /**
  * @swagger
- * /update-cart:
+ * /api/user/update-cart:
  *   put:
  *     summary: Update product quantity in user's cart
  *     description: Update product quantity in user's cart
@@ -1150,7 +1149,7 @@ router.get("/get-cart", authMiddleware, getUserCart);
 router.put("/update-cart", authMiddleware, updateCart);
 /**
  * @swagger
- * /add-cart:
+ * /api/user/add-cart:
  *   post:
  *     summary: Add product to user's cart
  *     description: Add product to user's cart
@@ -1222,7 +1221,7 @@ router.put("/update-cart", authMiddleware, updateCart);
 router.post("/add-cart", authMiddleware, addToCart2);
 /**
  * @swagger
- * /empty-cart:
+ * /api/user/empty-cart:
  *   post:
  *     summary: Empty user's cart by removing it from the database
  *     description: Empty user's cart by removing it from the database
@@ -1282,7 +1281,7 @@ router.post("/add-cart", authMiddleware, addToCart2);
 router.post("/empty-cart", authMiddleware, emptyCart);
 /**
  * @swagger
- * /create-order:
+ * /api/user/create-order:
  *   post:
  *     summary: Create a new order for the user
  *     description: Create a new order for the user
@@ -1362,7 +1361,7 @@ router.post("/empty-cart", authMiddleware, emptyCart);
 router.post("/checkout", authMiddleware, checkoutCart);
 /**
  * @swagger
- * /verify:
+ * /api/user/verify:
  *   post:
  *     summary: Verify user's email verification code
  *     description: Verify user's email verification code
@@ -1401,7 +1400,7 @@ router.post("/verify", verifyOtp);
 
 /**
  * @swagger
- * /me:
+ * /api/user/me:
  *   get:
  *     summary: Get current authenticated user's information
  *     description: Get current authenticated user's information with role-based data
@@ -1483,7 +1482,7 @@ router.get("/me", authMiddleware, getCurrentUser);
 
 /**
  * @swagger
- * /change-role:
+ * /api/user/change-role:
  *   put:
  *     summary: Change user's active role
  *     description: Change the user's currently active role to one of their assigned roles
@@ -1565,7 +1564,7 @@ router.put("/change-role", authMiddleware, changeActiveRole);
 
 /**
  * @swagger
- * /google-auth:
+ * /api/user/google-auth:
  *   post:
  *     summary: Authenticate with Google using Firebase ID token
  *     description: Authenticate user with Google using Firebase ID token verification

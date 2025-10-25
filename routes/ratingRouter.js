@@ -12,7 +12,7 @@ const router = express.Router();
 
 /**
  * @swagger
- * /rating:
+ * /api/rating/rating:
  *   post:
  *     summary: Create rating and review
  *     description: Create a rating and review for a delivery agent
@@ -92,7 +92,7 @@ router.post("/", authMiddleware, createRating);
 
 /**
  * @swagger
- * /rating/delivery-agent/{deliveryAgentId}:
+ * /api/rating/rating/delivery-agent/{deliveryAgentId}:
  *   get:
  *     summary: Get delivery agent ratings
  *     description: Get ratings for a specific delivery agent
@@ -161,7 +161,7 @@ router.get("/delivery-agent/:deliveryAgentId", getDeliveryAgentRatings);
 
 /**
  * @swagger
- * /rating/my-ratings:
+ * /api/rating/rating/my-ratings:
  *   get:
  *     summary: Get my ratings
  *     description: Get ratings given by the authenticated user
@@ -208,7 +208,7 @@ router.get("/my-ratings", authMiddleware, getMyRatings);
 
 /**
  * @swagger
- * /rating/{ratingId}:
+ * /api/rating/rating/{ratingId}:
  *   put:
  *     summary: Update rating
  *     description: Update an existing rating (within 24 hours)
@@ -272,7 +272,7 @@ router.put("/:ratingId", authMiddleware, updateRating);
 
 /**
  * @swagger
- * /rating/{ratingId}:
+ * /api/rating/rating/{ratingId}:
  *   delete:
  *     summary: Delete rating
  *     description: Delete a rating
@@ -299,7 +299,7 @@ router.delete("/:ratingId", authMiddleware, deleteRating);
 
 /**
  * @swagger
- * /rating/report:
+ * /api/rating/rating/report:
  *   post:
  *     summary: Report inappropriate rating
  *     description: Report an inappropriate rating

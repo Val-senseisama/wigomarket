@@ -25,7 +25,7 @@ const router = express.Router();
 
 /**
  * @swagger
- * /delivery-agent/orders/available:
+ * /api/delivery-agent/delivery-agent/orders/available:
  *   get:
  *     summary: Get orders available for delivery agent assignment
  *     description: Get orders that are pending assignment to delivery agents
@@ -115,7 +115,7 @@ router.get("/orders/available", authMiddleware, isDispatch, getAvailableOrders);
 
 /**
  * @swagger
- * /delivery-agent/orders/select:
+ * /api/delivery-agent/delivery-agent/orders/select:
  *   post:
  *     summary: Select an order for delivery
  *     description: Delivery agent selects an available order for delivery
@@ -166,7 +166,7 @@ router.post("/orders/select", authMiddleware, isDispatch, selectOrder);
 
 /**
  * @swagger
- * /delivery-agent/orders/status:
+ * /api/delivery-agent/delivery-agent/orders/status:
  *   put:
  *     summary: Update delivery status
  *     description: Update the delivery status of an assigned order
@@ -219,7 +219,7 @@ router.put("/orders/status", authMiddleware, isDispatch, updateDeliveryStatus);
 
 /**
  * @swagger
- * /delivery-agent/orders/my-deliveries:
+ * /api/delivery-agent/delivery-agent/orders/my-deliveries:
  *   get:
  *     summary: Get my deliveries
  *     description: Get orders assigned to the current delivery agent
@@ -272,7 +272,7 @@ router.get("/orders/my-deliveries", authMiddleware, isDispatch, getMyDeliveries)
 
 /**
  * @swagger
- * /delivery-agent/availability:
+ * /api/delivery-agent/delivery-agent/availability:
  *   put:
  *     summary: Update availability status
  *     description: Update delivery agent's availability status
@@ -325,7 +325,7 @@ router.put("/availability", authMiddleware, isDispatch, updateAvailability);
 // Dispatch Profile Management Routes
 /**
  * @swagger
- * /delivery-agent/profile:
+ * /api/delivery-agent/delivery-agent/profile:
  *   post:
  *     summary: Create dispatch profile
  *     description: Create a dispatch profile for delivery agent
@@ -421,7 +421,7 @@ router.post("/profile", authMiddleware, isDispatch, createDispatchProfile);
 
 /**
  * @swagger
- * /delivery-agent/profile:
+ * /api/delivery-agent/delivery-agent/profile:
  *   get:
  *     summary: Get dispatch profile
  *     description: Get current user's dispatch profile
@@ -438,7 +438,7 @@ router.get("/profile", authMiddleware, isDispatch, getDispatchProfile);
 
 /**
  * @swagger
- * /delivery-agent/profile:
+ * /api/delivery-agent/delivery-agent/profile:
  *   put:
  *     summary: Update dispatch profile
  *     description: Update current user's dispatch profile
@@ -477,7 +477,7 @@ router.put("/profile", authMiddleware, isDispatch, updateDispatchProfile);
 // Earnings and Analytics Routes
 /**
  * @swagger
- * /delivery-agent/earnings:
+ * /api/delivery-agent/delivery-agent/earnings:
  *   get:
  *     summary: Get earnings and analytics
  *     description: Get delivery agent earnings and analytics
@@ -502,7 +502,7 @@ router.get("/earnings", authMiddleware, isDispatch, getEarnings);
 
 /**
  * @swagger
- * /delivery-agent/dashboard:
+ * /api/delivery-agent/delivery-agent/dashboard:
  *   get:
  *     summary: Get dashboard statistics
  *     description: Get dashboard statistics for delivery agent
@@ -520,7 +520,7 @@ router.get("/dashboard", authMiddleware, isDispatch, getDashboardStats);
 // Notification Routes
 /**
  * @swagger
- * /delivery-agent/notifications:
+ * /api/delivery-agent/delivery-agent/notifications:
  *   get:
  *     summary: Get notifications
  *     description: Get notifications for delivery agent
@@ -559,7 +559,7 @@ router.get("/notifications", authMiddleware, isDispatch, getNotifications);
 
 /**
  * @swagger
- * /delivery-agent/notifications/read:
+ * /api/delivery-agent/delivery-agent/notifications/read:
  *   post:
  *     summary: Mark notification as read
  *     description: Mark a specific notification as read
@@ -588,7 +588,7 @@ router.post("/notifications/read", authMiddleware, isDispatch, markAsRead);
 
 /**
  * @swagger
- * /delivery-agent/notifications/read-all:
+ * /api/delivery-agent/delivery-agent/notifications/read-all:
  *   post:
  *     summary: Mark all notifications as read
  *     description: Mark all notifications as read for the delivery agent
@@ -603,7 +603,7 @@ router.post("/notifications/read-all", authMiddleware, isDispatch, markAllAsRead
 
 /**
  * @swagger
- * /delivery-agent/notifications/{notificationId}:
+ * /api/delivery-agent/delivery-agent/notifications/{notificationId}:
  *   delete:
  *     summary: Delete notification
  *     description: Delete a specific notification
@@ -627,7 +627,7 @@ router.delete("/notifications/:notificationId", authMiddleware, isDispatch, dele
 
 /**
  * @swagger
- * /delivery-agent/notifications/unread-count:
+ * /api/delivery-agent/delivery-agent/notifications/unread-count:
  *   get:
  *     summary: Get unread notification count
  *     description: Get count of unread notifications for delivery agent

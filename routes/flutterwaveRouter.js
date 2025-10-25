@@ -11,7 +11,7 @@ const router = express.Router();
 
 /**
  * @swagger
- * /flutterwave/banks:
+ * /api/flutterwave/flutterwave/banks:
  *   get:
  *     summary: Get list of banks
  *     description: Get list of banks from Flutterwave with caching
@@ -61,7 +61,7 @@ router.get("/banks", getBanksList);
 
 /**
  * @swagger
- * /flutterwave/banks/{bankCode}:
+ * /api/flutterwave/flutterwave/banks/{bankCode}:
  *   get:
  *     summary: Get bank details by code
  *     description: Get specific bank details by bank code
@@ -109,7 +109,7 @@ router.get("/banks/:bankCode", getBankByCode);
 
 /**
  * @swagger
- * /flutterwave/accounts/resolve:
+ * /api/flutterwave/flutterwave/accounts/resolve:
  *   post:
  *     summary: Resolve account name
  *     description: Resolve account name from bank account number and bank code
@@ -170,7 +170,7 @@ router.post("/accounts/resolve", resolveAccountName);
 
 /**
  * @swagger
- * /flutterwave/cache/clear:
+ * /api/flutterwave/flutterwave/cache/clear:
  *   post:
  *     summary: Clear banks cache
  *     description: Clear all banks and account resolution cache (Admin only)
@@ -210,7 +210,7 @@ router.post("/cache/clear", authMiddleware, isAdmin, clearBanksCache);
 
 /**
  * @swagger
- * /flutterwave/cache/stats:
+ * /api/flutterwave/flutterwave/cache/stats:
  *   get:
  *     summary: Get cache statistics
  *     description: Get cache statistics for banks and account resolution (Admin only)

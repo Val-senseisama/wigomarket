@@ -12,7 +12,7 @@ const { authMiddleware, isSeller } = require("../middleware/authMiddleware");
 const router = express.Router();
 /**
  * @swagger
- * /create:
+ * /api/store/create:
  *   post:
  *     summary: Create a new store for a user
  *     description: Create a new store for a user
@@ -69,7 +69,7 @@ const router = express.Router();
 router.post("/create", authMiddleware, createStore);
 /**
  * @swagger
- * /my-store:
+ * /api/store/my-store:
  *   get:
  *     summary: Get the current user's store
  *     description: Get the current user's store
@@ -103,7 +103,7 @@ router.post("/create", authMiddleware, createStore);
 router.get("/my-store", authMiddleware, isSeller, getMyStore);
 /**
  * @swagger
- * /bank-details:
+ * /api/store/bank-details:
  *   post:
  *     summary: Update store's bank details and create subaccount
  *     description: Update store's bank details and create subaccount
@@ -170,7 +170,7 @@ router.get("/my-store", authMiddleware, isSeller, getMyStore);
 router.post("/bank-details", authMiddleware, isSeller, updateBankDetails);
 /**
  * @swagger
- * /all:
+ * /api/store/all:
  *   get:
  *     summary: Get all stores with selected fields
  *     description: Get all stores with selected fields

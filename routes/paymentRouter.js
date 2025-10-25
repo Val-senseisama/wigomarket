@@ -14,7 +14,7 @@ const router = express.Router();
 
 /**
  * @swagger
- * /payment/initialize:
+ * /api/payment/payment/initialize:
  *   post:
  *     summary: Initialize payment with Flutterwave
  *     description: Initialize payment for an order using Flutterwave
@@ -66,7 +66,7 @@ router.post("/initialize", authMiddleware, initializePayment);
 
 /**
  * @swagger
- * /payment/verify:
+ * /api/payment/payment/verify:
  *   post:
  *     summary: Verify payment status
  *     description: Verify payment status with Flutterwave after payment
@@ -126,7 +126,7 @@ router.post("/verify", verifyPayment);
 
 /**
  * @swagger
- * /payment/status/{orderId}:
+ * /api/payment/payment/status/{orderId}:
  *   get:
  *     summary: Get payment status
  *     description: Get payment status for an order
@@ -169,7 +169,7 @@ router.get("/status/:orderId", authMiddleware, getPaymentStatus);
 
 /**
  * @swagger
- * /payment/refund:
+ * /api/payment/payment/refund:
  *   post:
  *     summary: Process refund
  *     description: Process refund for an order (Admin only)
@@ -225,7 +225,7 @@ router.post("/refund", authMiddleware, isAdmin, refundPayment);
 
 /**
  * @swagger
- * /payment/commissions:
+ * /api/payment/payment/commissions:
  *   get:
  *     summary: Get commission breakdown
  *     description: Get commission breakdown for stores and platform
@@ -261,7 +261,7 @@ router.get("/commissions", authMiddleware, commissionHandler);
 
 /**
  * @swagger
- * /payment/receipt/{orderId}:
+ * /api/payment/payment/receipt/{orderId}:
  *   get:
  *     summary: Generate payment receipt PDF
  *     description: Generate and download PDF receipt for a completed payment
@@ -343,7 +343,7 @@ router.get("/receipt/:orderId", authMiddleware, generatePaymentReceipt);
 
 /**
  * @swagger
- * /payment/statement:
+ * /api/payment/payment/statement:
  *   get:
  *     summary: Generate transaction statement PDF
  *     description: Generate and download PDF statement of user transactions
@@ -407,7 +407,7 @@ router.get("/statement", authMiddleware, generateTransactionStatement);
 
 /**
  * @swagger
- * /payment/vat-report:
+ * /api/payment/payment/vat-report:
  *   get:
  *     summary: Generate VAT report PDF (Admin only)
  *     description: Generate and download PDF VAT report for admin users
