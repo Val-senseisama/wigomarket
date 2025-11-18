@@ -8,11 +8,11 @@ const jwt = require("jsonwebtoken");
 const sendEmail = require("../controllers/emailController");
 const crypto = require("crypto");
 const Cart = require("../models/cartModel");
+const Validate = require("../Helpers/Validate");
 const Order = require("../models/orderModel");
 const Product = require("../models/productModel");
 const Store = require("../models/storeModel");
 const uniqid = require("uniqid");
-const { Validate } = require("../Helpers/Validate");
 const { ThrowError, MakeID } = require("../Helpers/Helpers");
 const { verificationCodeTemplate, welcome, forgotPasswordTemplate } = require("../templates/Emails");
 // ==================== BUYER SIGNUP ====================
@@ -32,6 +32,7 @@ const { verificationCodeTemplate, welcome, forgotPasswordTemplate } = require(".
  * @throws {Error} - Throws error if validation fails or user already exists
  */
 const createBuyer = asyncHandler(async (req, res) => {
+  console.log(req.body);
   const email = req.body.email;
   let number = req.body.mobile;
   const password = req.body.password;
@@ -287,6 +288,7 @@ const createSeller = asyncHandler(async (req, res) => {
  * @throws {Error} - Throws error if validation fails or user already exists
  */
 const createDeliveryAgent = asyncHandler(async (req, res) => {
+  console.log(req.body);
   const email = req.body.email;
   let number = req.body.mobile;
   const password = req.body.password;
@@ -296,7 +298,7 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
   const state = req.body.state;
   const nextOfKin = req.body.nextOfKin;
   const modeOfTransport = req.body.modeOfTransport;
-
+  try {
   // Validate required fields
   if (!Validate.email(email)) {
     ThrowError("Invalid Email");
@@ -360,7 +362,7 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
       code
     };
     
-    try {
+   
       // Create new user
       const createUser = await User.create(newUser);
       const createCode = await Token.create(token);
@@ -399,13 +401,15 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
           verificationCode: code // For testing purposes
         }
       });
-    } catch (error) {
+    }else {
+      ThrowError("User Already Exists");
+    }
+    
+   } catch (error) {
       console.log(error);
       throw new Error(error);
     }
-  } else {
-    ThrowError("User Already Exists");
-  }
+  
 });
 
 // ==================== LEGACY CREATE USER (for backward compatibility) ====================
