@@ -34,7 +34,7 @@ var userSchema = new mongoose.Schema(
       enum: ["seller", "buyer", "dispatch", "admin"],
       default: "buyer", // Default active role
     },
-    
+
     password: {
       type: String,
       required: true,
@@ -86,17 +86,8 @@ var userSchema = new mongoose.Schema(
       name: {
         type: String,
       },
-      relationship: {
-        type: String,
-        enum: ["spouse", "parent", "sibling", "child", "other"],
-      },
+
       mobile: {
-        type: String,
-      },
-      email: {
-        type: String,
-      },
-      address: {
         type: String,
       },
     },
@@ -109,29 +100,31 @@ var userSchema = new mongoose.Schema(
       default: 0,
     },
     // FCM tokens for push notifications
-    fcmTokens: [{
-      token: {
-        type: String,
-        required: true
+    fcmTokens: [
+      {
+        token: {
+          type: String,
+          required: true,
+        },
+        deviceType: {
+          type: String,
+          enum: ["android", "ios", "web"],
+          required: true,
+        },
+        deviceId: {
+          type: String,
+          required: true,
+        },
+        lastUsed: {
+          type: Date,
+          default: Date.now,
+        },
+        isActive: {
+          type: Boolean,
+          default: true,
+        },
       },
-      deviceType: {
-        type: String,
-        enum: ["android", "ios", "web"],
-        required: true
-      },
-      deviceId: {
-        type: String,
-        required: true
-      },
-      lastUsed: {
-        type: Date,
-        default: Date.now
-      },
-      isActive: {
-        type: Boolean,
-        default: true
-      }
-    }],
+    ],
     passwordChangedAt: Date,
     passwordRefreshToken: String,
     passwordResetExpiresAt: Date,

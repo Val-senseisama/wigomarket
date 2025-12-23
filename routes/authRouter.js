@@ -338,31 +338,16 @@ router.post("/register/seller", createSeller);
  *                 type: object
  *                 required:
  *                   - name
- *                   - relationship
  *                   - mobile
  *                 properties:
  *                   name:
  *                     type: string
  *                     description: Next of kin's full name
  *                     example: "Sarah Johnson"
- *                   relationship:
- *                     type: string
- *                     enum: [spouse, parent, sibling, child, other]
- *                     description: Relationship to the delivery agent
- *                     example: "spouse"
  *                   mobile:
  *                     type: string
  *                     description: Next of kin's mobile number
  *                     example: "+2348098765432"
- *                   email:
- *                     type: string
- *                     format: email
- *                     description: Next of kin's email (optional)
- *                     example: "sarah@example.com"
- *                   address:
- *                     type: string
- *                     description: Next of kin's address (optional)
- *                     example: "123 Family Street, Lagos"
  *               modeOfTransport:
  *                 type: string
  *                 enum: [bike, motorcycle, car, van, truck, bicycle]
@@ -409,11 +394,7 @@ router.post("/register/seller", createSeller);
  *                           properties:
  *                             name:
  *                               type: string
- *                             relationship:
- *                               type: string
  *                             mobile:
- *                               type: string
- *                             email:
  *                               type: string
  *                             address:
  *                               type: string
@@ -939,23 +920,23 @@ router.delete("/:id", deleteAUser);
  *             schema:
  *               type: object
  *               properties:
-*                 _id:
-*                   type: string
-*                 firstname:
-*                   type: string
-*                 lastname:
-*                   type: string
-*                 email:
-*                   type: string
-*                 mobile:
-*                   type: string
-*                 role:
-*                   type: string
-*                 isBlocked:
-*                   type: boolean
-*       400:
-*         description: Invalid MongoDB ID or database operation fails
-*/
+ *                 _id:
+ *                   type: string
+ *                 firstname:
+ *                   type: string
+ *                 lastname:
+ *                   type: string
+ *                 email:
+ *                   type: string
+ *                 mobile:
+ *                   type: string
+ *                 role:
+ *                   type: string
+ *                 isBlocked:
+ *                   type: boolean
+ *       400:
+ *         description: Invalid MongoDB ID or database operation fails
+ */
 router.put("/block-user/:id", authMiddleware, isAdmin, blockUser);
 /**
  * @swagger
@@ -982,18 +963,18 @@ router.put("/block-user/:id", authMiddleware, isAdmin, blockUser);
  *             schema:
  *               type: object
  *               properties:
-*                 _id:
-*                   type: string
-*                 firstname:
-*                   type: string
-*                 lastname:
-*                   type: string
-*                 email:
-*                   type: string
-*                 mobile:
-*                   type: string
-*                 role:
-*                   type: string
+ *                 _id:
+ *                   type: string
+ *                 firstname:
+ *                   type: string
+ *                 lastname:
+ *                   type: string
+ *                 email:
+ *                   type: string
+ *                 mobile:
+ *                   type: string
+ *                 role:
+ *                   type: string
  *                 isBlocked:
  *                   type: boolean
  *       400:
@@ -1029,36 +1010,36 @@ router.put("/unblock-user/:id", authMiddleware, isAdmin, unblockUser);
  *                         type: object
  *                         properties:
  *                           _id:
-*                             type: string
-*                           title:
-*                             type: string
-*                           listedPrice:
-*                             type: number
-*                           store:
-*                             type: object
-*                             properties:
-*                               _id:
-*                                 type: string
-*                               bankDetails:
-*                                 type: object
-*                               address:
-*                                 type: object
-*                               owner:
-*                                 type: object
-*                                 properties:
-*                                   mobile:
-*                                     type: string
-*                                   email:
-*                                     type: string
-*                       count:
-*                         type: number
-*                       price:
-*                         type: number
-*                 cartTotal:
-*                   type: number
-*       400:
-*         description: Cart retrieval fails
-*/
+ *                             type: string
+ *                           title:
+ *                             type: string
+ *                           listedPrice:
+ *                             type: number
+ *                           store:
+ *                             type: object
+ *                             properties:
+ *                               _id:
+ *                                 type: string
+ *                               bankDetails:
+ *                                 type: object
+ *                               address:
+ *                                 type: object
+ *                               owner:
+ *                                 type: object
+ *                                 properties:
+ *                                   mobile:
+ *                                     type: string
+ *                                   email:
+ *                                     type: string
+ *                       count:
+ *                         type: number
+ *                       price:
+ *                         type: number
+ *                 cartTotal:
+ *                   type: number
+ *       400:
+ *         description: Cart retrieval fails
+ */
 router.get("/get-cart", authMiddleware, getUserCart);
 /**
  * @swagger
@@ -1131,21 +1112,21 @@ router.get("/get-cart", authMiddleware, getUserCart);
  *                               address:
  *                                 type: object
  *                               owner:
-*                                 type: object
-*                                 properties:
-*                                   mobile:
-*                                     type: string
-*                                   email:
-*                                     type: string
-*                       count:
-*                         type: number
-*                       price:
-*                         type: number
-*                 cartTotal:
-*                   type: number
-*       400:
-*         description: Cart operation fails
-*/
+ *                                 type: object
+ *                                 properties:
+ *                                   mobile:
+ *                                     type: string
+ *                                   email:
+ *                                     type: string
+ *                       count:
+ *                         type: number
+ *                       price:
+ *                         type: number
+ *                 cartTotal:
+ *                   type: number
+ *       400:
+ *         description: Cart operation fails
+ */
 router.put("/update-cart", authMiddleware, updateCart);
 /**
  * @swagger
@@ -1199,25 +1180,25 @@ router.put("/update-cart", authMiddleware, updateCart);
  *                               _id:
  *                                 type: string
  *                               bankDetails:
-*                                 type: object
-*                               address:
-*                                 type: object
-*                               owner:
-*                                 type: object
-*                                 properties:
-*                                   mobile:
-*                                     type: string
-*                                   email:
-*                                     type: string
-*                       count:
-*                         type: number
-*                       price:
-*                         type: number
-*                 cartTotal:
-*                   type: number
-*       400:
-*         description: Cart operation fails
-*/
+ *                                 type: object
+ *                               address:
+ *                                 type: object
+ *                               owner:
+ *                                 type: object
+ *                                 properties:
+ *                                   mobile:
+ *                                     type: string
+ *                                   email:
+ *                                     type: string
+ *                       count:
+ *                         type: number
+ *                       price:
+ *                         type: number
+ *                 cartTotal:
+ *                   type: number
+ *       400:
+ *         description: Cart operation fails
+ */
 router.post("/add-cart", authMiddleware, addToCart2);
 /**
  * @swagger
@@ -1242,42 +1223,42 @@ router.post("/add-cart", authMiddleware, addToCart2);
  *                 products:
  *                   type: array
  *                   items:
-*                     type: object
-*                     properties:
-*                       product:
-*                         type: object
-*                         properties:
-*                           _id:
-*                             type: string
-*                           title:
-*                             type: string
-*                           listedPrice:
-*                             type: number
-*                           store:
-*                             type: object
-*                             properties:
-*                               _id:
-*                                 type: string
-*                               bankDetails:
-*                                 type: object
-*                               address:
-*                                 type: object
-*                               owner:
-*                                 type: object
-*                                 properties:
-*                                   mobile:
-*                                     type: string
-*                                   email:
-*                                     type: string
-*                       count:
-*                         type: number
-*                       price:
-*                         type: number
-*                 cartTotal:
-*                   type: number
-*       400:
-*         description: Cart removal fails
-*/
+ *                     type: object
+ *                     properties:
+ *                       product:
+ *                         type: object
+ *                         properties:
+ *                           _id:
+ *                             type: string
+ *                           title:
+ *                             type: string
+ *                           listedPrice:
+ *                             type: number
+ *                           store:
+ *                             type: object
+ *                             properties:
+ *                               _id:
+ *                                 type: string
+ *                               bankDetails:
+ *                                 type: object
+ *                               address:
+ *                                 type: object
+ *                               owner:
+ *                                 type: object
+ *                                 properties:
+ *                                   mobile:
+ *                                     type: string
+ *                                   email:
+ *                                     type: string
+ *                       count:
+ *                         type: number
+ *                       price:
+ *                         type: number
+ *                 cartTotal:
+ *                   type: number
+ *       400:
+ *         description: Cart removal fails
+ */
 router.post("/empty-cart", authMiddleware, emptyCart);
 /**
  * @swagger
@@ -1294,70 +1275,70 @@ router.post("/empty-cart", authMiddleware, emptyCart);
  *       content:
  *         application/json:
  *           schema:
-*             type: object
-*             required:
-*               - paymentIntent
-*               - deliveryMethod
-*               - deliveryAddress
-*             properties:
-*               paymentIntent:
-*                 type: string
-*                 description: Payment intent ID
-*               deliveryMethod:
-*                 type: string
-*                 description: Delivery method
-*               deliveryAddress:
-*                 type: object
-*                 description: Delivery address details
-*     responses:
-*       200:
-*         description: Created order details
-*         content:
-*           application/json:
-*             schema:
-*               type: object
-*               properties:
-*                 _id:
-*                   type: string
-*                 products:
-*                   type: array
-*                   items:
-*                     type: object
-*                     properties:
-*                       product:
-*                         type: object
-*                         properties:
-*                           _id:
-*                             type: string
-*                           title:
-*                             type: string
-*                           listedPrice:
-*                             type: number
-*                           store:
-*                             type: object
-*                             properties:
-*                               _id:
-*                                 type: string
-*                               bankDetails:
-*                                 type: object
-*                               address:
-*                                 type: object
-*                               owner:
-*                                 type: object
-*                                 properties:
-*                                   mobile:
-*                                     type: string
-*                                   email:
-*                                     type: string
-*                       count:
-*                         type: number
-*                       price:
-*                         type: number
-*                 cartTotal:
-*                   type: number
-*       400:
-*         description: Order creation fails
-*/
+ *             type: object
+ *             required:
+ *               - paymentIntent
+ *               - deliveryMethod
+ *               - deliveryAddress
+ *             properties:
+ *               paymentIntent:
+ *                 type: string
+ *                 description: Payment intent ID
+ *               deliveryMethod:
+ *                 type: string
+ *                 description: Delivery method
+ *               deliveryAddress:
+ *                 type: object
+ *                 description: Delivery address details
+ *     responses:
+ *       200:
+ *         description: Created order details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 _id:
+ *                   type: string
+ *                 products:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       product:
+ *                         type: object
+ *                         properties:
+ *                           _id:
+ *                             type: string
+ *                           title:
+ *                             type: string
+ *                           listedPrice:
+ *                             type: number
+ *                           store:
+ *                             type: object
+ *                             properties:
+ *                               _id:
+ *                                 type: string
+ *                               bankDetails:
+ *                                 type: object
+ *                               address:
+ *                                 type: object
+ *                               owner:
+ *                                 type: object
+ *                                 properties:
+ *                                   mobile:
+ *                                     type: string
+ *                                   email:
+ *                                     type: string
+ *                       count:
+ *                         type: number
+ *                       price:
+ *                         type: number
+ *                 cartTotal:
+ *                   type: number
+ *       400:
+ *         description: Order creation fails
+ */
 router.post("/checkout", authMiddleware, checkoutCart);
 /**
  * @swagger

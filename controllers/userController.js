@@ -14,7 +14,11 @@ const Product = require("../models/productModel");
 const Store = require("../models/storeModel");
 const uniqid = require("uniqid");
 const { ThrowError, MakeID } = require("../Helpers/Helpers");
-const { verificationCodeTemplate, welcome, forgotPasswordTemplate } = require("../templates/Emails");
+const {
+  verificationCodeTemplate,
+  welcome,
+  forgotPasswordTemplate,
+} = require("../templates/Emails");
 // ==================== BUYER SIGNUP ====================
 /**
  * @function createBuyer
@@ -53,7 +57,7 @@ const createBuyer = asyncHandler(async (req, res) => {
   if (!Validate.string(password)) {
     ThrowError("Invalid Password");
   }
-  
+
   number = Validate.formatPhone(number);
   const findUser = await User.findOne({ email: email }, { firstname: 1 });
   const mobileUser = await User.findOne({ mobile: number }, { firstname: 1 });
@@ -68,50 +72,50 @@ const createBuyer = asyncHandler(async (req, res) => {
       residentialAddress: residentialAddress || "",
       city: city || "",
       state: state || "",
-      role: ["buyer"] // Buyer role
+      role: ["buyer"], // Buyer role
     };
-    
+
     const code = MakeID(6);
     const token = {
       email,
-      code
+      code,
     };
-    
+
     try {
       // Create new user
-    const createUser = await User.create(newUser);
-    const createCode = await Token.create(token);
-      
-    const data1 = {
-      to: email,
+      const createUser = await User.create(newUser);
+      const createCode = await Token.create(token);
+
+      const data1 = {
+        to: email,
         text: `Welcome to WigoMarket!`,
-      subject: "Welcome to WigoMarket - Let's Shop!",
-      htm: welcomeMessage,
-    };
-      
-    const data2 = {
-      to: email,
-      text: ``,
-      subject: "Account Verification - WigoMarket",
+        subject: "Welcome to WigoMarket - Let's Shop!",
+        htm: welcomeMessage,
+      };
+
+      const data2 = {
+        to: email,
+        text: ``,
+        subject: "Account Verification - WigoMarket",
         htm: verificationCodeTemplate(fullName || "User", code),
-    };
-      
-   sendEmail(data1);
-   sendEmail(data2);
-      
+      };
+
+      sendEmail(data1);
+      sendEmail(data2);
+
       res.json({
-        message: "User created successfully. Please check your email for verification code.",
+        message:
+          "User created successfully. Please check your email for verification code.",
         success: true,
         user: {
           email: newUser.email,
           mobile: newUser.mobile,
-          role: newUser.role
-        }
+          role: newUser.role,
+        },
       });
     } catch (error) {
       throw new Error(error);
     }
-    
   } else {
     res.json({
       msg: "User already exists",
@@ -145,7 +149,7 @@ const verifyOtp = asyncHandler(async (req, res) => {
     await User.findOneAndUpdate(
       { email: email },
       {
-        status: 'active',
+        status: "active",
       }
     );
     await Token.findOneAndDelete({ email: email });
@@ -199,7 +203,7 @@ const createSeller = asyncHandler(async (req, res) => {
   if (!Validate.string(password)) {
     ThrowError("Invalid Password");
   }
-  
+
   number = Validate.formatPhone(number);
   const findUser = await User.findOne({ email: email }, { fullName: 1 });
   const mobileUser = await User.findOne({ mobile: number }, { fullName: 1 });
@@ -214,40 +218,41 @@ const createSeller = asyncHandler(async (req, res) => {
       residentialAddress: residentialAddress || "",
       city: city || "",
       state: state || "",
-      role: ["seller"] // Seller role
+      role: ["seller"], // Seller role
     };
-    
+
     const code = MakeID(6);
     const token = {
       email,
-      code
+      code,
     };
-    
+
     try {
       // Create new user
       const createUser = await User.create(newUser);
       const createCode = await Token.create(token);
-      
+
       const data1 = {
         to: email,
         text: `Welcome to WigoMarket!`,
         subject: "Welcome to WigoMarket - Start Selling!",
         htm: welcomeMessage,
       };
-      
+
       const data2 = {
         to: email,
         text: ``,
         subject: "Account Verification - WigoMarket",
         htm: verificationCodeTemplate(fullName || "User", code),
       };
-      
+
       await sendEmail(data1);
       await sendEmail(data2);
-      
+
       res.json({
         success: true,
-        message: "Seller account created successfully. Please check your email for verification code.",
+        message:
+          "Seller account created successfully. Please check your email for verification code.",
         data: {
           user: {
             _id: createUser._id,
@@ -255,10 +260,10 @@ const createSeller = asyncHandler(async (req, res) => {
             mobile: createUser.mobile,
             fullName: createUser.fullName,
             role: createUser.role,
-            status: createUser.status
+            status: createUser.status,
           },
-          verificationCode: code // For testing purposes
-        }
+          verificationCode: code, // For testing purposes
+        },
       });
     } catch (error) {
       console.log(error);
@@ -299,94 +304,96 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
   const nextOfKin = req.body.nextOfKin;
   const modeOfTransport = req.body.modeOfTransport;
   try {
-  // Validate required fields
-  if (!Validate.email(email)) {
-    ThrowError("Invalid Email");
-  }
+    // Validate required fields
+    if (!Validate.email(email)) {
+      ThrowError("Invalid Email");
+    }
 
-  if (!Validate.string(number)) {
-    ThrowError("Invalid Mobile Number");
-  }
+    if (!Validate.string(number)) {
+      ThrowError("Invalid Mobile Number");
+    }
 
-  if (!Validate.string(password)) {
-    ThrowError("Invalid Password");
-  }
+    if (!Validate.string(password)) {
+      ThrowError("Invalid Password");
+    }
 
-  // Validate delivery agent specific fields
-  if (!nextOfKin || !nextOfKin.name || !nextOfKin.relationship || !nextOfKin.mobile) {
-    ThrowError("Next of kin information is required for delivery agents");
-  }
+    // Validate delivery agent specific fields
+    if (!nextOfKin || !nextOfKin.name || !nextOfKin.mobile) {
+      ThrowError("Next of kin information is required for delivery agents");
+    }
 
-  if (!modeOfTransport) {
-    ThrowError("Mode of transport is required for delivery agents");
-  }
+    if (!modeOfTransport) {
+      ThrowError("Mode of transport is required for delivery agents");
+    }
 
-  const validTransportModes = ["bike", "motorcycle", "car", "van", "truck", "bicycle"];
-  if (!validTransportModes.includes(modeOfTransport)) {
-    ThrowError("Invalid mode of transport. Must be one of: " + validTransportModes.join(", "));
-  }
+    const validTransportModes = [
+      "bike",
+      "motorcycle",
+      "car",
+      "van",
+      "truck",
+      "bicycle",
+    ];
+    if (!validTransportModes.includes(modeOfTransport)) {
+      ThrowError(
+        "Invalid mode of transport. Must be one of: " +
+          validTransportModes.join(", ")
+      );
+    }
 
-  const validRelationships = ["spouse", "parent", "sibling", "child", "other"];
-  if (!validRelationships.includes(nextOfKin.relationship)) {
-    ThrowError("Invalid relationship. Must be one of: " + validRelationships.join(", "));
-  }
-  
-  number = Validate.formatPhone(number);
-  const findUser = await User.findOne({ email: email }, { fullName: 1 });
-  const mobileUser = await User.findOne({ mobile: number }, { fullName: 1 });
-  const welcomeMessage = welcome();
+    number = Validate.formatPhone(number);
+    const findUser = await User.findOne({ email: email }, { fullName: 1 });
+    const mobileUser = await User.findOne({ mobile: number }, { fullName: 1 });
+    const welcomeMessage = welcome();
 
-  if (!findUser && !mobileUser) {
-    const newUser = {
-      email,
-      mobile: number,
-      password,
-      fullName: fullName || "",
-      residentialAddress: residentialAddress || "",
-      city: city || "",
-      state: state || "",
-      role: ["dispatch"], // Delivery agent role
-      nextOfKin: {
-        name: nextOfKin.name,
-        relationship: nextOfKin.relationship,
-        mobile: nextOfKin.mobile,
-        email: nextOfKin.email || "",
-        address: nextOfKin.address || ""
-      },
-      modeOfTransport: modeOfTransport
-    };
-    
-    const code = MakeID(6);
-    const token = {
-      email,
-      code
-    };
-    
-   
+    if (!findUser && !mobileUser) {
+      const newUser = {
+        email,
+        mobile: number,
+        password,
+        fullName: fullName || "",
+        residentialAddress: residentialAddress || "",
+        city: city || "",
+        state: state || "",
+        role: ["dispatch"], // Delivery agent role
+        nextOfKin: {
+          name: nextOfKin.name,
+          mobile: nextOfKin.mobile,
+        },
+        modeOfTransport: modeOfTransport,
+      };
+
+      const code = MakeID(6);
+      const token = {
+        email,
+        code,
+      };
+
       // Create new user
       const createUser = await User.create(newUser);
       const createCode = await Token.create(token);
-      
+
       const data1 = {
         to: email,
         text: `Welcome to WigoMarket!`,
         subject: "Welcome to WigoMarket - Start Delivering!",
         htm: welcomeMessage,
       };
-      
+
       const data2 = {
         to: email,
         text: ``,
         subject: "Account Verification - WigoMarket",
         htm: verificationCodeTemplate(fullName || "User", code),
       };
-      
+
       await sendEmail(data1);
       await sendEmail(data2);
-      
+
       res.json({
         success: true,
-        message: "Delivery agent account created successfully. Please check your email for verification code.",
+        message:
+          "Delivery agent account created successfully. Please check your email for verification code.",
         data: {
           user: {
             _id: createUser._id,
@@ -396,20 +403,18 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
             role: createUser.role,
             status: createUser.status,
             nextOfKin: createUser.nextOfKin,
-            modeOfTransport: createUser.modeOfTransport
+            modeOfTransport: createUser.modeOfTransport,
           },
-          verificationCode: code // For testing purposes
-        }
+          verificationCode: code, // For testing purposes
+        },
       });
-    }else {
+    } else {
       ThrowError("User Already Exists");
     }
-    
-   } catch (error) {
-      console.log(error);
-      throw new Error(error);
-    }
-  
+  } catch (error) {
+    console.log(error);
+    throw new Error(error);
+  }
 });
 
 // ==================== LEGACY CREATE USER (for backward compatibility) ====================
@@ -437,18 +442,20 @@ const createUser = asyncHandler(async (req, res) => {
  */
 const loginUser = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
-  if(!Validate.email(email)){
+  if (!Validate.email(email)) {
     ThrowError("Invalid Email");
   }
 
-  if(!Validate.string(password)){
+  if (!Validate.string(password)) {
     ThrowError("Invalid Password");
   }
 
-
   //   Check if user exists
-  const findUser = await User.findOne({ email }, {password: 1, status: 1, role: 1, activeRole: 1, _id: 1});
-  console.log("User:", findUser)
+  const findUser = await User.findOne(
+    { email },
+    { password: 1, status: 1, role: 1, activeRole: 1, _id: 1 }
+  );
+  console.log("User:", findUser);
   if (findUser && (await findUser.isPasswordMatched(password))) {
     const refreshToken = await generateRefreshToken(findUser?._id);
     const updateUser = await User.findByIdAndUpdate(
@@ -460,7 +467,7 @@ const loginUser = asyncHandler(async (req, res) => {
       httpOnly: true,
       maxAge: 72 * 60 * 60 * 1000,
     });
-    console.log(updateUser)
+    console.log(updateUser);
     res.json({
       _id: findUser?._id,
       status: findUser?.status,
@@ -549,39 +556,39 @@ const logoutUser = asyncHandler(async (req, res) => {
 const updateAUser = asyncHandler(async (req, res) => {
   const { id } = req.user;
   validateMongodbId(id);
- const firstname = req?.body?.firstname
- const lastname = req?.body?.lastname
- const  email = req?.body?.email
- const  mobile = req?.body?.mobile
- const  address = req?.body?.address
- const  image = req?.body?.image
- const  nickname = req?.body?.nickname
- 
- if(!Validate.string(firstname)){
+  const firstname = req?.body?.firstname;
+  const lastname = req?.body?.lastname;
+  const email = req?.body?.email;
+  const mobile = req?.body?.mobile;
+  const address = req?.body?.address;
+  const image = req?.body?.image;
+  const nickname = req?.body?.nickname;
+
+  if (!Validate.string(firstname)) {
     ThrowError("Invalid Firstname");
   }
 
-  if(!Validate.string(lastname)){
+  if (!Validate.string(lastname)) {
     ThrowError("Invalid Lastname");
-  } 
+  }
 
-  if(!Validate.email(email)){
+  if (!Validate.email(email)) {
     ThrowError("Invalid Email");
   }
 
-  if(!Validate.string(mobile)){
+  if (!Validate.string(mobile)) {
     ThrowError("Invalid Mobile Number");
   }
 
-  if(!Validate.string(address)){  
+  if (!Validate.string(address)) {
     ThrowError("Invalid Address");
   }
 
-  if(!Validate.string(nickname)){
+  if (!Validate.string(nickname)) {
     ThrowError("Invalid Nickname");
-  }     
+  }
 
-  if(!Validate.string(image)){
+  if (!Validate.string(image)) {
     ThrowError("Invalid Image");
   }
 
@@ -625,8 +632,16 @@ const updateAUser = asyncHandler(async (req, res) => {
 const getAllUsers = asyncHandler(async (req, res) => {
   try {
     const getUsers = await User.find(
-        { status: { $ne: 'pending' } }, // Filter for users whose status is not 'pending'
-        { _id: 1, image: 1, firstname: 1, lastname: 1, role: 1, mobile: 1, nickname: 1 } // Specify the fields to return
+      { status: { $ne: "pending" } }, // Filter for users whose status is not 'pending'
+      {
+        _id: 1,
+        image: 1,
+        firstname: 1,
+        lastname: 1,
+        role: 1,
+        mobile: 1,
+        nickname: 1,
+      } // Specify the fields to return
     );
     res.json(getUsers);
   } catch (error) {
@@ -644,14 +659,22 @@ const getAllUsers = asyncHandler(async (req, res) => {
  */
 const getUsersByStatus = asyncHandler(async (req, res) => {
   const { status } = req.body; // Get the status from the request parameters
-  const  possibleStatusValues = ["active", "pending", "blocked"];
+  const possibleStatusValues = ["active", "pending", "blocked"];
   if (!possibleStatusValues.includes(status)) {
     return res.status(400).json({ error: "Invalid status value" });
   }
   try {
     const getUsers = await User.find(
-        { status: status }, // Filter for users with the specified status
-        { _id: 1, image: 1, firstname: 1, lastname: 1, role: 1, mobile: 1, nickname: 1 } // Specify the fields to return
+      { status: status }, // Filter for users with the specified status
+      {
+        _id: 1,
+        image: 1,
+        firstname: 1,
+        lastname: 1,
+        role: 1,
+        mobile: 1,
+        nickname: 1,
+      } // Specify the fields to return
     );
     res.json(getUsers);
   } catch (error) {
@@ -791,7 +814,7 @@ const updatePassword = asyncHandler(async (req, res) => {
  */
 const forgotPasswordToken = asyncHandler(async (req, res) => {
   const { email } = req.body;
-  
+
   if (!Validate.email(email)) {
     ThrowError("Invalid Email");
   }
@@ -800,12 +823,12 @@ const forgotPasswordToken = asyncHandler(async (req, res) => {
   if (!user) {
     return res.status(404).json({
       success: false,
-      message: "User not found with this email"
+      message: "User not found with this email",
     });
   }
 
   const token = MakeID(6);
-  
+
   try {
     const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
 
@@ -826,14 +849,15 @@ const forgotPasswordToken = asyncHandler(async (req, res) => {
       subject: "Password Reset Code - WigoMarket",
       htm: forgotPasswordTemplate(user?.fullName || "User", token),
     };
-    
+
     sendEmail(data);
-    
+
     res.json({
       success: true,
-      message: "Password reset code sent to your email. Please check your inbox.",
+      message:
+        "Password reset code sent to your email. Please check your inbox.",
       token: token, // For development/testing - remove in production
-      expiresIn: "15 minutes"
+      expiresIn: "15 minutes",
     });
   } catch (error) {
     throw new Error(error);
@@ -852,66 +876,70 @@ const forgotPasswordToken = asyncHandler(async (req, res) => {
  */
 const resetPassword = asyncHandler(async (req, res) => {
   const { password, token, email } = req.body;
-  
+
   // Validate input
   if (!Validate.string(password)) {
     ThrowError("Invalid Password");
   }
-  
+
   if (!Validate.string(token) || token.length !== 6) {
     ThrowError("Invalid Token - Must be 6 digits");
   }
-  
+
   if (!Validate.email(email)) {
     ThrowError("Invalid Email");
   }
 
   const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
-  
+
   // Find user and token
-  const user = await User.findOne({ email }, { password: 1, _id: 1, fullName: 1 });
+  const user = await User.findOne(
+    { email },
+    { password: 1, _id: 1, fullName: 1 }
+  );
   const tokenRecord = await Token.findOne({
     email,
     code: hashedToken,
   });
-  
+
   if (!user) {
     return res.status(404).json({
       success: false,
-      message: "User not found"
+      message: "User not found",
     });
   }
-  
+
   if (!tokenRecord) {
     return res.status(400).json({
       success: false,
-      message: "Invalid or expired token"
+      message: "Invalid or expired token",
     });
   }
-  
+
   // Check if token is expired (15 minutes)
   const tokenAge = Date.now() - tokenRecord.createdAt;
   const fifteenMinutes = 15 * 60 * 1000;
-  
+
   if (tokenAge > fifteenMinutes) {
     await Token.deleteOne({ email });
     return res.status(400).json({
       success: false,
-      message: "Token has expired. Please request a new one."
+      message: "Token has expired. Please request a new one.",
     });
   }
-  
+
   try {
     // Update password
-  user.password = password;
-  await user.save();
-    
+    user.password = password;
+    await user.save();
+
     // Delete the used token
-  await Token.deleteOne({ email });
-    
+    await Token.deleteOne({ email });
+
     res.json({
       success: true,
-      message: "Password reset successfully. You can now login with your new password."
+      message:
+        "Password reset successfully. You can now login with your new password.",
     });
   } catch (error) {
     throw new Error(error);
@@ -930,86 +958,87 @@ const resetPassword = asyncHandler(async (req, res) => {
 const addToCart2 = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   const { product } = req.body;
-  
+
   // Validate input
   if (!product._id || !product.count || product.count <= 0) {
     return res.status(400).json({
       success: false,
-      message: "Invalid product data"
+      message: "Invalid product data",
     });
   }
-  
+
   // Check if product exists and is in stock
   const productExists = await Product.findById(product._id);
   if (!productExists) {
     return res.status(404).json({
       success: false,
-      message: "Product not found"
+      message: "Product not found",
     });
   }
-  
+
   if (productExists.quantity < product.count) {
     return res.status(400).json({
       success: false,
-      message: "Insufficient stock available"
+      message: "Insufficient stock available",
     });
   }
-  
+
   // Find or create cart
   let cart = await Cart.findOne({ owner: _id });
-  
+
   if (!cart) {
-    cart = await Cart.create({ 
-      owner: _id, 
-      products: [], 
-      cartTotal: 0 
+    cart = await Cart.create({
+      owner: _id,
+      products: [],
+      cartTotal: 0,
     });
   }
-  
+
   // Check if product already exists in cart
   const existingProductIndex = cart.products.findIndex(
-    item => item.product.toString() === product._id
+    (item) => item.product.toString() === product._id
   );
-  
+
   if (existingProductIndex > -1) {
     // Update existing product quantity
-    const newQuantity = cart.products[existingProductIndex].count + product.count;
-    
+    const newQuantity =
+      cart.products[existingProductIndex].count + product.count;
+
     // Check if new quantity exceeds stock
     if (newQuantity > productExists.quantity) {
       return res.status(400).json({
         success: false,
-        message: "Cannot add more items than available in stock"
+        message: "Cannot add more items than available in stock",
       });
     }
-    
+
     cart.products[existingProductIndex].count = newQuantity;
-    cart.products[existingProductIndex].price = 
+    cart.products[existingProductIndex].price =
       newQuantity * product.listedPrice;
-    } else {
+  } else {
     // Add new product
     cart.products.push({
       product: product._id,
       count: product.count,
       price: product.count * product.listedPrice,
-      store: product.store._id
+      store: product.store._id,
     });
   }
-  
+
   // Recalculate total
   cart.cartTotal = cart.products.reduce((total, item) => total + item.price, 0);
-  
+
   await cart.save();
-  
+
   // Populate and return
   const populatedCart = await Cart.findById(cart._id)
-    .populate('products.product', 'title listedPrice images description brand')
-    .populate('products.store', 'name address mobile');
-  
+    .populate("products.product", "title listedPrice images description brand")
+    .populate("products.store", "name address mobile");
+
   res.json({
     success: true,
     message: "Product added to cart successfully",
-    data: populatedCart
+    data: populatedCart,
   });
 });
 /**
@@ -1025,57 +1054,63 @@ const addToCart2 = asyncHandler(async (req, res) => {
 const removeFromCart = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   const { productId } = req.body;
-  
+
   // Validate input
   if (!productId) {
     return res.status(400).json({
       success: false,
-      message: "Product ID is required"
+      message: "Product ID is required",
     });
   }
-  
+
   validateMongodbId(_id);
   validateMongodbId(productId);
 
   try {
     const cart = await Cart.findOne({ owner: _id });
-    
+
     if (!cart) {
       return res.status(404).json({
         success: false,
-        message: "Cart not found"
+        message: "Cart not found",
       });
     }
-    
+
     // Check if product exists in cart
     const productIndex = cart.products.findIndex(
-      item => item.product.toString() === productId
+      (item) => item.product.toString() === productId
     );
-    
+
     if (productIndex === -1) {
       return res.status(404).json({
         success: false,
-        message: "Product not found in cart"
+        message: "Product not found in cart",
       });
     }
-    
+
     // Remove product from array
     cart.products.splice(productIndex, 1);
-    
+
     // Recalculate total
-    cart.cartTotal = cart.products.reduce((total, item) => total + item.price, 0);
-    
+    cart.cartTotal = cart.products.reduce(
+      (total, item) => total + item.price,
+      0
+    );
+
     await cart.save();
-    
+
     // Populate and return updated cart
     const updatedCart = await Cart.findById(cart._id)
-      .populate('products.product', 'title listedPrice images description brand')
-      .populate('products.store', 'name address mobile');
-    
+      .populate(
+        "products.product",
+        "title listedPrice images description brand"
+      )
+      .populate("products.store", "name address mobile");
+
     res.json({
       success: true,
       message: "Product removed from cart successfully",
-      data: updatedCart
+      data: updatedCart,
     });
   } catch (error) {
     console.log(error);
@@ -1098,64 +1133,64 @@ const removeFromCart = asyncHandler(async (req, res) => {
 const updateCart = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   const { productId, newCount } = req.body;
-  
+
   // Validate input
   if (!productId) {
     return res.status(400).json({
       success: false,
-      message: "Product ID is required"
+      message: "Product ID is required",
     });
   }
-  
+
   if (newCount === undefined || newCount < 0) {
     return res.status(400).json({
       success: false,
-      message: "Invalid quantity"
+      message: "Invalid quantity",
     });
   }
-  
+
   validateMongodbId(_id);
   validateMongodbId(productId);
 
   try {
     const cart = await Cart.findOne({ owner: _id });
-    
+
     if (!cart) {
       return res.status(404).json({
         success: false,
-        message: "Cart not found"
+        message: "Cart not found",
       });
     }
-    
+
     // Find product in cart
     const productIndex = cart.products.findIndex(
-      item => item.product.toString() === productId
+      (item) => item.product.toString() === productId
     );
-    
+
     if (productIndex === -1) {
       return res.status(404).json({
         success: false,
-        message: "Product not found in cart"
+        message: "Product not found in cart",
       });
     }
-    
+
     // Get product details for price calculation
     const productDetails = await Product.findById(productId);
     if (!productDetails) {
       return res.status(404).json({
         success: false,
-        message: "Product not found"
+        message: "Product not found",
       });
     }
-    
+
     // Check stock availability
     if (newCount > productDetails.quantity) {
       return res.status(400).json({
         success: false,
-        message: "Insufficient stock available"
+        message: "Insufficient stock available",
       });
     }
-    
+
     if (newCount === 0) {
       // Remove product if quantity is 0
       cart.products.splice(productIndex, 1);
@@ -1164,21 +1199,27 @@ const updateCart = asyncHandler(async (req, res) => {
       cart.products[productIndex].count = newCount;
       cart.products[productIndex].price = newCount * productDetails.listedPrice;
     }
-    
+
     // Recalculate total
-    cart.cartTotal = cart.products.reduce((total, item) => total + item.price, 0);
-    
+    cart.cartTotal = cart.products.reduce(
+      (total, item) => total + item.price,
+      0
+    );
+
     await cart.save();
-    
+
     // Populate and return updated cart
     const updatedCart = await Cart.findById(cart._id)
-      .populate('products.product', 'title listedPrice images description brand')
-      .populate('products.store', 'name address mobile');
-    
+      .populate(
+        "products.product",
+        "title listedPrice images description brand"
+      )
+      .populate("products.store", "name address mobile");
+
     res.json({
       success: true,
       message: "Cart updated successfully",
-      data: updatedCart
+      data: updatedCart,
     });
   } catch (error) {
     console.log(error);
@@ -1197,27 +1238,30 @@ const updateCart = asyncHandler(async (req, res) => {
 const getUserCart = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   validateMongodbId(_id);
-  
+
   try {
     const cart = await Cart.findOne({ owner: _id })
-      .populate('products.product', 'title listedPrice images description brand quantity')
-      .populate('products.store', 'name address mobile');
-    
+      .populate(
+        "products.product",
+        "title listedPrice images description brand quantity"
+      )
+      .populate("products.store", "name address mobile");
+
     if (!cart) {
       return res.json({
         success: true,
         data: {
           products: [],
           cartTotal: 0,
-          owner: _id
-        }
+          owner: _id,
+        },
       });
     }
-    
+
     // Check if any products are out of stock or have been deleted
     const validProducts = [];
     let totalCost = 0;
-    
+
     for (const item of cart.products) {
       if (item.product && item.product.quantity > 0) {
         // Update price if product price has changed
@@ -1229,17 +1273,17 @@ const getUserCart = asyncHandler(async (req, res) => {
         validProducts.push(item);
       }
     }
-    
+
     // Update cart if products were removed
     if (validProducts.length !== cart.products.length) {
       cart.products = validProducts;
       cart.cartTotal = totalCost;
       await cart.save();
     }
-    
+
     res.json({
       success: true,
-      data: cart
+      data: cart,
     });
   } catch (error) {
     console.log(error);
@@ -1258,10 +1302,10 @@ const getUserCart = asyncHandler(async (req, res) => {
 const emptyCart = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   validateMongodbId(_id);
-  
+
   try {
     const cart = await Cart.findOneAndDelete({ owner: _id });
-    
+
     if (!cart) {
       return res.json({
         success: true,
@@ -1269,19 +1313,19 @@ const emptyCart = asyncHandler(async (req, res) => {
         data: {
           products: [],
           cartTotal: 0,
-          owner: _id
-        }
+          owner: _id,
+        },
       });
     }
-    
+
     res.json({
       success: true,
       message: "Cart emptied successfully",
       data: {
         products: [],
         cartTotal: 0,
-        owner: _id
-      }
+        owner: _id,
+      },
     });
   } catch (error) {
     console.log(error);
@@ -1301,63 +1345,68 @@ const emptyCart = asyncHandler(async (req, res) => {
  * @throws {Error} - Throws error if order creation fails
  */
 const checkoutCart = asyncHandler(async (req, res) => {
-  const { paymentMethod, deliveryMethod, deliveryAddress, deliveryNotes } = req.body;
+  const { paymentMethod, deliveryMethod, deliveryAddress, deliveryNotes } =
+    req.body;
   const { _id } = req.user;
-  
+
   // Validate input
   if (!paymentMethod || !deliveryMethod || !deliveryAddress) {
     return res.status(400).json({
       success: false,
-      message: "Payment method, delivery method, and delivery address are required"
+      message:
+        "Payment method, delivery method, and delivery address are required",
     });
   }
-  
+
   if (!["self_delivery", "delivery_agent"].includes(deliveryMethod)) {
     return res.status(400).json({
       success: false,
-      message: "Invalid delivery method. Must be 'self_delivery' or 'delivery_agent'"
+      message:
+        "Invalid delivery method. Must be 'self_delivery' or 'delivery_agent'",
     });
   }
-  
+
   if (!["cash", "card", "bank"].includes(paymentMethod)) {
     return res.status(400).json({
       success: false,
-      message: "Invalid payment method. Must be 'cash', 'card', or 'bank'"
+      message: "Invalid payment method. Must be 'cash', 'card', or 'bank'",
     });
   }
-  
+
   validateMongodbId(_id);
-  
+
   try {
     // Get user's cart
-    const userCart = await Cart.findOne({ owner: _id }).populate("products.product");
-    
+    const userCart = await Cart.findOne({ owner: _id }).populate(
+      "products.product"
+    );
+
     if (!userCart || userCart.products.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "Cart is empty"
+        message: "Cart is empty",
       });
     }
-    
+
     // Check stock availability
     for (const item of userCart.products) {
       if (item.product.quantity < item.count) {
         return res.status(400).json({
           success: false,
-          message: `Insufficient stock for ${item.product.title}. Available: ${item.product.quantity}, Requested: ${item.count}`
+          message: `Insufficient stock for ${item.product.title}. Available: ${item.product.quantity}, Requested: ${item.count}`,
         });
       }
     }
-    
+
     // Calculate delivery fee (if delivery agent is selected)
     let deliveryFee = 0;
     if (deliveryMethod === "delivery_agent") {
       // Calculate delivery fee based on distance or fixed rate
       deliveryFee = 500; // Base delivery fee in NGN
     }
-    
+
     const totalAmount = userCart.cartTotal + deliveryFee;
-    
+
     // Create order
     const newOrder = await Order.create({
       products: userCart.products,
@@ -1373,73 +1422,81 @@ const checkoutCart = asyncHandler(async (req, res) => {
       deliveryAddress: deliveryAddress,
       deliveryNotes: deliveryNotes || "",
       deliveryFee: deliveryFee,
-      deliveryStatus: deliveryMethod === "delivery_agent" ? "pending_assignment" : "assigned",
+      deliveryStatus:
+        deliveryMethod === "delivery_agent" ? "pending_assignment" : "assigned",
       orderedBy: _id,
       orderStatus: "Not yet processed",
       paymentStatus: "Not yet paid",
       paymentMethod: paymentMethod,
     });
-    
+
     // Update product quantities and sold counts
     const productUpdates = userCart.products.map((item) => ({
-        updateOne: {
+      updateOne: {
         filter: { _id: item.product._id },
-          update: {
-          $inc: { 
-            quantity: -item.count, 
-            sold: +item.count 
-          } 
+        update: {
+          $inc: {
+            quantity: -item.count,
+            sold: +item.count,
+          },
         },
       },
     }));
-    
+
     await Product.bulkWrite(productUpdates);
-    
+
     // Clear user's cart
     await Cart.findOneAndDelete({ owner: _id });
-    
+
     // Populate order details
     const populatedOrder = await Order.findById(newOrder._id)
-      .populate('products.product', 'title listedPrice images brand')
-      .populate('products.store', 'name address mobile')
-      .populate('orderedBy', 'fullName email mobile');
-    
+      .populate("products.product", "title listedPrice images brand")
+      .populate("products.store", "name address mobile")
+      .populate("orderedBy", "fullName email mobile");
+
     // Send notifications
     try {
-      const { sendNotificationToUser, sendDeliveryAgentNotification } = require('./notificationController');
-      
+      const {
+        sendNotificationToUser,
+        sendDeliveryAgentNotification,
+      } = require("./notificationController");
+
       // Notify customer
       await sendNotificationToUser(
         _id,
         "Order Created Successfully",
-        `Your order #${newOrder.paymentIntent.id} has been created. ${deliveryMethod === "delivery_agent" ? "Waiting for delivery agent assignment." : "Ready for pickup."}`,
+        `Your order #${newOrder.paymentIntent.id} has been created. ${
+          deliveryMethod === "delivery_agent"
+            ? "Waiting for delivery agent assignment."
+            : "Ready for pickup."
+        }`,
         {
           orderId: newOrder._id.toString(),
           orderNumber: newOrder.paymentIntent.id,
           totalAmount: totalAmount.toString(),
-          deliveryMethod: deliveryMethod
+          deliveryMethod: deliveryMethod,
         },
-        'orderUpdates'
+        "orderUpdates"
       );
-      
+
       // Notify delivery agents if delivery method is delivery_agent
       if (deliveryMethod === "delivery_agent") {
         await sendDeliveryAgentNotification(
-          'new_order_available',
+          "new_order_available",
           `New delivery order available: Order #${newOrder.paymentIntent.id}`,
           {
             orderId: newOrder._id.toString(),
             orderNumber: newOrder.paymentIntent.id,
             deliveryAddress: deliveryAddress,
-            totalAmount: totalAmount.toString()
+            totalAmount: totalAmount.toString(),
           }
         );
       }
     } catch (notificationError) {
-      console.log('Notification error:', notificationError);
+      console.log("Notification error:", notificationError);
       // Don't fail the order creation if notifications fail
     }
-    
+
     res.json({
       success: true,
       message: "Order created successfully",
@@ -1448,10 +1505,11 @@ const checkoutCart = asyncHandler(async (req, res) => {
         totalAmount: totalAmount,
         deliveryFee: deliveryFee,
         deliveryMethod: deliveryMethod,
-        nextStep: deliveryMethod === "delivery_agent" 
-          ? "Waiting for delivery agent assignment" 
-          : "Ready for pickup"
-      }
+        nextStep:
+          deliveryMethod === "delivery_agent"
+            ? "Waiting for delivery agent assignment"
+            : "Ready for pickup",
+      },
     });
   } catch (error) {
     console.log(error);
@@ -1536,29 +1594,31 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
 const getCurrentUser = asyncHandler(async (req, res) => {
   try {
     const user = req.user;
-    
+
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: "User not found"
+        message: "User not found",
       });
     }
 
     // Populate related data based on user roles
     let populatedUser = { ...user.toObject() };
-    
+
     // If user is a seller, populate store information
     if (user.role.includes("seller")) {
-      const store = await Store.findOne({ owner: user._id })
-        .select('name image address balance status');
+      const store = await Store.findOne({ owner: user._id }).select(
+        "name image address balance status"
+      );
       populatedUser.store = store;
     }
-    
+
     // If user is dispatch, populate dispatch profile
     if (user.role.includes("dispatch")) {
       const DispatchProfile = require("../models/dispatchProfileModel");
-      const dispatchProfile = await DispatchProfile.findOne({ user: user._id })
-        .select('vehicleInfo availability rating earnings status isActive');
+      const dispatchProfile = await DispatchProfile.findOne({
+        user: user._id,
+      }).select("vehicleInfo availability rating earnings status isActive");
       populatedUser.dispatchProfile = dispatchProfile;
     }
 
@@ -1572,9 +1632,9 @@ const getCurrentUser = asyncHandler(async (req, res) => {
           canSell: user.role.includes("seller"),
           canDispatch: user.role.includes("dispatch"),
           isAdmin: user.role.includes("admin"),
-          isBuyer: user.role.includes("buyer")
-        }
-      }
+          isBuyer: user.role.includes("buyer"),
+        },
+      },
     });
   } catch (error) {
     throw new Error(error);
@@ -1595,11 +1655,11 @@ const changeActiveRole = asyncHandler(async (req, res) => {
   try {
     const { role } = req.body;
     const user = req.user;
-    
+
     if (!role) {
       return res.status(400).json({
         success: false,
-        message: "Role is required"
+        message: "Role is required",
       });
     }
 
@@ -1608,7 +1668,7 @@ const changeActiveRole = asyncHandler(async (req, res) => {
     if (!validRoles.includes(role)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid role. Must be one of: " + validRoles.join(", ")
+        message: "Invalid role. Must be one of: " + validRoles.join(", "),
       });
     }
 
@@ -1616,7 +1676,7 @@ const changeActiveRole = asyncHandler(async (req, res) => {
     if (!user.role.includes(role)) {
       return res.status(400).json({
         success: false,
-        message: "You don't have permission to switch to this role"
+        message: "You don't have permission to switch to this role",
       });
     }
 
@@ -1625,7 +1685,9 @@ const changeActiveRole = asyncHandler(async (req, res) => {
       user._id,
       { activeRole: role },
       { new: true }
-    ).select('-password -refreshToken -passwordResetToken -passwordResetExpires');
+    ).select(
+      "-password -refreshToken -passwordResetToken -passwordResetExpires"
+    );
 
     res.json({
       success: true,
@@ -1633,8 +1695,8 @@ const changeActiveRole = asyncHandler(async (req, res) => {
       data: {
         user: updatedUser,
         activeRole: updatedUser.activeRole,
-        roles: updatedUser.role
-      }
+        roles: updatedUser.role,
+      },
     });
   } catch (error) {
     throw new Error(error);
@@ -1656,25 +1718,25 @@ const googleAuth = asyncHandler(async (req, res) => {
   if (!idToken) {
     return res.status(400).json({
       success: false,
-      message: "ID token is required"
+      message: "ID token is required",
     });
   }
 
   try {
     // Import Firebase Admin SDK
-    const admin = require('firebase-admin');
-    
+    const admin = require("firebase-admin");
+
     // Verify the Firebase ID token
     const decodedToken = await admin.auth().verifyIdToken(idToken);
     const { uid, email, name, picture } = decodedToken;
 
     // Check if user exists in MongoDB by Firebase UID
     let user = await User.findOne({ firebaseUid: uid });
-    
+
     if (!user) {
       // Check if user exists by email (for existing users who might link Google)
       const existingUser = await User.findOne({ email: email });
-      
+
       if (existingUser) {
         // Link Firebase UID to existing user
         existingUser.firebaseUid = uid;
@@ -1692,7 +1754,7 @@ const googleAuth = asyncHandler(async (req, res) => {
           role: ["buyer"], // Default role for Google auth users
           activeRole: "buyer",
           status: "active", // Auto-activate Google auth users
-          password: null // No password for Google auth users
+          password: null, // No password for Google auth users
         });
       }
     }
@@ -1701,16 +1763,16 @@ const googleAuth = asyncHandler(async (req, res) => {
     if (user.isBlocked) {
       return res.status(403).json({
         success: false,
-        message: "User account is blocked"
+        message: "User account is blocked",
       });
     }
 
     // Generate JWT token
     const token = generateToken(user._id);
-    
+
     // Generate refresh token
     const refreshToken = await generateRefreshToken(user._id);
-    
+
     // Update user's refresh token
     await User.findByIdAndUpdate(
       user._id,
@@ -1736,24 +1798,23 @@ const googleAuth = asyncHandler(async (req, res) => {
         activeRole: user.activeRole,
         status: user.status,
         token: token,
-        isGoogleAuth: true
-      }
+        isGoogleAuth: true,
+      },
     });
-
   } catch (error) {
-    console.error('Google auth error:', error);
-    
-    if (error.code === 'auth/invalid-id-token') {
+    console.error("Google auth error:", error);
+
+    if (error.code === "auth/invalid-id-token") {
       return res.status(401).json({
         success: false,
-        message: "Invalid Google ID token"
+        message: "Invalid Google ID token",
       });
     }
-    
+
     return res.status(500).json({
       success: false,
       message: "Google authentication failed",
-      error: error.message
+      error: error.message,
     });
   }
 });
