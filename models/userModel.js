@@ -90,6 +90,10 @@ var userSchema = new mongoose.Schema(
       mobile: {
         type: String,
       },
+      gender: {
+        type: String,
+        enum: ["male", "female", "other"],
+      },
     },
     modeOfTransport: {
       type: String,

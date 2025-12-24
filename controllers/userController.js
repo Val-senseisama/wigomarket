@@ -359,6 +359,7 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
         nextOfKin: {
           name: nextOfKin.name,
           mobile: nextOfKin.mobile,
+          gender: nextOfKin.gender,
         },
         modeOfTransport: modeOfTransport,
       };

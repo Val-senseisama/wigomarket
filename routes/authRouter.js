@@ -348,6 +348,11 @@ router.post("/register/seller", createSeller);
  *                     type: string
  *                     description: Next of kin's mobile number
  *                     example: "+2348098765432"
+ *                   gender:
+ *                     type: string
+ *                     enum: [male, female, other]
+ *                     description: Next of kin's gender
+ *                     example: "female"
  *               modeOfTransport:
  *                 type: string
  *                 enum: [bike, motorcycle, car, van, truck, bicycle]
@@ -396,6 +401,9 @@ router.post("/register/seller", createSeller);
  *                               type: string
  *                             mobile:
  *                               type: string
+ *                             gender:
+ *                               type: string
+ *                               enum: [male, female, other]
  *                             address:
  *                               type: string
  *                         modeOfTransport:
