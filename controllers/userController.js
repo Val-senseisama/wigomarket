@@ -177,6 +177,7 @@ const verifyOtp = asyncHandler(async (req, res) => {
  * @param {string} req.body.password - User's password (required)
  * @param {string} req.body.fullName - User's full name (optional)
  * @param {string} req.body.residentialAddress - User's residential address (optional)
+ * @param {string} req.body.gender - User's gender (optional)
  * @param {string} req.body.city - User's city (optional)
  * @param {string} req.body.state - User's state (optional)
  * @returns {Object} - New user data or error message
@@ -190,6 +191,7 @@ const createSeller = asyncHandler(async (req, res) => {
   const residentialAddress = req.body.residentialAddress;
   const city = req.body.city;
   const state = req.body.state;
+  const gender = req.body.gender;
 
   // Validate required fields
   if (!Validate.email(email)) {
@@ -202,6 +204,10 @@ const createSeller = asyncHandler(async (req, res) => {
 
   if (!Validate.string(password)) {
     ThrowError("Invalid Password");
+  }
+
+  if (!Validate.string(gender)) {
+    ThrowError("Invalid Gender");
   }
 
   number = Validate.formatPhone(number);
@@ -218,6 +224,7 @@ const createSeller = asyncHandler(async (req, res) => {
       residentialAddress: residentialAddress || "",
       city: city || "",
       state: state || "",
+      gender: gender,
       role: ["seller"], // Seller role
     };
 
@@ -286,6 +293,7 @@ const createSeller = asyncHandler(async (req, res) => {
  * @param {string} req.body.fullName - User's full name (optional)
  * @param {string} req.body.residentialAddress - User's residential address (optional)
  * @param {string} req.body.city - User's city (optional)
+ * @param {string} req.body.gender - User's gender (optional)
  * @param {string} req.body.state - User's state (optional)
  * @param {Object} req.body.nextOfKin - Next of kin information (required for delivery agents)
  * @param {string} req.body.modeOfTransport - Mode of transport (required for delivery agents)
@@ -302,6 +310,7 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
   const city = req.body.city;
   const state = req.body.state;
   const nextOfKin = req.body.nextOfKin;
+  const gender = req.body.gender;
   const modeOfTransport = req.body.modeOfTransport;
   try {
     // Validate required fields
@@ -324,6 +333,10 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
 
     if (!modeOfTransport) {
       ThrowError("Mode of transport is required for delivery agents");
+    }
+    const validGenders = ["male", "female", "other"];
+    if (!gender || !validGenders.includes(gender)) {
+      ThrowError("Gender is required for delivery agents");
     }
 
     const validTransportModes = [
@@ -356,10 +369,10 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
         city: city || "",
         state: state || "",
         role: ["dispatch"], // Delivery agent role
+        gender: gender,
         nextOfKin: {
           name: nextOfKin.name,
           mobile: nextOfKin.mobile,
-          gender: nextOfKin.gender,
         },
         modeOfTransport: modeOfTransport,
       };
@@ -402,6 +415,7 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
             mobile: createUser.mobile,
             fullName: createUser.fullName,
             role: createUser.role,
+            gender: createUser.gender,
             status: createUser.status,
             nextOfKin: createUser.nextOfKin,
             modeOfTransport: createUser.modeOfTransport,

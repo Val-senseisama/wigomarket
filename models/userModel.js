@@ -73,6 +73,10 @@ var userSchema = new mongoose.Schema(
     nickname: {
       type: String,
     },
+    gender: {
+      type: String,
+      enum: ["male", "female", "other"],
+    },
     store: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Store",
@@ -89,10 +93,6 @@ var userSchema = new mongoose.Schema(
 
       mobile: {
         type: String,
-      },
-      gender: {
-        type: String,
-        enum: ["male", "female", "other"],
       },
     },
     modeOfTransport: {
