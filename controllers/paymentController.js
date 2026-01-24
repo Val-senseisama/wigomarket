@@ -1,5 +1,6 @@
 const asyncHandler = require("express-async-handler");
 const mongoose = require("mongoose");
+const crypto = require("crypto");
 const Order = require("../models/orderModel");
 const Store = require("../models/storeModel");
 const Product = require("../models/productModel");
@@ -7,14 +8,54 @@ const User = require("../models/userModel");
 const Wallet = require("../models/walletModel");
 const Transaction = require("../models/transactionModel");
 const VATConfig = require("../models/vatConfigModel");
-const Flutterwave = require('flutterwave-node-v3');
+const Flutterwave = require("flutterwave-node-v3");
 const receiptService = require("../services/receiptService");
 const { validateMongodbId } = require("../utils/validateMongodbId");
 const { Validate } = require("../Helpers/Validate");
 const { ThrowError, MakeID } = require("../Helpers/Helpers");
+const {
+  PaymentStatus,
+  OrderStatus,
+  PaymentMethod,
+} = require("../utils/constants");
+const appConfig = require("../config/appConfig");
 
-// Initialize Flutterwave
-const flw = new Flutterwave(process.env.FLW_PUBLIC_KEY, process.env.FLW_SECRET_KEY);
+// Lazy-load Flutterwave instance
+let flw = null;
+const getFlutterwaveInstance = () => {
+  if (!flw) {
+    const config = appConfig.payment.flutterwave;
+    if (!config.validate()) {
+      throw new Error(
+        "Flutterwave configuration is incomplete. Check environment variables.",
+      );
+    }
+    flw = new Flutterwave(config.publicKey, config.secretKey);
+  }
+  return flw;
+};
+
+/**
+ * @function verifyFlutterwaveSignature
+ * @description Verify Flutterwave webhook signature
+ * @param {string} signature - Signature from x-flw-signature header
+ * @param {Object} payload - Webhook payload
+ * @returns {boolean} - True if signature is valid
+ */
+const verifyFlutterwaveSignature = (signature, payload) => {
+  const secretHash = appConfig.payment.flutterwave.webhookSecretHash;
+  if (!secretHash) {
+    console.error("⚠️  FLW_WEBHOOK_SECRET_HASH not configured!");
+    return false;
+  }
+
+  const hash = crypto
+    .createHmac("sha256", secretHash)
+    .update(JSON.stringify(payload))
+    .digest("hex");
+
+  return hash === signature;
+};
 
 /**
  * @function calculateCommissionBreakdown
@@ -27,39 +68,40 @@ const calculateCommissionBreakdown = async (order) => {
   let totalVendorAmount = 0;
   let totalDispatchAmount = 0;
   let platformRate = 0;
-  
+
   // Calculate commissions for each product
   for (const item of order.products) {
     const storePrice = item.product.price;
     const listedPrice = item.product.listedPrice;
     const count = item.count;
-    
+
     const storeCommission = storePrice * count;
-    const platformCommission = (listedPrice * count) - storeCommission;
-    
+    const platformCommission = listedPrice * count - storeCommission;
+
     totalPlatformCommission += platformCommission;
     totalVendorAmount += storeCommission;
-    
+
     // Calculate platform rate (average)
     if (listedPrice > 0) {
       platformRate += (platformCommission / (listedPrice * count)) * 100;
     }
   }
-  
+
   // Calculate dispatch amount (if delivery agent is assigned)
   if (order.deliveryAgent && order.deliveryFee) {
     totalDispatchAmount = order.deliveryFee;
   }
-  
+
   // Calculate average platform rate
-  platformRate = order.products.length > 0 ? platformRate / order.products.length : 0;
-  
+  platformRate =
+    order.products.length > 0 ? platformRate / order.products.length : 0;
+
   return {
     platformRate: Math.round(platformRate * 100) / 100, // Round to 2 decimal places
     platformAmount: Math.round(totalPlatformCommission * 100) / 100,
     vendorAmount: Math.round(totalVendorAmount * 100) / 100,
     dispatchAmount: Math.round(totalDispatchAmount * 100) / 100,
-    totalAmount: order.paymentIntent.amount
+    totalAmount: order.paymentIntent.amount,
   };
 };
 
@@ -75,49 +117,55 @@ const calculateCommissionBreakdown = async (order) => {
 const initializePayment = asyncHandler(async (req, res) => {
   const { orderId } = req.body;
   const { _id } = req.user;
-  
+
   if (!orderId) {
     return res.status(400).json({
       success: false,
-      message: "Order ID is required"
+      message: "Order ID is required",
     });
   }
-  
+
   validateMongodbId(orderId);
-  
+
   try {
+    // Check if user has a wallet (create if doesn't exist)
+    let userWallet = await Wallet.findOne({ user: _id });
+    if (!userWallet) {
+      console.log(`Creating wallet for user ${_id}`);
+      userWallet = await Wallet.createWallet(_id, 0);
+    }
     // Get order details
     const order = await Order.findById(orderId)
-      .populate('orderedBy', 'fullName email mobile')
-      .populate('products.product', 'title listedPrice')
-      .populate('products.store', 'name');
-    
+      .populate("orderedBy", "fullName email mobile")
+      .populate("products.product", "title listedPrice")
+      .populate("products.store", "name");
+
     if (!order) {
       return res.status(404).json({
         success: false,
-        message: "Order not found"
+        message: "Order not found",
       });
     }
-    
+
     // Check if order belongs to user
     if (order.orderedBy._id.toString() !== _id.toString()) {
       return res.status(403).json({
         success: false,
-        message: "Access denied. This order doesn't belong to you."
+        message: "Access denied. This order doesn't belong to you.",
       });
     }
-    
+
     // Check if order is already paid
-    if (order.paymentStatus === "Paid") {
+    if (order.paymentStatus === PaymentStatus.PAID) {
       return res.status(400).json({
         success: false,
-        message: "Order is already paid"
+        message: "Order is already paid",
       });
     }
-    
+
     const user = order.orderedBy;
     const totalAmount = order.paymentIntent.amount;
-    
+
     // Prepare payment data
     const paymentData = {
       tx_ref: order.paymentIntent.id,
@@ -127,29 +175,30 @@ const initializePayment = asyncHandler(async (req, res) => {
       customer: {
         email: user.email,
         phonenumber: user.mobile,
-        name: user.fullName || "Customer"
+        name: user.fullName || "Customer",
       },
       customizations: {
         title: "WigoMarket Payment",
         description: `Payment for Order #${order.paymentIntent.id}`,
-        logo: process.env.LOGO_URL || "https://via.placeholder.com/150"
+        logo: process.env.LOGO_URL || "https://via.placeholder.com/150",
       },
       meta: {
         orderId: orderId,
-        userId: _id
-      }
+        userId: _id,
+      },
     };
-    
+
     // Initialize payment with Flutterwave
-    const response = await flw.Payment.initialize(paymentData);
-    
+    const flwClient = getFlutterwaveInstance();
+    const response = await flwClient.Payment.initialize(paymentData);
+
     if (response.status === "success") {
       // Update order with payment reference
       await Order.findByIdAndUpdate(orderId, {
         "paymentIntent.flw_ref": response.data.flw_ref,
-        "paymentIntent.status": "pending"
+        "paymentIntent.status": PaymentStatus.PENDING,
       });
-      
+
       res.json({
         success: true,
         message: "Payment initialized successfully",
@@ -157,8 +206,8 @@ const initializePayment = asyncHandler(async (req, res) => {
           payment_url: response.data.link,
           flw_ref: response.data.flw_ref,
           orderId: orderId,
-          amount: totalAmount
-        }
+          amount: totalAmount,
+        },
       });
     } else {
       throw new Error(response.message || "Payment initialization failed");
@@ -180,199 +229,226 @@ const initializePayment = asyncHandler(async (req, res) => {
  */
 const verifyPayment = asyncHandler(async (req, res) => {
   const { transaction_id, orderId } = req.body;
-  
+
   if (!transaction_id || !orderId) {
     return res.status(400).json({
       success: false,
-      message: "Transaction ID and Order ID are required"
+      message: "Transaction ID and Order ID are required",
     });
   }
-  
+
   validateMongodbId(orderId);
-  
+
   const session = await mongoose.startSession();
-  
+
   try {
     await session.withTransaction(async () => {
       // Verify payment with Flutterwave
-      const response = await flw.Transaction.verify({ id: transaction_id });
-      
-      if (response.status === "success" && response.data.status === "successful") {
+      const flwClient = getFlutterwaveInstance();
+      const response = await flwClient.Transaction.verify({
+        id: transaction_id,
+      });
+
+      if (
+        response.status === "success" &&
+        response.data.status === "successful"
+      ) {
         // Get order with populated data
         const order = await Order.findById(orderId)
-          .populate('orderedBy', 'fullName email mobile')
-          .populate('products.product', 'title listedPrice price store')
-          .populate('products.store', 'name')
-          .populate('deliveryAgent', 'fullName email mobile')
+          .populate("orderedBy", "fullName email mobile")
+          .populate("products.product", "title listedPrice price store")
+          .populate("products.store", "name")
+          .populate("deliveryAgent", "fullName email mobile")
           .session(session);
-        
+
         if (!order) {
           throw new Error("Order not found");
         }
-        
+
         // Calculate commission breakdown using existing logic
         const commissionData = await calculateCommissionBreakdown(order);
-        
+
         // Get VAT configuration
         const vatConfig = await VATConfig.getActiveConfig();
         if (!vatConfig) {
           throw new Error("VAT configuration not found");
         }
-        
+
         // Calculate VAT
         const vatAmount = vatConfig.calculateVAT(order.paymentIntent.amount);
-        
+
         // Determine VAT responsibility
-        const vendor = await User.findById(order.products[0].product.store).session(session);
-        const vatResponsibility = vatConfig.getVATResponsibility(vendor, order.paymentIntent.amount);
-        
+        const vendor = await User.findById(
+          order.products[0].product.store,
+        ).session(session);
+        const vatResponsibility = vatConfig.getVATResponsibility(
+          vendor,
+          order.paymentIntent.amount,
+        );
+
         // Create transaction ledger entry
         const transactionId = `PAY_${Date.now()}_${MakeID(6)}`;
         const transaction = await Transaction.createTransaction({
           transactionId,
           reference: `Payment-${orderId}`,
-          type: 'order_payment',
+          type: "order_payment",
           totalAmount: order.paymentIntent.amount,
           entries: [
             // Customer payment
             {
-              account: 'cash_account',
+              account: "cash_account",
               userId: order.orderedBy._id,
               debit: order.paymentIntent.amount,
               credit: 0,
-              description: `Payment for order ${orderId}`
+              description: `Payment for order ${orderId}`,
             },
             {
-              account: 'accounts_receivable',
+              account: "accounts_receivable",
               userId: order.orderedBy._id,
               debit: 0,
               credit: order.paymentIntent.amount,
-              description: `Receivable from customer`
+              description: `Receivable from customer`,
             },
             // Platform commission
             {
-              account: 'commission_revenue',
+              account: "commission_revenue",
               userId: null,
               debit: commissionData.platformAmount,
               credit: 0,
-              description: `Platform commission`
+              description: `Platform commission`,
             },
             {
-              account: 'accounts_payable',
+              account: "accounts_payable",
               userId: null,
               debit: 0,
               credit: commissionData.platformAmount,
-              description: `Platform commission payable`
+              description: `Platform commission payable`,
             },
             // Vendor earnings
             {
-              account: 'commission_payable',
+              account: "commission_payable",
               userId: vendor._id,
               debit: commissionData.vendorAmount,
               credit: 0,
-              description: `Vendor earnings`
+              description: `Vendor earnings`,
             },
             {
-              account: 'wallet_vendor',
+              account: "wallet_vendor",
               userId: vendor._id,
               debit: 0,
               credit: commissionData.vendorAmount,
-              description: `Vendor wallet credit`
+              description: `Vendor wallet credit`,
             },
             // Dispatch earnings (if applicable)
-            ...(commissionData.dispatchAmount > 0 ? [
-              {
-                account: 'commission_payable',
-                userId: order.deliveryAgent?._id,
-                debit: commissionData.dispatchAmount,
-                credit: 0,
-                description: `Dispatch earnings`
-              },
-              {
-                account: 'wallet_dispatch',
-                userId: order.deliveryAgent?._id,
-                debit: 0,
-                credit: commissionData.dispatchAmount,
-                description: `Dispatch wallet credit`
-              }
-            ] : []),
+            ...(commissionData.dispatchAmount > 0
+              ? [
+                  {
+                    account: "commission_payable",
+                    userId: order.deliveryAgent?._id,
+                    debit: commissionData.dispatchAmount,
+                    credit: 0,
+                    description: `Dispatch earnings`,
+                  },
+                  {
+                    account: "wallet_dispatch",
+                    userId: order.deliveryAgent?._id,
+                    debit: 0,
+                    credit: commissionData.dispatchAmount,
+                    description: `Dispatch wallet credit`,
+                  },
+                ]
+              : []),
             // VAT handling
-            ...(vatAmount > 0 ? [
-              {
-                account: 'vat_payable',
-                userId: vatResponsibility === 'platform' ? null : vendor._id,
-                debit: vatAmount,
-                credit: 0,
-                description: `VAT collected`
-              },
-              {
-                account: 'vat_revenue',
-                userId: null,
-                debit: 0,
-                credit: vatAmount,
-                description: `VAT revenue`
-              }
-            ] : [])
+            ...(vatAmount > 0
+              ? [
+                  {
+                    account: "vat_payable",
+                    userId:
+                      vatResponsibility === "platform" ? null : vendor._id,
+                    debit: vatAmount,
+                    credit: 0,
+                    description: `VAT collected`,
+                  },
+                  {
+                    account: "vat_revenue",
+                    userId: null,
+                    debit: 0,
+                    credit: vatAmount,
+                    description: `VAT revenue`,
+                  },
+                ]
+              : []),
           ],
           vat: {
             rate: vatConfig.rates.standard,
             amount: vatAmount,
             responsibility: vatResponsibility,
-            collected: true
+            collected: true,
           },
           commission: {
             platformRate: commissionData.platformRate,
             platformAmount: commissionData.platformAmount,
             vendorAmount: commissionData.vendorAmount,
-            dispatchAmount: commissionData.dispatchAmount
+            dispatchAmount: commissionData.dispatchAmount,
           },
           relatedEntity: {
-            type: 'order',
-            id: orderId
+            type: "order",
+            id: orderId,
           },
-          status: 'completed',
+          status: "completed",
           metadata: {
-            paymentMethod: 'flutterwave',
+            paymentMethod: "flutterwave",
             externalTransactionId: transaction_id,
-            notes: `Payment processed via Flutterwave with VAT responsibility: ${vatResponsibility}`
-          }
+            notes: `Payment processed via Flutterwave with VAT responsibility: ${vatResponsibility}`,
+          },
         });
-        
+
         // Update vendor wallet
         if (commissionData.vendorAmount > 0) {
-          let vendorWallet = await Wallet.findOne({ user: vendor._id }).session(session);
+          let vendorWallet = await Wallet.findOne({ user: vendor._id }).session(
+            session,
+          );
           if (!vendorWallet) {
             vendorWallet = await Wallet.createWallet(vendor._id, 0);
           }
-          await vendorWallet.addFunds(commissionData.vendorAmount, 'earning');
+          await vendorWallet.addFunds(commissionData.vendorAmount, "earning");
         }
-        
+
         // Update dispatch wallet (if applicable)
         if (commissionData.dispatchAmount > 0 && order.deliveryAgent) {
-          let dispatchWallet = await Wallet.findOne({ user: order.deliveryAgent._id }).session(session);
+          let dispatchWallet = await Wallet.findOne({
+            user: order.deliveryAgent._id,
+          }).session(session);
           if (!dispatchWallet) {
-            dispatchWallet = await Wallet.createWallet(order.deliveryAgent._id, 0);
+            dispatchWallet = await Wallet.createWallet(
+              order.deliveryAgent._id,
+              0,
+            );
           }
-          await dispatchWallet.addFunds(commissionData.dispatchAmount, 'earning');
+          await dispatchWallet.addFunds(
+            commissionData.dispatchAmount,
+            "earning",
+          );
         }
-        
+
         // Update order payment status
         const updatedOrder = await Order.findByIdAndUpdate(
           orderId,
           {
-            paymentStatus: "Paid",
-            "paymentIntent.status": "paid",
+            paymentStatus: PaymentStatus.PAID,
+            "paymentIntent.status": "paid", // Flutterwave response status is usually lowercase
             "paymentIntent.flw_ref": transaction_id,
             "paymentIntent.paid_at": new Date(),
             "paymentIntent.transaction_id": transaction.transactionId,
-            orderStatus: "Pending"
+            orderStatus: OrderStatus.PENDING,
           },
-          { new: true }
-        ).populate('orderedBy', 'fullName email mobile')
-         .populate('products.product', 'title listedPrice')
-         .populate('products.store', 'name')
-         .session(session);
-        
+          { new: true },
+        )
+          .populate("orderedBy", "fullName email mobile")
+          .populate("products.product", "title listedPrice")
+          .populate("products.store", "name")
+          .session(session);
+
         res.json({
           success: true,
           message: "Payment verified and processed successfully",
@@ -383,34 +459,34 @@ const verifyPayment = asyncHandler(async (req, res) => {
               amount: response.data.amount,
               currency: response.data.currency,
               status: response.data.status,
-              paid_at: new Date()
+              paid_at: new Date(),
             },
             commission: commissionData,
             vat: {
               amount: vatAmount,
               responsibility: vatResponsibility,
-              rate: vatConfig.rates.standard
+              rate: vatConfig.rates.standard,
             },
             ledger: {
               transactionId: transaction.transactionId,
-              reference: transaction.reference
-            }
-          }
+              reference: transaction.reference,
+            },
+          },
         });
       } else {
         // Payment failed
         await Order.findByIdAndUpdate(orderId, {
-          "paymentIntent.status": "failed",
-          "paymentIntent.failed_at": new Date()
+          "paymentIntent.status": PaymentStatus.FAILED.toLowerCase(),
+          "paymentIntent.failed_at": new Date(),
         }).session(session);
-        
+
         res.status(400).json({
           success: false,
           message: "Payment verification failed",
           data: {
             status: response.data?.status || "failed",
-            message: response.message || "Payment was not successful"
-          }
+            message: response.message || "Payment was not successful",
+          },
         });
       }
     });
@@ -435,30 +511,30 @@ const verifyPayment = asyncHandler(async (req, res) => {
 const getPaymentStatus = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
   const { _id } = req.user;
-  
+
   validateMongodbId(orderId);
-  
+
   try {
     const order = await Order.findOne({
       _id: orderId,
-      orderedBy: _id
-    }).select('paymentIntent paymentStatus orderStatus');
-    
+      orderedBy: _id,
+    }).select("paymentIntent paymentStatus orderStatus");
+
     if (!order) {
       return res.status(404).json({
         success: false,
-        message: "Order not found"
+        message: "Order not found",
       });
     }
-    
+
     res.json({
       success: true,
       data: {
         orderId: orderId,
         paymentStatus: order.paymentStatus,
         orderStatus: order.orderStatus,
-        paymentIntent: order.paymentIntent
-      }
+        paymentIntent: order.paymentIntent,
+      },
     });
   } catch (error) {
     console.log(error);
@@ -478,189 +554,204 @@ const getPaymentStatus = asyncHandler(async (req, res) => {
  */
 const refundPayment = asyncHandler(async (req, res) => {
   const { orderId, amount, reason } = req.body;
-  
+
   if (!orderId) {
     return res.status(400).json({
       success: false,
-      message: "Order ID is required"
+      message: "Order ID is required",
     });
   }
-  
+
   validateMongodbId(orderId);
-  
+
   const session = await mongoose.startSession();
-  
+
   try {
     await session.withTransaction(async () => {
       const order = await Order.findById(orderId)
-        .populate('orderedBy', 'fullName email mobile')
-        .populate('products.product', 'title listedPrice price store')
-        .populate('products.store', 'name')
-        .populate('deliveryAgent', 'fullName email mobile')
+        .populate("orderedBy", "fullName email mobile")
+        .populate("products.product", "title listedPrice price store")
+        .populate("products.store", "name")
+        .populate("deliveryAgent", "fullName email mobile")
         .session(session);
-      
+
       if (!order) {
         throw new Error("Order not found");
       }
-      
-      if (order.paymentStatus !== "Paid") {
+
+      if (order.paymentStatus !== PaymentStatus.PAID) {
         throw new Error("Order is not paid, cannot process refund");
       }
-      
+
       const refundAmount = amount || order.paymentIntent.amount;
-      
+
       // Process refund with Flutterwave
       const refundData = {
         tx_ref: order.paymentIntent.id,
         amount: refundAmount,
-        type: "refund"
+        type: "refund",
       };
-      
-      const response = await flw.Transaction.refund(refundData);
-      
+
+      const flwClient = getFlutterwaveInstance();
+      const response = await flwClient.Transaction.refund(refundData);
+
       if (response.status === "success") {
         // Get original transaction for commission reversal
         const originalTransaction = await Transaction.findOne({
           reference: `Payment-${orderId}`,
-          type: 'order_payment'
+          type: "order_payment",
         }).session(session);
-        
+
         if (originalTransaction) {
           // Calculate proportional refunds
           const refundRatio = refundAmount / originalTransaction.totalAmount;
-          const platformRefund = originalTransaction.commission.platformAmount * refundRatio;
-          const vendorRefund = originalTransaction.commission.vendorAmount * refundRatio;
-          const dispatchRefund = originalTransaction.commission.dispatchAmount * refundRatio;
+          const platformRefund =
+            originalTransaction.commission.platformAmount * refundRatio;
+          const vendorRefund =
+            originalTransaction.commission.vendorAmount * refundRatio;
+          const dispatchRefund =
+            originalTransaction.commission.dispatchAmount * refundRatio;
           const vatRefund = originalTransaction.vat.amount * refundRatio;
-          
+
           // Create refund transaction
           const refundTransactionId = `REF_${Date.now()}_${MakeID(6)}`;
           const refundTransaction = await Transaction.createTransaction({
             transactionId: refundTransactionId,
             reference: `Refund-${orderId}`,
-            type: 'order_refund',
+            type: "order_refund",
             totalAmount: refundAmount,
             entries: [
               // Customer refund
               {
-                account: 'accounts_receivable',
+                account: "accounts_receivable",
                 userId: order.orderedBy._id,
                 debit: refundAmount,
                 credit: 0,
-                description: `Refund for order ${orderId}`
+                description: `Refund for order ${orderId}`,
               },
               {
-                account: 'cash_account',
+                account: "cash_account",
                 userId: order.orderedBy._id,
                 debit: 0,
                 credit: refundAmount,
-                description: `Refund payment to customer`
+                description: `Refund payment to customer`,
               },
               // Platform commission reversal
               {
-                account: 'commission_revenue',
+                account: "commission_revenue",
                 userId: null,
                 debit: 0,
                 credit: platformRefund,
-                description: `Platform commission reversal`
+                description: `Platform commission reversal`,
               },
               {
-                account: 'accounts_payable',
+                account: "accounts_payable",
                 userId: null,
                 debit: platformRefund,
                 credit: 0,
-                description: `Platform commission refund`
+                description: `Platform commission refund`,
               },
               // Vendor refund
               {
-                account: 'wallet_vendor',
+                account: "wallet_vendor",
                 userId: order.products[0].product.store,
                 debit: vendorRefund,
                 credit: 0,
-                description: `Vendor refund for order ${orderId}`
+                description: `Vendor refund for order ${orderId}`,
               },
               {
-                account: 'commission_payable',
+                account: "commission_payable",
                 userId: order.products[0].product.store,
                 debit: 0,
                 credit: vendorRefund,
-                description: `Vendor commission reversal`
+                description: `Vendor commission reversal`,
               },
               // Dispatch refund (if applicable)
-              ...(dispatchRefund > 0 ? [
-                {
-                  account: 'wallet_dispatch',
-                  userId: order.deliveryAgent?._id,
-                  debit: dispatchRefund,
-                  credit: 0,
-                  description: `Dispatch refund for order ${orderId}`
-                },
-                {
-                  account: 'commission_payable',
-                  userId: order.deliveryAgent?._id,
-                  debit: 0,
-                  credit: dispatchRefund,
-                  description: `Dispatch commission reversal`
-                }
-              ] : []),
+              ...(dispatchRefund > 0
+                ? [
+                    {
+                      account: "wallet_dispatch",
+                      userId: order.deliveryAgent?._id,
+                      debit: dispatchRefund,
+                      credit: 0,
+                      description: `Dispatch refund for order ${orderId}`,
+                    },
+                    {
+                      account: "commission_payable",
+                      userId: order.deliveryAgent?._id,
+                      debit: 0,
+                      credit: dispatchRefund,
+                      description: `Dispatch commission reversal`,
+                    },
+                  ]
+                : []),
               // VAT reversal
-              ...(vatRefund > 0 ? [
-                {
-                  account: 'vat_payable',
-                  userId: originalTransaction.vat.responsibility === 'platform' ? null : order.products[0].product.store,
-                  debit: 0,
-                  credit: vatRefund,
-                  description: `VAT reversal for refund`
-                },
-                {
-                  account: 'vat_revenue',
-                  userId: null,
-                  debit: vatRefund,
-                  credit: 0,
-                  description: `VAT revenue reversal`
-                }
-              ] : [])
+              ...(vatRefund > 0
+                ? [
+                    {
+                      account: "vat_payable",
+                      userId:
+                        originalTransaction.vat.responsibility === "platform"
+                          ? null
+                          : order.products[0].product.store,
+                      debit: 0,
+                      credit: vatRefund,
+                      description: `VAT reversal for refund`,
+                    },
+                    {
+                      account: "vat_revenue",
+                      userId: null,
+                      debit: vatRefund,
+                      credit: 0,
+                      description: `VAT revenue reversal`,
+                    },
+                  ]
+                : []),
             ],
             relatedEntity: {
-              type: 'order',
-              id: orderId
+              type: "order",
+              id: orderId,
             },
-            status: 'completed',
+            status: "completed",
             metadata: {
-              paymentMethod: 'refund',
+              paymentMethod: "refund",
               externalTransactionId: response.data.id,
-              notes: `Refund processed: ${reason || 'Customer request'}`,
-              originalTransactionId: originalTransaction.transactionId
-            }
+              notes: `Refund processed: ${reason || "Customer request"}`,
+              originalTransactionId: originalTransaction.transactionId,
+            },
           });
-          
+
           // Update vendor wallet
           if (vendorRefund > 0) {
-            const vendorWallet = await Wallet.findOne({ user: order.products[0].product.store }).session(session);
+            const vendorWallet = await Wallet.findOne({
+              user: order.products[0].product.store,
+            }).session(session);
             if (vendorWallet) {
-              await vendorWallet.deductFunds(vendorRefund, 'refund');
+              await vendorWallet.deductFunds(vendorRefund, "refund");
             }
           }
-          
+
           // Update dispatch wallet (if applicable)
           if (dispatchRefund > 0 && order.deliveryAgent) {
-            const dispatchWallet = await Wallet.findOne({ user: order.deliveryAgent._id }).session(session);
+            const dispatchWallet = await Wallet.findOne({
+              user: order.deliveryAgent._id,
+            }).session(session);
             if (dispatchWallet) {
-              await dispatchWallet.deductFunds(dispatchRefund, 'refund');
+              await dispatchWallet.deductFunds(dispatchRefund, "refund");
             }
           }
         }
-        
+
         // Update order status
         await Order.findByIdAndUpdate(orderId, {
-          paymentStatus: "Refunded",
-          orderStatus: "Cancelled",
+          paymentStatus: PaymentStatus.REFUNDED,
+          orderStatus: OrderStatus.CANCELLED,
           "paymentIntent.status": "refunded",
           "paymentIntent.refunded_at": new Date(),
           "paymentIntent.refund_amount": refundAmount,
-          "paymentIntent.refund_reason": reason || "Customer request"
+          "paymentIntent.refund_reason": reason || "Customer request",
         }).session(session);
-        
+
         res.json({
           success: true,
           message: "Refund processed successfully",
@@ -670,9 +761,9 @@ const refundPayment = asyncHandler(async (req, res) => {
             status: response.data.status,
             ledger: {
               transactionId: refundTransaction?.transactionId,
-              reference: refundTransaction?.reference
-            }
-          }
+              reference: refundTransaction?.reference,
+            },
+          },
         });
       } else {
         throw new Error(response.message || "Refund processing failed");
@@ -697,7 +788,7 @@ const refundPayment = asyncHandler(async (req, res) => {
  */
 const commissionHandler = asyncHandler(async (req, res) => {
   const { _id } = req.user;
-  
+
   try {
     const order = await Order.findOne({ orderedBy: _id })
       .populate({
@@ -710,59 +801,63 @@ const commissionHandler = asyncHandler(async (req, res) => {
           model: "Store",
         },
       })
-      .populate('deliveryAgent', 'fullName email mobile');
-    
+      .populate("deliveryAgent", "fullName email mobile");
+
     if (!order) {
       return res.status(404).json({
         success: false,
-        message: "No order found for this user"
+        message: "No order found for this user",
       });
     }
-    
+
     // Calculate commission breakdown
     const commissionData = await calculateCommissionBreakdown(order);
-    
+
     // Get VAT configuration
     const vatConfig = await VATConfig.getActiveConfig();
-    const vatAmount = vatConfig ? vatConfig.calculateVAT(order.paymentIntent.amount) : 0;
-    
+    const vatAmount = vatConfig
+      ? vatConfig.calculateVAT(order.paymentIntent.amount)
+      : 0;
+
     // Determine VAT responsibility
     const vendor = await User.findById(order.products[0].product.store);
-    const vatResponsibility = vatConfig ? vatConfig.getVATResponsibility(vendor, order.paymentIntent.amount) : 'platform';
-    
+    const vatResponsibility = vatConfig
+      ? vatConfig.getVATResponsibility(vendor, order.paymentIntent.amount)
+      : "platform";
+
     // Group commissions by store
     const storeCommissions = {};
-    
+
     order.products.forEach((item) => {
       const storeId = item.product.store._id.toString();
       const storePrice = item.product.price;
       const listedPrice = item.product.listedPrice;
       const count = item.count;
-      
+
       const storeCommission = storePrice * count;
-      const platformCommission = (listedPrice * count) - storeCommission;
-      
+      const platformCommission = listedPrice * count - storeCommission;
+
       if (!storeCommissions[storeId]) {
         storeCommissions[storeId] = {
           store: item.product.store,
           storeCommission: 0,
           platformCommission: 0,
-          totalAmount: 0
+          totalAmount: 0,
         };
       }
-      
+
       storeCommissions[storeId].storeCommission += storeCommission;
       storeCommissions[storeId].platformCommission += platformCommission;
       storeCommissions[storeId].totalAmount += listedPrice * count;
     });
-    
+
     const payblocks = Object.values(storeCommissions).map((item) => ({
       store: item.store,
       storeCommission: Math.round(item.storeCommission * 100) / 100,
       platformCommission: Math.round(item.platformCommission * 100) / 100,
-      totalAmount: Math.round(item.totalAmount * 100) / 100
+      totalAmount: Math.round(item.totalAmount * 100) / 100,
     }));
-    
+
     res.json({
       success: true,
       data: {
@@ -772,14 +867,16 @@ const commissionHandler = asyncHandler(async (req, res) => {
         vat: {
           amount: vatAmount,
           responsibility: vatResponsibility,
-          rate: vatConfig ? vatConfig.rates.standard : 7.5
+          rate: vatConfig ? vatConfig.rates.standard : 7.5,
         },
         storeCommissions: payblocks,
-        dispatch: order.deliveryAgent ? {
-          agent: order.deliveryAgent,
-          fee: order.deliveryFee || 0
-        } : null
-      }
+        dispatch: order.deliveryAgent
+          ? {
+              agent: order.deliveryAgent,
+              fee: order.deliveryFee || 0,
+            }
+          : null,
+      },
     });
   } catch (error) {
     console.log(error);
@@ -799,82 +896,90 @@ const commissionHandler = asyncHandler(async (req, res) => {
 const generatePaymentReceipt = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
   const { _id } = req.user;
-  
+
   validateMongodbId(orderId);
-  
+
   try {
     // Get order with populated data
     const order = await Order.findById(orderId)
-      .populate('orderedBy', 'fullName email mobile')
-      .populate('products.product', 'title listedPrice price store')
-      .populate('products.store', 'name')
-      .populate('deliveryAgent', 'fullName email mobile');
-    
+      .populate("orderedBy", "fullName email mobile")
+      .populate("products.product", "title listedPrice price store")
+      .populate("products.store", "name")
+      .populate("deliveryAgent", "fullName email mobile");
+
     if (!order) {
       return res.status(404).json({
         success: false,
-        message: "Order not found"
+        message: "Order not found",
       });
     }
-    
+
     // Check if user has access to this order
     if (order.orderedBy._id.toString() !== _id.toString()) {
       return res.status(403).json({
         success: false,
-        message: "Access denied. This order doesn't belong to you."
+        message: "Access denied. This order doesn't belong to you.",
       });
     }
-    
+
     // Check if order is paid
-    if (order.paymentStatus !== "Paid") {
+    if (order.paymentStatus !== PaymentStatus.PAID) {
       return res.status(400).json({
         success: false,
-        message: "Receipt can only be generated for paid orders"
+        message: "Receipt can only be generated for paid orders",
       });
     }
-    
+
     // Get transaction data
     const transaction = await Transaction.findOne({
       reference: `Payment-${orderId}`,
-      type: 'order_payment'
+      type: "order_payment",
     });
-    
+
     if (!transaction) {
       return res.status(404).json({
         success: false,
-        message: "Transaction not found"
+        message: "Transaction not found",
       });
     }
-    
+
     // Calculate commission breakdown
     const commissionData = await calculateCommissionBreakdown(order);
-    
+
     // Get VAT configuration
     const vatConfig = await VATConfig.getActiveConfig();
-    const vatAmount = vatConfig ? vatConfig.calculateVAT(order.paymentIntent.amount) : 0;
+    const vatAmount = vatConfig
+      ? vatConfig.calculateVAT(order.paymentIntent.amount)
+      : 0;
     const vendor = await User.findById(order.products[0].product.store);
-    const vatResponsibility = vatConfig ? vatConfig.getVATResponsibility(vendor, order.paymentIntent.amount) : 'platform';
-    
+    const vatResponsibility = vatConfig
+      ? vatConfig.getVATResponsibility(vendor, order.paymentIntent.amount)
+      : "platform";
+
     const vatData = {
       rate: vatConfig ? vatConfig.rates.standard : 7.5,
       amount: vatAmount,
-      responsibility: vatResponsibility
+      responsibility: vatResponsibility,
     };
-    
+
     // Generate PDF receipt
-    const pdfPath = await receiptService.generatePaymentReceipt(order, transaction, commissionData, vatData);
-    
+    const pdfPath = await receiptService.generatePaymentReceipt(
+      order,
+      transaction,
+      commissionData,
+      vatData,
+    );
+
     // Send PDF file
     res.download(pdfPath, `receipt_${order.paymentIntent.id}.pdf`, (err) => {
       if (err) {
-        console.error('Error sending PDF:', err);
+        console.error("Error sending PDF:", err);
         res.status(500).json({
           success: false,
-          message: "Failed to download receipt"
+          message: "Failed to download receipt",
         });
       }
     });
-    
   } catch (error) {
     console.log(error);
     throw new Error(error.message || "Failed to generate receipt");
@@ -894,56 +999,59 @@ const generatePaymentReceipt = asyncHandler(async (req, res) => {
 const generateTransactionStatement = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   const { startDate, endDate } = req.query;
-  
+
   try {
     // Get user data
     const user = await User.findById(_id);
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: "User not found"
+        message: "User not found",
       });
     }
-    
+
     // Build query for transactions
     const query = { "entries.userId": _id };
-    
+
     if (startDate || endDate) {
       query.createdAt = {};
       if (startDate) query.createdAt.$gte = new Date(startDate);
       if (endDate) query.createdAt.$lte = new Date(endDate);
     }
-    
+
     // Get transactions
     const transactions = await Transaction.find(query)
       .sort({ createdAt: -1 })
       .limit(1000); // Limit to prevent large PDFs
-    
+
     if (transactions.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "No transactions found for the specified period"
+        message: "No transactions found for the specified period",
       });
     }
-    
+
     // Generate PDF statement
-    const pdfPath = await receiptService.generateTransactionStatement(user, transactions, {
-      startDate,
-      endDate
-    });
-    
+    const pdfPath = await receiptService.generateTransactionStatement(
+      user,
+      transactions,
+      {
+        startDate,
+        endDate,
+      },
+    );
+
     // Send PDF file
     const filename = `statement_${user._id}_${Date.now()}.pdf`;
     res.download(pdfPath, filename, (err) => {
       if (err) {
-        console.error('Error sending PDF:', err);
+        console.error("Error sending PDF:", err);
         res.status(500).json({
           success: false,
-          message: "Failed to download statement"
+          message: "Failed to download statement",
         });
       }
     });
-    
   } catch (error) {
     console.log(error);
     throw new Error(error.message || "Failed to generate statement");
@@ -961,55 +1069,66 @@ const generateTransactionStatement = asyncHandler(async (req, res) => {
  */
 const generateVATReport = asyncHandler(async (req, res) => {
   const { startDate, endDate } = req.query;
-  
+
   try {
-    const start = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const start = startDate
+      ? new Date(startDate)
+      : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const end = endDate ? new Date(endDate) : new Date();
-    
+
     // Get VAT summary
     const vatSummary = await Transaction.getVATSummary(start, end);
-    
+
     if (!vatSummary || vatSummary.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "No VAT data found for the specified period"
+        message: "No VAT data found for the specified period",
       });
     }
-    
+
     // Process VAT summary data
     const processedSummary = {
-      totalVATCollected: vatSummary.reduce((sum, item) => sum + item.totalVATCollected, 0),
-      totalTransactions: vatSummary.reduce((sum, item) => sum + item.totalTransactions, 0),
-      platformVAT: vatSummary.find(item => item._id === 'platform')?.totalVATCollected || 0,
-      vendorVAT: vatSummary.find(item => item._id === 'vendor')?.totalVATCollected || 0,
-      breakdown: vatSummary
+      totalVATCollected: vatSummary.reduce(
+        (sum, item) => sum + item.totalVATCollected,
+        0,
+      ),
+      totalTransactions: vatSummary.reduce(
+        (sum, item) => sum + item.totalTransactions,
+        0,
+      ),
+      platformVAT:
+        vatSummary.find((item) => item._id === "platform")?.totalVATCollected ||
+        0,
+      vendorVAT:
+        vatSummary.find((item) => item._id === "vendor")?.totalVATCollected ||
+        0,
+      breakdown: vatSummary,
     };
-    
+
     // Generate PDF report
     const pdfPath = await receiptService.generateVATReport(processedSummary, {
       startDate: start,
-      endDate: end
+      endDate: end,
     });
-    
+
     // Send PDF file
     const filename = `vat_report_${start.toISOString().slice(0, 10)}_${end.toISOString().slice(0, 10)}.pdf`;
     res.download(pdfPath, filename, (err) => {
       if (err) {
-        console.error('Error sending PDF:', err);
+        console.error("Error sending PDF:", err);
         res.status(500).json({
           success: false,
-          message: "Failed to download VAT report"
+          message: "Failed to download VAT report",
         });
       }
     });
-    
   } catch (error) {
     console.log(error);
     throw new Error(error.message || "Failed to generate VAT report");
   }
 });
 
-module.exports = { 
+module.exports = {
   initializePayment,
   verifyPayment,
   getPaymentStatus,
@@ -1017,5 +1136,5 @@ module.exports = {
   commissionHandler,
   generatePaymentReceipt,
   generateTransactionStatement,
-  generateVATReport
+  generateVATReport,
 };

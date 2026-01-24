@@ -1,7 +1,7 @@
-const admin = require('firebase-admin');
-const User = require('../models/userModel');
-const NotificationPreferences = require('../models/notificationPreferencesModel');
-const { sendEmail } = require('../controllers/emailController');
+const admin = require("firebase-admin");
+const User = require("../models/userModel");
+const NotificationPreferences = require("../models/notificationPreferencesModel");
+const { sendEmail } = require("../controllers/emailController");
 
 // Initialize Firebase Admin SDK
 let firebaseApp;
@@ -10,29 +10,36 @@ try {
   if (admin.apps.length === 0) {
     // Check if Firebase service account JSON is present
     if (!process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-      console.warn('FIREBASE_SERVICE_ACCOUNT_JSON not configured. Push notifications will be disabled.');
+      console.warn(
+        "FIREBASE_SERVICE_ACCOUNT_JSON not configured. Push notifications will be disabled.",
+      );
       firebaseApp = null;
     } else {
       // Parse the service account JSON
-      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-      
+      const serviceAccount = JSON.parse(
+        process.env.FIREBASE_SERVICE_ACCOUNT_JSON,
+      );
+
       // Ensure private key has proper line breaks
       if (serviceAccount.private_key) {
-        serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+        serviceAccount.private_key = serviceAccount.private_key.replace(
+          /\\n/g,
+          "\n",
+        );
       }
 
       firebaseApp = admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
-        projectId: serviceAccount.project_id
+        projectId: serviceAccount.project_id,
       });
-      
-      console.log('Firebase Admin SDK initialized successfully');
+
+      console.log("Firebase Admin SDK initialized successfully");
     }
   } else {
     firebaseApp = admin.app();
   }
 } catch (error) {
-  console.error('Firebase initialization error:', error);
+  console.error("Firebase initialization error:", error);
   firebaseApp = null;
 }
 
@@ -46,41 +53,53 @@ try {
  * @param {string} type - Notification type (orderUpdates, deliveryUpdates, etc.)
  * @returns {Object} - Send result
  */
-const sendNotificationToUser = async (userId, title, body, data = {}, type = 'systemUpdates') => {
+const sendNotificationToUser = async (
+  userId,
+  title,
+  body,
+  data = {},
+  type = "systemUpdates",
+) => {
   try {
     // Check if Firebase is initialized
     if (!firebaseApp) {
-      console.warn('Firebase not initialized. Skipping push notification.');
-      return { success: false, message: 'Firebase not configured' };
+      console.warn("Firebase not initialized. Skipping push notification.");
+      return { success: false, message: "Firebase not configured" };
     }
 
     // Get user and their notification preferences
-    const user = await User.findById(userId).select('fcmTokens fullName email');
+    const user = await User.findById(userId).select("fcmTokens fullName email");
     if (!user) {
-      throw new Error('User not found');
+      throw new Error("User not found");
     }
 
     const preferences = await NotificationPreferences.findOne({ user: userId });
     if (!preferences) {
       // Create default preferences if none exist
       await NotificationPreferences.create({ user: userId });
-      return { success: false, message: 'No notification preferences found' };
+      return { success: false, message: "No notification preferences found" };
     }
 
     // Check if user wants to receive this type of notification
-    const shouldReceivePush = preferences.shouldReceiveNotification(type, 'push');
-    const shouldReceiveEmail = preferences.shouldReceiveNotification(type, 'email');
+    const shouldReceivePush = preferences.shouldReceiveNotification(
+      type,
+      "push",
+    );
+    const shouldReceiveEmail = preferences.shouldReceiveNotification(
+      type,
+      "email",
+    );
 
     const results = {
       push: { sent: false, result: null },
-      email: { sent: false, result: null }
+      email: { sent: false, result: null },
     };
 
     // Send push notification
     if (shouldReceivePush && user.fcmTokens && user.fcmTokens.length > 0) {
       const activeTokens = user.fcmTokens
-        .filter(token => token.isActive)
-        .map(token => token.token);
+        .filter((token) => token.isActive)
+        .map((token) => token.token);
 
       if (activeTokens.length > 0) {
         const message = {
@@ -92,40 +111,46 @@ const sendNotificationToUser = async (userId, title, body, data = {}, type = 'sy
             ...data,
             type,
             userId: userId,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
           },
           tokens: activeTokens,
           webpush: {
             notification: {
-              icon: process.env.NOTIFICATION_ICON_URL || "https://via.placeholder.com/64",
-              badge: process.env.NOTIFICATION_BADGE_URL || "https://via.placeholder.com/32",
-              requireInteraction: true
-            }
+              icon:
+                process.env.NOTIFICATION_ICON_URL ||
+                "https://via.placeholder.com/64",
+              badge:
+                process.env.NOTIFICATION_BADGE_URL ||
+                "https://via.placeholder.com/32",
+              requireInteraction: true,
+            },
           },
           android: {
             notification: {
               icon: "ic_notification",
               color: "#4CAF50",
               sound: "default",
-              priority: "high"
-            }
+              priority: "high",
+            },
           },
           apns: {
             payload: {
               aps: {
                 sound: "default",
-                badge: 1
-              }
-            }
-          }
+                badge: 1,
+              },
+            },
+          },
         };
 
-        const pushResult = await admin.messaging().sendEachForMulticast(message);
+        const pushResult = await admin
+          .messaging()
+          .sendEachForMulticast(message);
         results.push = {
           sent: true,
           result: pushResult,
           successCount: pushResult.successCount,
-          failureCount: pushResult.failureCount
+          failureCount: pushResult.failureCount,
         };
 
         // Remove failed tokens
@@ -136,10 +161,10 @@ const sendNotificationToUser = async (userId, title, body, data = {}, type = 'sy
               failedTokens.push(activeTokens[index]);
             }
           });
-          
+
           if (failedTokens.length > 0) {
             await User.findByIdAndUpdate(userId, {
-              $pull: { fcmTokens: { token: { $in: failedTokens } } }
+              $pull: { fcmTokens: { token: { $in: failedTokens } } },
             });
           }
         }
@@ -162,25 +187,24 @@ const sendNotificationToUser = async (userId, title, body, data = {}, type = 'sy
               </p>
             </div>
           </div>
-        `
+        `,
       };
 
       try {
-        await sendEmail(emailData);
-        results.email = { sent: true, result: 'Email sent successfully' };
+        sendEmail(emailData);
+        results.email = { sent: true, result: "Email sent successfully" };
       } catch (emailError) {
-        console.error('Email sending error:', emailError);
+        console.error("Email sending error:", emailError);
         results.email = { sent: false, result: emailError.message };
       }
     }
 
     return {
       success: results.push.sent || results.email.sent,
-      results
+      results,
     };
-
   } catch (error) {
-    console.error('Notification sending error:', error);
+    console.error("Notification sending error:", error);
     throw error;
   }
 };
@@ -195,23 +219,35 @@ const sendNotificationToUser = async (userId, title, body, data = {}, type = 'sy
  * @param {string} type - Notification type
  * @returns {Object} - Send results
  */
-const sendNotificationToUsers = async (userIds, title, body, data = {}, type = 'systemUpdates') => {
+const sendNotificationToUsers = async (
+  userIds,
+  title,
+  body,
+  data = {},
+  type = "systemUpdates",
+) => {
   const results = {
     totalUsers: userIds.length,
     successCount: 0,
     failureCount: 0,
-    details: []
+    details: [],
   };
 
   for (const userId of userIds) {
     try {
-      const result = await sendNotificationToUser(userId, title, body, data, type);
+      const result = await sendNotificationToUser(
+        userId,
+        title,
+        body,
+        data,
+        type,
+      );
       results.details.push({
         userId,
         success: result.success,
-        results: result.results
+        results: result.results,
       });
-      
+
       if (result.success) {
         results.successCount++;
       } else {
@@ -222,7 +258,7 @@ const sendNotificationToUsers = async (userIds, title, body, data = {}, type = '
       results.details.push({
         userId,
         success: false,
-        error: error.message
+        error: error.message,
       });
       results.failureCount++;
     }
@@ -241,14 +277,20 @@ const sendNotificationToUsers = async (userIds, title, body, data = {}, type = '
  * @param {string} type - Notification type
  * @returns {Object} - Send results
  */
-const sendNotificationToRole = async (role, title, body, data = {}, type = 'systemUpdates') => {
+const sendNotificationToRole = async (
+  role,
+  title,
+  body,
+  data = {},
+  type = "systemUpdates",
+) => {
   try {
-    const users = await User.find({ role: { $in: [role] } }).select('_id');
-    const userIds = users.map(user => user._id.toString());
-    
+    const users = await User.find({ role: { $in: [role] } }).select("_id");
+    const userIds = users.map((user) => user._id.toString());
+
     return await sendNotificationToUsers(userIds, title, body, data, type);
   } catch (error) {
-    console.error('Error sending notification to role:', error);
+    console.error("Error sending notification to role:", error);
     throw error;
   }
 };
@@ -266,12 +308,12 @@ const registerFCMToken = async (userId, token, deviceType, deviceId) => {
   try {
     const user = await User.findById(userId);
     if (!user) {
-      throw new Error('User not found');
+      throw new Error("User not found");
     }
 
     // Check if token already exists
-    const existingToken = user.fcmTokens.find(t => t.token === token);
-    
+    const existingToken = user.fcmTokens.find((t) => t.token === token);
+
     if (existingToken) {
       // Update existing token
       existingToken.lastUsed = new Date();
@@ -285,13 +327,15 @@ const registerFCMToken = async (userId, token, deviceType, deviceId) => {
         deviceType,
         deviceId,
         lastUsed: new Date(),
-        isActive: true
+        isActive: true,
       });
     }
 
     // Limit to 5 tokens per user (remove oldest if exceeded)
     if (user.fcmTokens.length > 5) {
-      user.fcmTokens.sort((a, b) => new Date(b.lastUsed) - new Date(a.lastUsed));
+      user.fcmTokens.sort(
+        (a, b) => new Date(b.lastUsed) - new Date(a.lastUsed),
+      );
       user.fcmTokens = user.fcmTokens.slice(0, 5);
     }
 
@@ -299,11 +343,11 @@ const registerFCMToken = async (userId, token, deviceType, deviceId) => {
 
     return {
       success: true,
-      message: 'FCM token registered successfully',
-      tokenCount: user.fcmTokens.length
+      message: "FCM token registered successfully",
+      tokenCount: user.fcmTokens.length,
     };
   } catch (error) {
-    console.error('FCM token registration error:', error);
+    console.error("FCM token registration error:", error);
     throw error;
   }
 };
@@ -320,16 +364,16 @@ const unregisterFCMToken = async (userId, token) => {
     const result = await User.findByIdAndUpdate(
       userId,
       { $pull: { fcmTokens: { token } } },
-      { new: true }
+      { new: true },
     );
 
     return {
       success: true,
-      message: 'FCM token unregistered successfully',
-      tokenCount: result.fcmTokens.length
+      message: "FCM token unregistered successfully",
+      tokenCount: result.fcmTokens.length,
     };
   } catch (error) {
-    console.error('FCM token unregistration error:', error);
+    console.error("FCM token unregistration error:", error);
     throw error;
   }
 };
@@ -344,14 +388,20 @@ const unregisterFCMToken = async (userId, token) => {
  * @param {string} type - Notification type
  * @returns {Object} - Send results
  */
-const sendBulkNotification = async (criteria, title, body, data = {}, type = 'systemUpdates') => {
+const sendBulkNotification = async (
+  criteria,
+  title,
+  body,
+  data = {},
+  type = "systemUpdates",
+) => {
   try {
-    const users = await User.find(criteria).select('_id');
-    const userIds = users.map(user => user._id.toString());
-    
+    const users = await User.find(criteria).select("_id");
+    const userIds = users.map((user) => user._id.toString());
+
     return await sendNotificationToUsers(userIds, title, body, data, type);
   } catch (error) {
-    console.error('Bulk notification error:', error);
+    console.error("Bulk notification error:", error);
     throw error;
   }
 };
@@ -362,5 +412,5 @@ module.exports = {
   sendNotificationToRole,
   registerFCMToken,
   unregisterFCMToken,
-  sendBulkNotification
+  sendBulkNotification,
 };

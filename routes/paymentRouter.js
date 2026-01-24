@@ -7,10 +7,35 @@ const {
   commissionHandler,
   generatePaymentReceipt,
   generateTransactionStatement,
-  generateVATReport
+  generateVATReport,
 } = require("../controllers/paymentController");
+const {
+  handleFlutterwaveWebhook,
+} = require("../controllers/webhookController");
 const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
 const router = express.Router();
+
+/**
+ * @swagger
+ * /api/payment/webhook:
+ *   post:
+ *     summary: Flutterwave Webhook Handler
+ *     description: Securely handle Flutterwave webhook events with signature verification
+ *     tags:
+ *       - Payment
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *     responses:
+ *       200:
+ *         description: Webhook received
+ *       401:
+ *         description: Invalid signature
+ */
+router.post("/webhook", handleFlutterwaveWebhook);
 
 /**
  * @swagger

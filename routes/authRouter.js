@@ -16,15 +16,14 @@ const {
   addToCart2,
   emptyCart,
   verifyOtp,
-  resetPassword,
   forgotPasswordToken,
   getUserCart,
   updateCart,
-  checkoutCart,
   getUsersByStatus,
   getCurrentUser,
   changeActiveRole,
   googleAuth,
+  resetPassword,
 } = require("../controllers/userController");
 const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
 const { commissionHandler } = require("../controllers/paymentController");
@@ -1269,86 +1268,6 @@ router.post("/add-cart", authMiddleware, addToCart2);
  *         description: Cart removal fails
  */
 router.post("/empty-cart", authMiddleware, emptyCart);
-/**
- * @swagger
- * /api/user/create-order:
- *   post:
- *     summary: Create a new order for the user
- *     description: Create a new order for the user
- *     tags:
- *       - Orders
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - paymentIntent
- *               - deliveryMethod
- *               - deliveryAddress
- *             properties:
- *               paymentIntent:
- *                 type: string
- *                 description: Payment intent ID
- *               deliveryMethod:
- *                 type: string
- *                 description: Delivery method
- *               deliveryAddress:
- *                 type: object
- *                 description: Delivery address details
- *     responses:
- *       200:
- *         description: Created order details
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 _id:
- *                   type: string
- *                 products:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       product:
- *                         type: object
- *                         properties:
- *                           _id:
- *                             type: string
- *                           title:
- *                             type: string
- *                           listedPrice:
- *                             type: number
- *                           store:
- *                             type: object
- *                             properties:
- *                               _id:
- *                                 type: string
- *                               bankDetails:
- *                                 type: object
- *                               address:
- *                                 type: object
- *                               owner:
- *                                 type: object
- *                                 properties:
- *                                   mobile:
- *                                     type: string
- *                                   email:
- *                                     type: string
- *                       count:
- *                         type: number
- *                       price:
- *                         type: number
- *                 cartTotal:
- *                   type: number
- *       400:
- *         description: Order creation fails
- */
-router.post("/checkout", authMiddleware, checkoutCart);
 /**
  * @swagger
  * /api/user/verify:

@@ -12,7 +12,7 @@ var orderSchema = new mongoose.Schema(
         count: {
           type: Number,
           required: true,
-          min: 1 // Ensure count is at least 1
+          min: 1, // Ensure count is at least 1
         },
         stores: {
           type: mongoose.Schema.Types.ObjectId,
@@ -54,13 +54,20 @@ var orderSchema = new mongoose.Schema(
     },
     deliveryStatus: {
       type: String,
-      enum: ["pending_assignment", "assigned", "picked_up", "in_transit", "delivered", "failed"],
+      enum: [
+        "pending_assignment",
+        "assigned",
+        "picked_up",
+        "in_transit",
+        "delivered",
+        "failed",
+      ],
       default: "pending_assignment",
     },
     deliveryAgent: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: function() {
+      required: function () {
         return this.deliveryMethod === "delivery_agent";
       },
     },
@@ -77,6 +84,14 @@ var orderSchema = new mongoose.Schema(
     deliveryNotes: {
       type: String,
     },
+    deliveryMetadata: {
+      distance: Number, // km
+      estimatedTime: Number, // minutes
+      calculatedAt: Date,
+      storeAddress: String,
+      fallback: Boolean, // true if dynamic calculation failed
+      error: String, // error message if fallback used
+    },
     paymentStatus: {
       type: String,
       default: "Not yet paid",
@@ -89,7 +104,7 @@ var orderSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 //Export the model

@@ -150,7 +150,7 @@ const verifyOtp = asyncHandler(async (req, res) => {
       { email: email },
       {
         status: "active",
-      }
+      },
     );
     await Token.findOneAndDelete({ email: email });
     res.json({
@@ -253,8 +253,8 @@ const createSeller = asyncHandler(async (req, res) => {
         htm: verificationCodeTemplate(fullName || "User", code),
       };
 
-      await sendEmail(data1);
-      await sendEmail(data2);
+      sendEmail(data1);
+      sendEmail(data2);
 
       res.json({
         success: true,
@@ -350,7 +350,7 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
     if (!validTransportModes.includes(modeOfTransport)) {
       ThrowError(
         "Invalid mode of transport. Must be one of: " +
-          validTransportModes.join(", ")
+          validTransportModes.join(", "),
       );
     }
 
@@ -401,8 +401,8 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
         htm: verificationCodeTemplate(fullName || "User", code),
       };
 
-      await sendEmail(data1);
-      await sendEmail(data2);
+      sendEmail(data1);
+      sendEmail(data2);
 
       res.json({
         success: true,
@@ -468,7 +468,7 @@ const loginUser = asyncHandler(async (req, res) => {
   //   Check if user exists
   const findUser = await User.findOne(
     { email },
-    { password: 1, status: 1, role: 1, activeRole: 1, _id: 1 }
+    { password: 1, status: 1, role: 1, activeRole: 1, _id: 1 },
   );
   console.log("User:", findUser);
   if (findUser && (await findUser.isPasswordMatched(password))) {
@@ -476,7 +476,7 @@ const loginUser = asyncHandler(async (req, res) => {
     const updateUser = await User.findByIdAndUpdate(
       findUser.id,
       { refreshToken: refreshToken },
-      { new: true }
+      { new: true },
     );
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
@@ -627,7 +627,7 @@ const updateAUser = asyncHandler(async (req, res) => {
         image: req?.body?.image,
         nickname: req?.body?.nickname,
       },
-      { new: true }
+      { new: true },
     );
     res.json(updatedUser);
   } catch (error) {
@@ -656,7 +656,7 @@ const getAllUsers = asyncHandler(async (req, res) => {
         role: 1,
         mobile: 1,
         nickname: 1,
-      } // Specify the fields to return
+      }, // Specify the fields to return
     );
     res.json(getUsers);
   } catch (error) {
@@ -689,7 +689,7 @@ const getUsersByStatus = asyncHandler(async (req, res) => {
         role: 1,
         mobile: 1,
         nickname: 1,
-      } // Specify the fields to return
+      }, // Specify the fields to return
     );
     res.json(getUsers);
   } catch (error) {
@@ -760,7 +760,7 @@ const blockUser = asyncHandler(async (req, res) => {
       },
       {
         new: true,
-      }
+      },
     );
     res.json(block);
   } catch (error) {
@@ -788,7 +788,7 @@ const unblockUser = asyncHandler(async (req, res) => {
       },
       {
         new: true,
-      }
+      },
     );
     res.json(unblock);
   } catch (error) {
@@ -851,7 +851,7 @@ const forgotPasswordToken = asyncHandler(async (req, res) => {
     const newToken = await Token.findOneAndUpdate(
       { email },
       { code: hashedToken, createdAt: Date.now() },
-      { new: true, upsert: true }
+      { new: true, upsert: true },
     );
 
     if (!newToken) {
@@ -910,7 +910,7 @@ const resetPassword = asyncHandler(async (req, res) => {
   // Find user and token
   const user = await User.findOne(
     { email },
-    { password: 1, _id: 1, fullName: 1 }
+    { password: 1, _id: 1, fullName: 1 },
   );
   const tokenRecord = await Token.findOne({
     email,
@@ -1011,7 +1011,7 @@ const addToCart2 = asyncHandler(async (req, res) => {
 
   // Check if product already exists in cart
   const existingProductIndex = cart.products.findIndex(
-    (item) => item.product.toString() === product._id
+    (item) => item.product.toString() === product._id,
   );
 
   if (existingProductIndex > -1) {
@@ -1093,7 +1093,7 @@ const removeFromCart = asyncHandler(async (req, res) => {
 
     // Check if product exists in cart
     const productIndex = cart.products.findIndex(
-      (item) => item.product.toString() === productId
+      (item) => item.product.toString() === productId,
     );
 
     if (productIndex === -1) {
@@ -1109,7 +1109,7 @@ const removeFromCart = asyncHandler(async (req, res) => {
     // Recalculate total
     cart.cartTotal = cart.products.reduce(
       (total, item) => total + item.price,
-      0
+      0,
     );
 
     await cart.save();
@@ -1118,7 +1118,7 @@ const removeFromCart = asyncHandler(async (req, res) => {
     const updatedCart = await Cart.findById(cart._id)
       .populate(
         "products.product",
-        "title listedPrice images description brand"
+        "title listedPrice images description brand",
       )
       .populate("products.store", "name address mobile");
 
@@ -1179,7 +1179,7 @@ const updateCart = asyncHandler(async (req, res) => {
 
     // Find product in cart
     const productIndex = cart.products.findIndex(
-      (item) => item.product.toString() === productId
+      (item) => item.product.toString() === productId,
     );
 
     if (productIndex === -1) {
@@ -1218,7 +1218,7 @@ const updateCart = asyncHandler(async (req, res) => {
     // Recalculate total
     cart.cartTotal = cart.products.reduce(
       (total, item) => total + item.price,
-      0
+      0,
     );
 
     await cart.save();
@@ -1227,7 +1227,7 @@ const updateCart = asyncHandler(async (req, res) => {
     const updatedCart = await Cart.findById(cart._id)
       .populate(
         "products.product",
-        "title listedPrice images description brand"
+        "title listedPrice images description brand",
       )
       .populate("products.store", "name address mobile");
 
@@ -1258,7 +1258,7 @@ const getUserCart = asyncHandler(async (req, res) => {
     const cart = await Cart.findOne({ owner: _id })
       .populate(
         "products.product",
-        "title listedPrice images description brand quantity"
+        "title listedPrice images description brand quantity",
       )
       .populate("products.store", "name address mobile");
 
@@ -1348,256 +1348,6 @@ const emptyCart = asyncHandler(async (req, res) => {
   }
 });
 /**
- * @function createOrder
- * @description Creates a new order for the user
- * @param {Object} req - Express request object containing order details
- * @param {Object} res - Express response object
- * @param {string} req.body.paymentIntent - Payment intent ID
- * @param {string} req.body.deliveryMethod - Delivery method
- * @param {Object} req.body.deliveryAddress - Delivery address details
- * @param {string} req.user._id - Authenticated user's ID
- * @returns {Object} - Created order details
- * @throws {Error} - Throws error if order creation fails
- */
-const checkoutCart = asyncHandler(async (req, res) => {
-  const { paymentMethod, deliveryMethod, deliveryAddress, deliveryNotes } =
-    req.body;
-  const { _id } = req.user;
-
-  // Validate input
-  if (!paymentMethod || !deliveryMethod || !deliveryAddress) {
-    return res.status(400).json({
-      success: false,
-      message:
-        "Payment method, delivery method, and delivery address are required",
-    });
-  }
-
-  if (!["self_delivery", "delivery_agent"].includes(deliveryMethod)) {
-    return res.status(400).json({
-      success: false,
-      message:
-        "Invalid delivery method. Must be 'self_delivery' or 'delivery_agent'",
-    });
-  }
-
-  if (!["cash", "card", "bank"].includes(paymentMethod)) {
-    return res.status(400).json({
-      success: false,
-      message: "Invalid payment method. Must be 'cash', 'card', or 'bank'",
-    });
-  }
-
-  validateMongodbId(_id);
-
-  try {
-    // Get user's cart
-    const userCart = await Cart.findOne({ owner: _id }).populate(
-      "products.product"
-    );
-
-    if (!userCart || userCart.products.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Cart is empty",
-      });
-    }
-
-    // Check stock availability
-    for (const item of userCart.products) {
-      if (item.product.quantity < item.count) {
-        return res.status(400).json({
-          success: false,
-          message: `Insufficient stock for ${item.product.title}. Available: ${item.product.quantity}, Requested: ${item.count}`,
-        });
-      }
-    }
-
-    // Calculate delivery fee (if delivery agent is selected)
-    let deliveryFee = 0;
-    if (deliveryMethod === "delivery_agent") {
-      // Calculate delivery fee based on distance or fixed rate
-      deliveryFee = 500; // Base delivery fee in NGN
-    }
-
-    const totalAmount = userCart.cartTotal + deliveryFee;
-
-    // Create order
-    const newOrder = await Order.create({
-      products: userCart.products,
-      paymentIntent: {
-        id: uniqid(),
-        method: paymentMethod,
-        amount: totalAmount,
-        status: "unpaid",
-        created: Date.now(),
-        currency: "NGN",
-      },
-      deliveryMethod: deliveryMethod,
-      deliveryAddress: deliveryAddress,
-      deliveryNotes: deliveryNotes || "",
-      deliveryFee: deliveryFee,
-      deliveryStatus:
-        deliveryMethod === "delivery_agent" ? "pending_assignment" : "assigned",
-      orderedBy: _id,
-      orderStatus: "Not yet processed",
-      paymentStatus: "Not yet paid",
-      paymentMethod: paymentMethod,
-    });
-
-    // Update product quantities and sold counts
-    const productUpdates = userCart.products.map((item) => ({
-      updateOne: {
-        filter: { _id: item.product._id },
-        update: {
-          $inc: {
-            quantity: -item.count,
-            sold: +item.count,
-          },
-        },
-      },
-    }));
-
-    await Product.bulkWrite(productUpdates);
-
-    // Clear user's cart
-    await Cart.findOneAndDelete({ owner: _id });
-
-    // Populate order details
-    const populatedOrder = await Order.findById(newOrder._id)
-      .populate("products.product", "title listedPrice images brand")
-      .populate("products.store", "name address mobile")
-      .populate("orderedBy", "fullName email mobile");
-
-    // Send notifications
-    try {
-      const {
-        sendNotificationToUser,
-        sendDeliveryAgentNotification,
-      } = require("./notificationController");
-
-      // Notify customer
-      await sendNotificationToUser(
-        _id,
-        "Order Created Successfully",
-        `Your order #${newOrder.paymentIntent.id} has been created. ${
-          deliveryMethod === "delivery_agent"
-            ? "Waiting for delivery agent assignment."
-            : "Ready for pickup."
-        }`,
-        {
-          orderId: newOrder._id.toString(),
-          orderNumber: newOrder.paymentIntent.id,
-          totalAmount: totalAmount.toString(),
-          deliveryMethod: deliveryMethod,
-        },
-        "orderUpdates"
-      );
-
-      // Notify delivery agents if delivery method is delivery_agent
-      if (deliveryMethod === "delivery_agent") {
-        await sendDeliveryAgentNotification(
-          "new_order_available",
-          `New delivery order available: Order #${newOrder.paymentIntent.id}`,
-          {
-            orderId: newOrder._id.toString(),
-            orderNumber: newOrder.paymentIntent.id,
-            deliveryAddress: deliveryAddress,
-            totalAmount: totalAmount.toString(),
-          }
-        );
-      }
-    } catch (notificationError) {
-      console.log("Notification error:", notificationError);
-      // Don't fail the order creation if notifications fail
-    }
-
-    res.json({
-      success: true,
-      message: "Order created successfully",
-      data: {
-        order: populatedOrder,
-        totalAmount: totalAmount,
-        deliveryFee: deliveryFee,
-        deliveryMethod: deliveryMethod,
-        nextStep:
-          deliveryMethod === "delivery_agent"
-            ? "Waiting for delivery agent assignment"
-            : "Ready for pickup",
-      },
-    });
-  } catch (error) {
-    console.log(error);
-    throw new Error(error);
-  }
-});
-/**
- * @function getOrders
- * @description Retrieves user's order history with detailed product and store information
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- * @param {string} req.user._id - Authenticated user's ID (required)
- * @returns {Array} - Array of user's orders with populated product and store details
- * @throws {Error} - Throws error if invalid MongoDB ID or database operation fails
- */
-const getOrders = asyncHandler(async (req, res) => {
-  const { _id } = req.user;
-  validateMongoDbId(_id);
-  try {
-    const userOrders = await Order.find({ orderedBy: _id })
-      .populate({
-        path: "products.product",
-        select: "store",
-        model: "Product",
-        populate: {
-          path: "store",
-          select: "bankDetails, address, owner",
-          model: "Store",
-          populate: {
-            path: "owner",
-            select: "mobile, email",
-            model: "User",
-          },
-        },
-      })
-      .exec();
-    res.json(userOrders);
-  } catch (error) {
-    throw new Error(error);
-  }
-});
-/**
- * @function updateOrderStatus
- * @description Updates the status of a specific order
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- * @param {string} req.body.status - New order status to set (required)
- * @param {string} req.body.id - Order ID to update (required)
- * @returns {Object} - Updated order information
- * @throws {Error} - Throws error if invalid MongoDB ID or database operation fails
- */
-const updateOrderStatus = asyncHandler(async (req, res) => {
-  const { status } = req.body;
-  const { id } = req.body;
-  validateMongoDbId(id);
-  try {
-    const updatedOrderStatus = await Order.findByIdAndUpdate(
-      id,
-      {
-        orderStatus: status,
-        paymentIntent: {
-          status: status,
-        },
-      },
-      { new: true }
-    );
-    res.json(updatedOrderStatus);
-  } catch (error) {
-    throw new Error(error);
-  }
-});
-
-/**
  * @function getCurrentUser
  * @description Get current authenticated user's information
  * @param {Object} req - Express request object
@@ -1623,7 +1373,7 @@ const getCurrentUser = asyncHandler(async (req, res) => {
     // If user is a seller, populate store information
     if (user.role.includes("seller")) {
       const store = await Store.findOne({ owner: user._id }).select(
-        "name image address balance status"
+        "name image address balance status",
       );
       populatedUser.store = store;
     }
@@ -1699,9 +1449,9 @@ const changeActiveRole = asyncHandler(async (req, res) => {
     const updatedUser = await User.findByIdAndUpdate(
       user._id,
       { activeRole: role },
-      { new: true }
+      { new: true },
     ).select(
-      "-password -refreshToken -passwordResetToken -passwordResetExpires"
+      "-password -refreshToken -passwordResetToken -passwordResetExpires",
     );
 
     res.json({
@@ -1792,7 +1542,7 @@ const googleAuth = asyncHandler(async (req, res) => {
     await User.findByIdAndUpdate(
       user._id,
       { refreshToken: refreshToken },
-      { new: true }
+      { new: true },
     );
 
     // Set refresh token cookie
@@ -1857,11 +1607,8 @@ module.exports = {
   removeFromCart,
   verifyOtp,
   updateCart,
-  checkoutCart,
-  updateOrderStatus,
-  getUsersByStatus,
-  getOrders,
   getCurrentUser,
   changeActiveRole,
   googleAuth,
+  getUsersByStatus,
 };

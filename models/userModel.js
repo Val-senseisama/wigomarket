@@ -99,10 +99,6 @@ var userSchema = new mongoose.Schema(
       type: String,
       enum: ["bike", "motorcycle", "car", "van", "truck", "bicycle"],
     },
-    balance: {
-      type: Number,
-      default: 0,
-    },
     // FCM tokens for push notifications
     fcmTokens: [
       {
@@ -135,7 +131,7 @@ var userSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 userSchema.pre(`save`, async function (next) {
