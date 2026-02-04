@@ -908,7 +908,7 @@ router.post("/pay", authMiddleware, commissionHandler);
  *       400:
  *         description: Invalid MongoDB ID or database operation fails
  */
-router.delete("/:id", authMiddleware, isAdmin, deleteAUser);
+router.delete("/delete/:id", authMiddleware, isAdmin, deleteAUser);
 /**
  * @swagger
  * /api/user/block-user/:id:
