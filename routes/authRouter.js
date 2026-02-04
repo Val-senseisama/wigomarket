@@ -207,6 +207,7 @@ router.post("/register/buyer", createBuyer);
  *               - email
  *               - mobile
  *               - password
+ *               - gender
  *             properties:
  *               email:
  *                 type: string
@@ -222,6 +223,11 @@ router.post("/register/buyer", createBuyer);
  *                 minLength: 6
  *                 description: User's password
  *                 example: "password123"
+ *               gender:
+ *                 type: string
+ *                 enum: [male, female, other]
+ *                 description: User's gender
+ *                 example: "female"
  *               fullName:
  *                 type: string
  *                 description: User's full name (optional)
@@ -355,7 +361,7 @@ router.post("/register/seller", createSeller);
 
  *               modeOfTransport:
  *                 type: string
- *                 enum: [bike, motorcycle, car, van, truck, bicycle]
+ *                 enum: [bike, motorcycle, car, van, truck, bicycle, feet, bus]
  *                 description: Mode of transport for delivery
  *                 example: "motorcycle"
  *     responses:
@@ -902,7 +908,7 @@ router.post("/pay", authMiddleware, commissionHandler);
  *       400:
  *         description: Invalid MongoDB ID or database operation fails
  */
-router.delete("/:id", deleteAUser);
+router.delete("/:id", authMiddleware, isAdmin, deleteAUser);
 /**
  * @swagger
  * /api/user/block-user/:id:

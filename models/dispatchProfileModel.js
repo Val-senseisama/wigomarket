@@ -12,7 +12,16 @@ var dispatchProfileSchema = new mongoose.Schema(
     vehicleInfo: {
       type: {
         type: String,
-        enum: ["bike", "motorcycle", "car", "van", "truck"],
+        enum: [
+          "bike",
+          "motorcycle",
+          "car",
+          "van",
+          "truck",
+          "bicycle",
+          "feet",
+          "bus",
+        ],
         required: true,
       },
       make: {
@@ -77,7 +86,15 @@ var dispatchProfileSchema = new mongoose.Schema(
       },
       workingDays: {
         type: [String],
-        enum: ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
+        enum: [
+          "monday",
+          "tuesday",
+          "wednesday",
+          "thursday",
+          "friday",
+          "saturday",
+          "sunday",
+        ],
         default: ["monday", "tuesday", "wednesday", "thursday", "friday"],
       },
     },
@@ -205,13 +222,19 @@ var dispatchProfileSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Index for efficient queries
 dispatchProfileSchema.index({ user: 1 });
-dispatchProfileSchema.index({ "coverageAreas.coordinates.latitude": 1, "coverageAreas.coordinates.longitude": 1 });
-dispatchProfileSchema.index({ "availability.status": 1, "availability.workingDays": 1 });
+dispatchProfileSchema.index({
+  "coverageAreas.coordinates.latitude": 1,
+  "coverageAreas.coordinates.longitude": 1,
+});
+dispatchProfileSchema.index({
+  "availability.status": 1,
+  "availability.workingDays": 1,
+});
 dispatchProfileSchema.index({ status: 1, isActive: 1 });
 
 //Export the model

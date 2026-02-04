@@ -97,7 +97,16 @@ var userSchema = new mongoose.Schema(
     },
     modeOfTransport: {
       type: String,
-      enum: ["bike", "motorcycle", "car", "van", "truck", "bicycle"],
+      enum: [
+        "bike",
+        "motorcycle",
+        "car",
+        "van",
+        "truck",
+        "bicycle",
+        "feet",
+        "bus",
+      ],
     },
     // FCM tokens for push notifications
     fcmTokens: [

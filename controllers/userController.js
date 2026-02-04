@@ -73,6 +73,7 @@ const createBuyer = asyncHandler(async (req, res) => {
       city: city || "",
       state: state || "",
       role: ["buyer"], // Buyer role
+      activeRole: "buyer",
     };
 
     const code = MakeID(6);
@@ -226,6 +227,7 @@ const createSeller = asyncHandler(async (req, res) => {
       state: state || "",
       gender: gender,
       role: ["seller"], // Seller role
+      activeRole: "seller",
     };
 
     const code = MakeID(6);
@@ -268,6 +270,7 @@ const createSeller = asyncHandler(async (req, res) => {
             fullName: createUser.fullName,
             role: createUser.role,
             status: createUser.status,
+            gender: createUser.gender,
           },
           verificationCode: code, // For testing purposes
         },
@@ -346,6 +349,8 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
       "van",
       "truck",
       "bicycle",
+      "feet",
+      "bus",
     ];
     if (!validTransportModes.includes(modeOfTransport)) {
       ThrowError(
@@ -369,6 +374,7 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
         city: city || "",
         state: state || "",
         role: ["dispatch"], // Delivery agent role
+        activeRole: "dispatch",
         gender: gender,
         nextOfKin: {
           name: nextOfKin.name,
@@ -729,7 +735,7 @@ const getAUser = asyncHandler(async (req, res) => {
  * @throws {Error} - Throws error if invalid MongoDB ID or database operation fails
  */
 const deleteAUser = asyncHandler(async (req, res) => {
-  const { id } = req.body;
+  const { id } = req.params;
   validateMongodbId(id);
   try {
     const deleteUser = await User.findByIdAndDelete(id);
