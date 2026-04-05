@@ -127,7 +127,7 @@ router.put("/:id/status", authMiddleware, isAdmin, updateOrderStatus);
  *     description: |
  *       Called by the customer when they physically receive their order.
  *       If the delivery agent has already confirmed on their end, the agent's
- *       earnings are credited immediately and both parties are notified by email.
+ *       earnings are credited immediately and both parties are notified by email (sent via background queue).
  *       If the agent has not yet confirmed, the customer's confirmation is recorded
  *       and earnings will be credited once the agent confirms.
  *     tags: [Orders]

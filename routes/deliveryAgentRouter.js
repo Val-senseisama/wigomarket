@@ -23,9 +23,7 @@ const {
 } = require("../controllers/notificationController");
 const { authMiddleware, isDispatch } = require("../middleware/authMiddleware");
 const asyncHandler = require("express-async-handler");
-const {
-  agentConfirmDelivery,
-} = require("../services/dispatchEarningsService");
+const { agentConfirmDelivery } = require("../services/dispatchEarningsService");
 const router = express.Router();
 
 /**
@@ -178,7 +176,7 @@ router.post("/orders/select", authMiddleware, isDispatch, selectOrder);
  *       Atomically assigns the requesting dispatch agent to a pending order.
  *       The order must have deliveryStatus of "pending_assignment". If two agents
  *       request the same order simultaneously, only one will succeed.
- *       The customer is notified by email when an agent is assigned.
+ *       The customer is notified by email (sent via background queue) when an agent is assigned.
  *     tags: [Delivery Agent]
  *     security:
  *       - bearerAuth: []
@@ -387,7 +385,7 @@ router.put("/availability", authMiddleware, isDispatch, updateAvailability);
  *     description: |
  *       Dispatch agent calls this when they hand the parcel to the customer.
  *       Atomically marks the order as Delivered and credits the delivery fee
- *       to the agent's wallet. Idempotent — safe to call more than once.
+ *       to the agent's wallet. Email notifications are dispatched via background queue. Idempotent — safe to call more than once.
  *     tags: [Delivery Agent]
  *     security:
  *       - bearerAuth: []

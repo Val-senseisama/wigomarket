@@ -18,7 +18,7 @@ const router = express.Router();
  * /api/store/create:
  *   post:
  *     summary: Create a new store for a user
- *     description: Create a new store for a user
+ *     description: Create a new store for a user. A confirmation email is sent via background queue.
  *     tags:
  *       - Stores
  *     security:

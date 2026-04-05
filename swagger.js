@@ -1,53 +1,54 @@
 // swagger.js
-const swaggerJsdoc = require('swagger-jsdoc');
-const swaggerUi = require('swagger-ui-express');
+const swaggerJsdoc = require("swagger-jsdoc");
+const swaggerUi = require("swagger-ui-express");
 
 const options = {
   definition: {
-    openapi: '3.0.0',
+    openapi: "3.0.0",
     info: {
-      title: 'Wigomarket backend api docs',
-      version: '1.0.0',
-      description: 'API documentation for WigoMarket e-commerce platform with real-time location tracking',
+      title: "Wigomarket backend api docs",
+      version: "1.0.0",
+      description:
+        "API documentation for WigoMarket e-commerce platform with real-time location tracking",
     },
     servers: [
       {
-        url: process.env.API_URL || 'http://localhost:5001',
-        description: 'Development server',
+        url: process.env.API_URL || "http://localhost:5001",
+        description: "Development server",
       },
     ],
     components: {
       securitySchemes: {
         bearerAuth: {
-          type: 'http',
-          scheme: 'bearer',
-          bearerFormat: 'JWT',
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT",
         },
       },
       schemas: {
         Error: {
-          type: 'object',
+          type: "object",
           properties: {
             success: {
-              type: 'boolean',
+              type: "boolean",
               example: false,
             },
             message: {
-              type: 'string',
-              example: 'Error message',
+              type: "string",
+              example: "Error message",
             },
           },
         },
         Success: {
-          type: 'object',
+          type: "object",
           properties: {
             success: {
-              type: 'boolean',
+              type: "boolean",
               example: true,
             },
             message: {
-              type: 'string',
-              example: 'Success message',
+              type: "string",
+              example: "Success message",
             },
           },
         },
@@ -55,82 +56,83 @@ const options = {
     },
     tags: [
       {
-        name: 'Authentication',
-        description: 'User authentication and authorization',
+        name: "Authentication",
+        description: "User authentication and authorization",
       },
       {
-        name: 'Users',
-        description: 'User management and profile operations',
+        name: "Users",
+        description: "User management and profile operations",
       },
       {
-        name: 'Products',
-        description: 'Product management and suggestions',
+        name: "Products",
+        description: "Product management and suggestions",
       },
       {
-        name: 'Store',
-        description: 'Store management for sellers',
+        name: "Store",
+        description: "Store management for sellers",
       },
       {
-        name: 'Delivery Agent',
-        description: 'Delivery agent operations and management',
+        name: "Delivery Agent",
+        description: "Delivery agent operations and management",
       },
       {
-        name: 'Payment',
-        description: 'Payment processing with Flutterwave',
+        name: "Payment",
+        description: "Payment processing with Flutterwave",
       },
       {
-        name: 'Location Tracking',
-        description: 'Real-time location tracking for delivery agents',
+        name: "Location Tracking",
+        description: "Real-time location tracking for delivery agents",
       },
       {
-        name: 'Notifications',
-        description: 'Push notifications and preferences',
+        name: "Notifications",
+        description: "Push notifications and preferences",
       },
       {
-        name: 'Rating',
-        description: 'Rating and review system',
+        name: "Rating",
+        description: "Rating and review system",
       },
       {
-        name: 'Flutterwave',
-        description: 'Flutterwave integration utilities',
+        name: "Flutterwave",
+        description: "Flutterwave integration utilities",
       },
       {
-        name: 'WebSocket',
-        description: 'Real-time WebSocket connections',
+        name: "WebSocket",
+        description: "Real-time WebSocket connections",
       },
       {
-        name: 'Receipts',
-        description: 'PDF receipt and document generation',
+        name: "Receipts",
+        description: "PDF receipt and document generation",
       },
       {
-        name: 'Orders',
-        description: 'Order placement, tracking, and delivery confirmation',
+        name: "Orders",
+        description: "Order placement, tracking, and delivery confirmation",
       },
       {
-        name: 'Wishlist',
-        description: 'User wishlist and saved products management',
+        name: "Wishlist",
+        description: "User wishlist and saved products management",
       },
       {
-        name: 'Seller Discovery',
-        description: 'Popular sellers and location-based seller discovery',
+        name: "Seller Discovery",
+        description: "Popular sellers and location-based seller discovery",
       },
     ],
   },
   apis: [
-    './routes/authRouter.js',
-    './routes/productRouter.js',
-    './routes/storeRouter.js',
-    './routes/orderRouter.js',
-    './routes/deliveryAgentRouter.js',
-    './routes/paymentRouter.js',
-    './routes/locationTrackingRouter.js',
-    './routes/notificationRouter.js',
-    './routes/ratingRouter.js',
-    './routes/flutterwaveRouter.js',
-    './routes/walletRouter.js',
-    './routes/websocketRouter.js',
-    './routes/wishlistRouter.js',
-    './routes/sellerDiscoveryRouter.js',
+    "./routes/authRouter.js",
+    "./routes/productRouter.js",
+    "./routes/storeRouter.js",
+    "./routes/orderRouter.js",
+    "./routes/deliveryAgentRouter.js",
+    "./routes/paymentRouter.js",
+    "./routes/locationTrackingRouter.js",
+    "./routes/notificationRouter.js",
+    "./routes/ratingRouter.js",
+    "./routes/flutterwaveRouter.js",
+    "./routes/walletRouter.js",
+    "./routes/websocketRouter.js",
+    "./routes/wishlistRouter.js",
+    "./routes/sellerDiscoveryRouter.js",
+    "./routes/billPaymentRouter.js",
   ],
 };
 

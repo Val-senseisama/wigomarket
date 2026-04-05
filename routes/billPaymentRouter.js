@@ -139,7 +139,22 @@ router.get("/verify/decoder", authMiddleware, verifyDecoder);
  *                 minimum: 50
  *     responses:
  *       200:
- *         description: Airtime purchased or processing
+ *         description: Initial wallet debit successful; purchase offloaded to background queue
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 message: { type: string, example: "Airtime purchase is processing" }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     request_id: { type: string, example: "20240405123456" }
+ *                     status: { type: string, example: "processing" }
+ *                     network: { type: string, example: "mtn" }
+ *                     phone: { type: string, example: "08012345678" }
+ *                     amount: { type: number, example: 100 }
  *       400:
  *         description: Validation error or insufficient balance
  */
@@ -170,7 +185,22 @@ router.post("/airtime", authMiddleware, purchaseAirtime);
  *                 description: From GET /api/bills/plans/data
  *     responses:
  *       200:
- *         description: Data purchased or processing
+ *         description: Initial wallet debit successful; data bundle purchase offloaded to background queue
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 message: { type: string, example: "MTN 1GB data purchase is processing" }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     request_id: { type: string, example: "20240405123456" }
+ *                     status: { type: string, example: "processing" }
+ *                     network: { type: string, example: "mtn" }
+ *                     phone: { type: string, example: "08012345678" }
+ *                     amount: { type: number, example: 500 }
  */
 router.post("/data", authMiddleware, purchaseData);
 
@@ -205,7 +235,22 @@ router.post("/data", authMiddleware, purchaseData);
  *                 type: string
  *     responses:
  *       200:
- *         description: Payment successful — includes electricity token if available
+ *         description: Initial wallet debit successful; electricity payment offloaded to background queue
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 message: { type: string, example: "Electricity payment is processing" }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     request_id: { type: string, example: "20240405123456" }
+ *                     status: { type: string, example: "processing" }
+ *                     provider: { type: string, example: "ikeja-electric" }
+ *                     meter_number: { type: string, example: "01234567890" }
+ *                     amount: { type: number, example: 1000 }
  */
 router.post("/electricity", authMiddleware, payElectricity);
 
@@ -236,7 +281,22 @@ router.post("/electricity", authMiddleware, payElectricity);
  *                 type: string
  *     responses:
  *       200:
- *         description: Subscription activated or processing
+ *         description: Initial wallet debit successful; subscription offloaded to background queue
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 message: { type: string, example: "DSTV payment is processing" }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     request_id: { type: string, example: "20240405123456" }
+ *                     status: { type: string, example: "processing" }
+ *                     provider: { type: string, example: "dstv" }
+ *                     smartcard_number: { type: string, example: "0123456789" }
+ *                     amount: { type: number, example: 5000 }
  */
 router.post("/cable-tv", authMiddleware, payCableTv);
 

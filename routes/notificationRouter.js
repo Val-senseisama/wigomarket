@@ -9,7 +9,7 @@ const {
   updateNotificationPreferences,
   registerFCMToken,
   unregisterFCMToken,
-  sendTestNotification
+  sendTestNotification,
 } = require("../controllers/notificationController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const router = express.Router();
@@ -453,7 +453,7 @@ router.post("/fcm/unregister", authMiddleware, unregisterFCMToken);
  * /api/notifications/notifications/test:
  *   post:
  *     summary: Send test notification
- *     description: Send a test notification to the current user
+ *     description: Send a test notification to the current user (dispatched via background queue)
  *     tags:
  *       - Notifications
  *     security:

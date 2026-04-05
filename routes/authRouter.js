@@ -101,7 +101,7 @@ router.post("/register", createUser);
  * /api/user/register/buyer:
  *   post:
  *     summary: Register as a buyer
- *     description: Create a new buyer account with email verification
+ *     description: Create a new buyer account. Email verification code is sent via background queue.
  *     tags:
  *       - Authentication
  *     requestBody:
@@ -194,7 +194,7 @@ router.post("/register/buyer", createBuyer);
  * /api/user/register/seller:
  *   post:
  *     summary: Register as a seller
- *     description: Create a new seller account with email verification
+ *     description: Create a new seller account. Welcome and verification emails are sent via background queue.
  *     tags:
  *       - Authentication
  *     requestBody:
@@ -293,7 +293,7 @@ router.post("/register/seller", createSeller);
  * /api/user/register/delivery:
  *   post:
  *     summary: Register as a delivery agent
- *     description: Create a new delivery agent account with email verification
+ *     description: Create a new delivery agent account. Welcome and verification emails are sent via background queue.
  *     tags:
  *       - Authentication
  *     requestBody:
@@ -427,7 +427,7 @@ router.post("/register/delivery", createDeliveryAgent);
  * /api/user/forgot-password-token:
  *   post:
  *     summary: Generate password reset token and send to user's email
- *     description: Generate password reset token and send to user's email
+ *     description: Generate password reset token. The email is dispatched immediately via background queue.
  *     tags:
  *       - Auth
  *     requestBody:
