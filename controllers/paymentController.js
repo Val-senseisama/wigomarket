@@ -19,6 +19,8 @@ const {
   PaymentMethod,
 } = require("../utils/constants");
 const appConfig = require("../config/appConfig");
+const audit = require("../services/auditService");
+const { calculateCommissionBreakdown } = require("../services/commissionService");
 
 // Lazy-load Flutterwave instance
 let flw = null;
@@ -57,53 +59,7 @@ const verifyFlutterwaveSignature = (signature, payload) => {
   return hash === signature;
 };
 
-/**
- * @function calculateCommissionBreakdown
- * @description Calculate commission breakdown for an order
- * @param {Object} order - Order object with populated products
- * @returns {Object} - Commission breakdown
- */
-const calculateCommissionBreakdown = async (order) => {
-  let totalPlatformCommission = 0;
-  let totalVendorAmount = 0;
-  let totalDispatchAmount = 0;
-  let platformRate = 0;
-
-  // Calculate commissions for each product
-  for (const item of order.products) {
-    const storePrice = item.product.price;
-    const listedPrice = item.product.listedPrice;
-    const count = item.count;
-
-    const storeCommission = storePrice * count;
-    const platformCommission = listedPrice * count - storeCommission;
-
-    totalPlatformCommission += platformCommission;
-    totalVendorAmount += storeCommission;
-
-    // Calculate platform rate (average)
-    if (listedPrice > 0) {
-      platformRate += (platformCommission / (listedPrice * count)) * 100;
-    }
-  }
-
-  // Calculate dispatch amount (if delivery agent is assigned)
-  if (order.deliveryAgent && order.deliveryFee) {
-    totalDispatchAmount = order.deliveryFee;
-  }
-
-  // Calculate average platform rate
-  platformRate =
-    order.products.length > 0 ? platformRate / order.products.length : 0;
-
-  return {
-    platformRate: Math.round(platformRate * 100) / 100, // Round to 2 decimal places
-    platformAmount: Math.round(totalPlatformCommission * 100) / 100,
-    vendorAmount: Math.round(totalVendorAmount * 100) / 100,
-    dispatchAmount: Math.round(totalDispatchAmount * 100) / 100,
-    totalAmount: order.paymentIntent.amount,
-  };
-};
+// calculateCommissionBreakdown is imported from services/commissionService.js
 
 /**
  * @function initializePayment
@@ -210,10 +166,22 @@ const initializePayment = asyncHandler(async (req, res) => {
         },
       });
     } else {
+      audit.error({
+        action: "payment.initialization_failed",
+        actor: audit.actor(req),
+        resource: { type: "order", id: orderId },
+        metadata: { error: response.message || "Failed at Flutterwave API" },
+      });
       throw new Error(response.message || "Payment initialization failed");
     }
   } catch (error) {
     console.log(error);
+    audit.error({
+      action: "payment.initialization_failed",
+      actor: audit.actor(req),
+      resource: { type: "order", id: orderId },
+      metadata: { error: error.message },
+    });
     throw new Error(error.message || "Payment initialization failed");
   }
 });
@@ -287,7 +255,7 @@ const verifyPayment = asyncHandler(async (req, res) => {
         );
 
         // Create transaction ledger entry
-        const transactionId = `PAY_${Date.now()}_${MakeID(6)}`;
+        const transactionId = `PAY_${Date.now()}_${MakeID(16)}`;
         const transaction = await Transaction.createTransaction({
           transactionId,
           reference: `Payment-${orderId}`,
@@ -399,6 +367,7 @@ const verifyPayment = asyncHandler(async (req, res) => {
           metadata: {
             paymentMethod: "flutterwave",
             externalTransactionId: transaction_id,
+            externalEventId: `FLW_VERIFY_${transaction_id}`,
             notes: `Payment processed via Flutterwave with VAT responsibility: ${vatResponsibility}`,
           },
         });
@@ -411,7 +380,11 @@ const verifyPayment = asyncHandler(async (req, res) => {
           if (!vendorWallet) {
             vendorWallet = await Wallet.createWallet(vendor._id, 0);
           }
-          await vendorWallet.addFunds(commissionData.vendorAmount, "earning");
+          await vendorWallet.addFunds(
+            commissionData.vendorAmount,
+            "earning",
+            session,
+          );
         }
 
         // Update dispatch wallet (if applicable)
@@ -428,6 +401,7 @@ const verifyPayment = asyncHandler(async (req, res) => {
           await dispatchWallet.addFunds(
             commissionData.dispatchAmount,
             "earning",
+            session,
           );
         }
 
@@ -614,7 +588,7 @@ const refundPayment = asyncHandler(async (req, res) => {
           const vatRefund = originalTransaction.vat.amount * refundRatio;
 
           // Create refund transaction
-          const refundTransactionId = `REF_${Date.now()}_${MakeID(6)}`;
+          const refundTransactionId = `REF_${Date.now()}_${MakeID(16)}`;
           const refundTransaction = await Transaction.createTransaction({
             transactionId: refundTransactionId,
             reference: `Refund-${orderId}`,
@@ -716,6 +690,7 @@ const refundPayment = asyncHandler(async (req, res) => {
             metadata: {
               paymentMethod: "refund",
               externalTransactionId: response.data.id,
+              externalEventId: `FLW_REFUND_${response.data.id}`,
               notes: `Refund processed: ${reason || "Customer request"}`,
               originalTransactionId: originalTransaction.transactionId,
             },
@@ -727,7 +702,7 @@ const refundPayment = asyncHandler(async (req, res) => {
               user: order.products[0].product.store,
             }).session(session);
             if (vendorWallet) {
-              await vendorWallet.deductFunds(vendorRefund, "refund");
+              await vendorWallet.deductFunds(vendorRefund, "refund", session);
             }
           }
 
@@ -737,7 +712,11 @@ const refundPayment = asyncHandler(async (req, res) => {
               user: order.deliveryAgent._id,
             }).session(session);
             if (dispatchWallet) {
-              await dispatchWallet.deductFunds(dispatchRefund, "refund");
+              await dispatchWallet.deductFunds(
+                dispatchRefund,
+                "refund",
+                session,
+              );
             }
           }
         }

@@ -76,16 +76,20 @@ const appConfig = {
     },
   },
 
-  // Maps Configuration
+  // Maps Configuration (Google Maps)
   maps: {
-    hereMaps: {
-      apiKey: process.env.HERE_API_KEY,
-      baseUrl: "https://api.here.com",
+    googleMaps: {
+      apiKey: process.env.GOOGLE_MAPS_API_KEY,
+
+      // Default region bias for Lagos / Nigeria
+      region: "NG",
+      language: "en",
+      countryRestriction: "ng", // ISO 3166-1 alpha-2
 
       validate() {
-        if (!this.apiKey) {
+        if (!this.apiKey || this.apiKey === "YOUR_GOOGLE_MAPS_API_KEY_HERE") {
           console.warn(
-            "⚠️  HERE_API_KEY not configured. Distance-based delivery fees will use fallback.",
+            "⚠️  GOOGLE_MAPS_API_KEY not configured. Distance-based delivery fees will use fallback.",
           );
           return false;
         }

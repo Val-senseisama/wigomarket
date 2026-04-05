@@ -4,24 +4,11 @@ const Geofence = require("../models/geofenceModel");
 const Order = require("../models/orderModel");
 const User = require("../models/userModel");
 const DispatchProfile = require("../models/dispatchProfileModel");
-const { validateMongodbId } = require("../utils/validateMongodbId");
+const validateMongodbId = require("../utils/validateMongodbId");
 const { Validate } = require("../Helpers/Validate");
 const { ThrowError } = require("../Helpers/Helpers");
-const axios = require("axios");
-const Redis = require("ioredis");
-
-// Redis client for real-time location caching
-const redisClient = new Redis(process.env.REDIS_URL || "redis://localhost:6379", {
-  retryDelayOnFailover: 100,
-  enableReadyCheck: false,
-  maxRetriesPerRequest: null,
-});
-
-
-// Here Maps API configuration
-const HERE_API_KEY = process.env.HERE_API_KEY;
-const HERE_APP_ID = process.env.HERE_APP_CODE;
-const HERE_BASE_URL = "https://api.here.com";
+const redisClient = require("../config/redisClient");
+const googleMapsService = require("../services/googleMapsService");
 
 /**
  * @function updateLocation
@@ -39,44 +26,51 @@ const HERE_BASE_URL = "https://api.here.com";
  */
 const updateLocation = asyncHandler(async (req, res) => {
   const { _id } = req.user;
-  const { latitude, longitude, orderId, accuracy = 10, speed, heading } = req.body;
-  
+  const {
+    latitude,
+    longitude,
+    orderId,
+    accuracy = 10,
+    speed,
+    heading,
+  } = req.body;
+
   // Validate input
   if (!latitude || !longitude || !orderId) {
     return res.status(400).json({
       success: false,
-      message: "Latitude, longitude, and orderId are required"
+      message: "Latitude, longitude, and orderId are required",
     });
   }
-  
+
   if (!Validate.float(latitude) || !Validate.float(longitude)) {
     return res.status(400).json({
       success: false,
-      message: "Invalid latitude or longitude values"
+      message: "Invalid latitude or longitude values",
     });
   }
-  
+
   validateMongodbId(orderId);
-  
+
   // Verify user is a delivery agent
   if (!req.userRoles.includes("dispatch")) {
     return res.status(403).json({
       success: false,
-      message: "Access denied. Only delivery agents can update location."
+      message: "Access denied. Only delivery agents can update location.",
     });
   }
-  
+
   try {
     // Get reverse geocoding address
     const address = await getAddressFromCoordinates(latitude, longitude);
-    
+
     // Find or create location tracking record
     let tracking = await LocationTracking.findOne({
       deliveryAgent: _id,
       order: orderId,
-      isActive: true
+      isActive: true,
     });
-    
+
     if (!tracking) {
       // Create new tracking record
       tracking = await LocationTracking.create({
@@ -87,9 +81,9 @@ const updateLocation = asyncHandler(async (req, res) => {
           coordinates: [longitude, latitude],
           address: address,
           accuracy: accuracy,
-          timestamp: new Date()
+          timestamp: new Date(),
         },
-        status: "assigned"
+        status: "assigned",
       });
     } else {
       // Update existing tracking record
@@ -98,9 +92,9 @@ const updateLocation = asyncHandler(async (req, res) => {
         coordinates: [longitude, latitude],
         address: address,
         accuracy: accuracy,
-        timestamp: new Date()
+        timestamp: new Date(),
       };
-      
+
       // Add to tracking history
       tracking.trackingHistory.push({
         location: newLocation,
@@ -108,19 +102,19 @@ const updateLocation = asyncHandler(async (req, res) => {
         accuracy: accuracy,
         speed: speed,
         heading: heading,
-        status: tracking.status
+        status: tracking.status,
       });
-      
+
       // Update current location
       tracking.currentLocation = newLocation;
       tracking.lastUpdated = new Date();
-      
+
       await tracking.save();
     }
-    
+
     // Check geofences
     await checkGeofences(tracking, latitude, longitude);
-    
+
     // Cache location for real-time updates
     await redisClient.setex(
       `location:${_id}:${orderId}`,
@@ -130,19 +124,19 @@ const updateLocation = asyncHandler(async (req, res) => {
         longitude,
         address,
         timestamp: new Date(),
-        status: tracking.status
-      })
+        status: tracking.status,
+      }),
     );
-    
+
     // Publish location update to WebSocket clients
     await publishLocationUpdate(_id, orderId, {
       latitude,
       longitude,
       address,
       status: tracking.status,
-      timestamp: new Date()
+      timestamp: new Date(),
     });
-    
+
     res.json({
       success: true,
       message: "Location updated successfully",
@@ -152,10 +146,10 @@ const updateLocation = asyncHandler(async (req, res) => {
           longitude,
           address,
           accuracy,
-          timestamp: new Date()
+          timestamp: new Date(),
         },
-        status: tracking.status
-      }
+        status: tracking.status,
+      },
     });
   } catch (error) {
     console.log(error);
@@ -177,33 +171,33 @@ const updateLocation = asyncHandler(async (req, res) => {
 const getRoute = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   const { orderId, startLat, startLng } = req.body;
-  
+
   if (!orderId) {
     return res.status(400).json({
       success: false,
-      message: "Order ID is required"
+      message: "Order ID is required",
     });
   }
-  
+
   validateMongodbId(orderId);
-  
+
   try {
     // Get order details
     const order = await Order.findById(orderId)
-      .populate('products.store', 'name address')
-      .populate('orderedBy', 'fullName mobile');
-    
+      .populate("products.store", "name address")
+      .populate("orderedBy", "fullName mobile");
+
     if (!order) {
       return res.status(404).json({
         success: false,
-        message: "Order not found"
+        message: "Order not found",
       });
     }
-    
+
     // Get delivery addresses
     const deliveryAddress = order.deliveryAddress;
-    const storeAddresses = order.products.map(item => item.store.address);
-    
+    const storeAddresses = order.products.map((item) => item.store.address);
+
     // Use current location or provided start coordinates
     let startCoordinates;
     if (startLat && startLng) {
@@ -213,34 +207,32 @@ const getRoute = asyncHandler(async (req, res) => {
       const tracking = await LocationTracking.findOne({
         deliveryAgent: _id,
         order: orderId,
-        isActive: true
+        isActive: true,
       });
-      
+
       if (tracking) {
         startCoordinates = tracking.currentLocation.coordinates;
       } else {
         return res.status(400).json({
           success: false,
-          message: "No current location found. Please update your location first."
+          message:
+            "No current location found. Please update your location first.",
         });
       }
     }
-    
+
     // Get geocoded coordinates for addresses
     const deliveryCoords = await getCoordinatesFromAddress(deliveryAddress);
     const storeCoords = await Promise.all(
-      storeAddresses.map(addr => getCoordinatesFromAddress(addr))
+      storeAddresses.map((addr) => getCoordinatesFromAddress(addr)),
     );
-    
+
     // Build waypoints
-    const waypoints = [
-      ...storeCoords.filter(coord => coord),
-      deliveryCoords
-    ];
-    
+    const waypoints = [...storeCoords.filter((coord) => coord), deliveryCoords];
+
     // Get optimized route from Here Maps
     const route = await getOptimizedRoute(startCoordinates, waypoints);
-    
+
     // Update tracking with route information
     await LocationTracking.findOneAndUpdate(
       { deliveryAgent: _id, order: orderId, isActive: true },
@@ -249,32 +241,35 @@ const getRoute = asyncHandler(async (req, res) => {
           startLocation: {
             type: "Point",
             coordinates: startCoordinates,
-            address: await getAddressFromCoordinates(startCoordinates[1], startCoordinates[0])
+            address: await getAddressFromCoordinates(
+              startCoordinates[1],
+              startCoordinates[0],
+            ),
           },
           endLocation: {
             type: "Point",
             coordinates: deliveryCoords,
-            address: deliveryAddress
+            address: deliveryAddress,
           },
           waypoints: waypoints.map((coord, index) => ({
             type: "Point",
             coordinates: coord,
             address: storeAddresses[index] || deliveryAddress,
-            order: index
+            order: index,
           })),
           optimizedRoute: route,
-          estimatedArrival: new Date(Date.now() + route.duration * 1000)
-        }
-      }
+          estimatedArrival: new Date(Date.now() + route.duration * 1000),
+        },
+      },
     );
-    
+
     res.json({
       success: true,
       data: {
         route: route,
         waypoints: waypoints,
-        estimatedArrival: new Date(Date.now() + route.duration * 1000)
-      }
+        estimatedArrival: new Date(Date.now() + route.duration * 1000),
+      },
     });
   } catch (error) {
     console.log(error);
@@ -294,33 +289,33 @@ const getRoute = asyncHandler(async (req, res) => {
 const getCurrentLocation = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
   const { _id } = req.user;
-  
+
   validateMongodbId(orderId);
-  
+
   try {
     // Try to get from cache first
     const cachedLocation = await redisClient.get(`location:${_id}:${orderId}`);
     if (cachedLocation) {
       return res.json({
         success: true,
-        data: JSON.parse(cachedLocation)
+        data: JSON.parse(cachedLocation),
       });
     }
-    
+
     // Get from database
     const tracking = await LocationTracking.findOne({
       deliveryAgent: _id,
       order: orderId,
-      isActive: true
-    }).select('currentLocation status lastUpdated');
-    
+      isActive: true,
+    }).select("currentLocation status lastUpdated");
+
     if (!tracking) {
       return res.status(404).json({
         success: false,
-        message: "No location tracking found for this order"
+        message: "No location tracking found for this order",
       });
     }
-    
+
     const locationData = {
       latitude: tracking.currentLocation.coordinates[1],
       longitude: tracking.currentLocation.coordinates[0],
@@ -328,12 +323,12 @@ const getCurrentLocation = asyncHandler(async (req, res) => {
       accuracy: tracking.currentLocation.accuracy,
       status: tracking.status,
       timestamp: tracking.currentLocation.timestamp,
-      lastUpdated: tracking.lastUpdated
+      lastUpdated: tracking.lastUpdated,
     };
-    
+
     res.json({
       success: true,
-      data: locationData
+      data: locationData,
     });
   } catch (error) {
     console.log(error);
@@ -355,28 +350,28 @@ const getTrackingHistory = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
   const { _id } = req.user;
   const { limit = 50 } = req.query;
-  
+
   validateMongodbId(orderId);
-  
+
   try {
     const tracking = await LocationTracking.findOne({
       deliveryAgent: _id,
       order: orderId,
-      isActive: true
-    }).select('trackingHistory status');
-    
+      isActive: true,
+    }).select("trackingHistory status");
+
     if (!tracking) {
       return res.status(404).json({
         success: false,
-        message: "No tracking history found for this order"
+        message: "No tracking history found for this order",
       });
     }
-    
+
     // Get recent history points
     const history = tracking.trackingHistory
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
       .slice(0, parseInt(limit))
-      .map(point => ({
+      .map((point) => ({
         latitude: point.location.coordinates[1],
         longitude: point.location.coordinates[0],
         address: point.location.address,
@@ -384,17 +379,17 @@ const getTrackingHistory = asyncHandler(async (req, res) => {
         speed: point.speed,
         heading: point.heading,
         status: point.status,
-        timestamp: point.timestamp
+        timestamp: point.timestamp,
       }));
-    
+
     res.json({
       success: true,
       data: {
         orderId: orderId,
         status: tracking.status,
         history: history,
-        totalPoints: tracking.trackingHistory.length
-      }
+        totalPoints: tracking.trackingHistory.length,
+      },
     });
   } catch (error) {
     console.log(error);
@@ -417,27 +412,33 @@ const getTrackingHistory = asyncHandler(async (req, res) => {
 const updateDeliveryStatus = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   const { orderId, status, latitude, longitude } = req.body;
-  
+
   if (!orderId || !status) {
     return res.status(400).json({
       success: false,
-      message: "Order ID and status are required"
+      message: "Order ID and status are required",
     });
   }
-  
-  const validStatuses = ["assigned", "en_route", "arrived", "delivered", "cancelled"];
+
+  const validStatuses = [
+    "assigned",
+    "en_route",
+    "arrived",
+    "delivered",
+    "cancelled",
+  ];
   if (!validStatuses.includes(status)) {
     return res.status(400).json({
       success: false,
-      message: "Invalid status. Must be one of: " + validStatuses.join(", ")
+      message: "Invalid status. Must be one of: " + validStatuses.join(", "),
     });
   }
-  
+
   validateMongodbId(orderId);
-  
+
   try {
     const updateData = { status, lastUpdated: new Date() };
-    
+
     // If location is provided, update it
     if (latitude && longitude) {
       const address = await getAddressFromCoordinates(latitude, longitude);
@@ -445,53 +446,53 @@ const updateDeliveryStatus = asyncHandler(async (req, res) => {
         type: "Point",
         coordinates: [longitude, latitude],
         address: address,
-        timestamp: new Date()
+        timestamp: new Date(),
       };
-      
+
       // Add to tracking history
       updateData.$push = {
         trackingHistory: {
           location: updateData.currentLocation,
           timestamp: new Date(),
-          status: status
-        }
+          status: status,
+        },
       };
     }
-    
+
     const tracking = await LocationTracking.findOneAndUpdate(
       { deliveryAgent: _id, order: orderId, isActive: true },
       updateData,
-      { new: true }
+      { new: true },
     );
-    
+
     if (!tracking) {
       return res.status(404).json({
         success: false,
-        message: "Tracking record not found"
+        message: "Tracking record not found",
       });
     }
-    
+
     // Update order status if delivered
     if (status === "delivered") {
       await Order.findByIdAndUpdate(orderId, {
         deliveryStatus: "delivered",
         orderStatus: "Filled",
-        actualDeliveryTime: new Date()
+        actualDeliveryTime: new Date(),
       });
-      
+
       // Deactivate tracking
       tracking.isActive = false;
       await tracking.save();
     }
-    
+
     res.json({
       success: true,
       message: `Delivery status updated to ${status}`,
       data: {
         status: status,
         timestamp: new Date(),
-        location: tracking.currentLocation
-      }
+        location: tracking.currentLocation,
+      },
     });
   } catch (error) {
     console.log(error);
@@ -499,94 +500,73 @@ const updateDeliveryStatus = asyncHandler(async (req, res) => {
   }
 });
 
-// Helper Functions
+// ─── Map Helper Functions (Google Maps) ─────────────────────────────────────
 
 /**
- * Get address from coordinates using Here Maps Geocoding API
+ * Reverse-geocode coordinates to a human-readable address.
+ * Falls back to a "lat, lng" string if API is unavailable.
  */
 async function getAddressFromCoordinates(latitude, longitude) {
   try {
-    const response = await axios.get(`${HERE_BASE_URL}/v1/revgeocode`, {
-      params: {
-        at: `${latitude},${longitude}`,
-        apikey: HERE_API_KEY,
-        lang: 'en-US'
-      }
-    });
-    
-    if (response.data && response.data.items && response.data.items.length > 0) {
-      return response.data.items[0].address.label;
-    }
-    return `${latitude}, ${longitude}`;
+    const result = await googleMapsService.reverseGeocode(
+      parseFloat(latitude),
+      parseFloat(longitude),
+    );
+    return result?.formattedAddress || `${latitude}, ${longitude}`;
   } catch (error) {
-    console.log('Geocoding error:', error.message);
+    console.log("[Maps] reverseGeocode error:", error.message);
     return `${latitude}, ${longitude}`;
   }
 }
 
 /**
- * Get coordinates from address using Here Maps Geocoding API
+ * Geocode a text address to [longitude, latitude] coordinates.
+ * Returns null if geocoding fails.
  */
 async function getCoordinatesFromAddress(address) {
   try {
-    const response = await axios.get(`${HERE_BASE_URL}/v1/geocode`, {
-      params: {
-        q: address,
-        apikey: HERE_API_KEY,
-        limit: 1
-      }
-    });
-    
-    if (response.data && response.data.items && response.data.items.length > 0) {
-      const item = response.data.items[0];
-      return [item.position.lng, item.position.lat];
-    }
-    return null;
+    const result = await googleMapsService.geocodeAddress(address);
+    if (!result) return null;
+    return [result.lng, result.lat]; // GeoJSON order: [lng, lat]
   } catch (error) {
-    console.log('Geocoding error:', error.message);
+    console.log("[Maps] geocode error:", error.message);
     return null;
   }
 }
 
 /**
- * Get optimized route from Here Maps Routing API
+ * Get an optimised driving route with optional waypoints.
+ * @param {[number,number]} start      - [lng, lat]
+ * @param {Array<[number,number]>} waypoints - array of [lng, lat]
+ * @returns {Promise<{distance,duration,polyline,instructions}>}
  */
 async function getOptimizedRoute(start, waypoints) {
-  try {
-    const waypointString = waypoints.map(wp => `${wp[1]},${wp[0]}`).join(';');
-    const startString = `${start[1]},${start[0]}`;
-    
-    const response = await axios.get(`${HERE_BASE_URL}/v8/routes`, {
-      params: {
-        origin: startString,
-        destination: waypoints[waypoints.length - 1].join(','),
-        waypoint0: waypointString,
-        apikey: HERE_API_KEY,
-        transportMode: 'car',
-        return: 'polyline,summary,actions,instructions'
-      }
-    });
-    
-    if (response.data && response.data.routes && response.data.routes.length > 0) {
-      const route = response.data.routes[0];
-      return {
-        distance: route.sections[0].summary.length,
-        duration: route.sections[0].summary.duration,
-        polyline: route.sections[0].polyline,
-        instructions: route.sections[0].actions.map(action => ({
-          instruction: action.instruction,
-          distance: action.length,
-          duration: action.duration,
-          coordinates: [action.offset]
-        }))
-      };
-    }
-    
-    throw new Error('No route found');
-  } catch (error) {
-    console.log('Routing error:', error.message);
-    throw error;
-  }
+  // Convert GeoJSON [lng, lat] arrays to {lat, lng} objects
+  const originCoords = { lat: start[1], lng: start[0] };
+  const destCoords = { lat: waypoints.at(-1)[1], lng: waypoints.at(-1)[0] };
+  const midWayCoords = waypoints
+    .slice(0, -1)
+    .map((wp) => ({ lat: wp[1], lng: wp[0] }));
+
+  const result = await googleMapsService.getDirections(
+    originCoords,
+    destCoords,
+    midWayCoords,
+  );
+
+  if (!result) throw new Error("No route found");
+
+  return {
+    distance: result.distance, // metres
+    duration: result.duration, // seconds
+    polyline: result.polyline,
+    instructions: result.steps.map((s) => ({
+      instruction: s.instruction,
+      distance: s.distance,
+      duration: s.duration,
+      coordinates: [s.startLocation.lng, s.startLocation.lat],
+    })),
+  };
 }
 
 /**
@@ -595,22 +575,24 @@ async function getOptimizedRoute(start, waypoints) {
 async function checkGeofences(tracking, latitude, longitude) {
   try {
     const geofences = await Geofence.find({
-      status: 'active',
-      'center.coordinates': {
+      status: "active",
+      "center.coordinates": {
         $near: {
           $geometry: {
             type: "Point",
-            coordinates: [longitude, latitude]
+            coordinates: [longitude, latitude],
           },
-          $maxDistance: 5000 // 5km radius
-        }
-      }
+          $maxDistance: 5000, // 5km radius
+        },
+      },
     });
-    
+
     for (const geofence of geofences) {
       const isInside = geofence.isPointInside(longitude, latitude);
-      const wasInside = tracking.geofences.find(gf => gf.name === geofence.name);
-      
+      const wasInside = tracking.geofences.find(
+        (gf) => gf.name === geofence.name,
+      );
+
       if (isInside && !wasInside) {
         // Entered geofence
         tracking.geofences.push({
@@ -618,32 +600,34 @@ async function checkGeofences(tracking, latitude, longitude) {
           type: geofence.type,
           center: geofence.center,
           radius: geofence.radius,
-          enteredAt: new Date()
+          enteredAt: new Date(),
         });
-        
+
         tracking.notifications.push({
-          type: 'geofence_enter',
+          type: "geofence_enter",
           message: `Entered ${geofence.name}`,
-          timestamp: new Date()
+          timestamp: new Date(),
         });
       } else if (!isInside && wasInside) {
         // Exited geofence
-        const geofenceIndex = tracking.geofences.findIndex(gf => gf.name === geofence.name);
+        const geofenceIndex = tracking.geofences.findIndex(
+          (gf) => gf.name === geofence.name,
+        );
         if (geofenceIndex !== -1) {
           tracking.geofences[geofenceIndex].exitedAt = new Date();
         }
-        
+
         tracking.notifications.push({
-          type: 'geofence_exit',
+          type: "geofence_exit",
           message: `Exited ${geofence.name}`,
-          timestamp: new Date()
+          timestamp: new Date(),
         });
       }
     }
-    
+
     await tracking.save();
   } catch (error) {
-    console.log('Geofence check error:', error.message);
+    console.log("Geofence check error:", error.message);
   }
 }
 
@@ -652,14 +636,17 @@ async function checkGeofences(tracking, latitude, longitude) {
  */
 async function publishLocationUpdate(deliveryAgentId, orderId, locationData) {
   try {
-    await redisClient.publish('location_updates', JSON.stringify({
-      deliveryAgentId,
-      orderId,
-      location: locationData,
-      timestamp: new Date()
-    }));
+    await redisClient.publish(
+      "location_updates",
+      JSON.stringify({
+        deliveryAgentId,
+        orderId,
+        location: locationData,
+        timestamp: new Date(),
+      }),
+    );
   } catch (error) {
-    console.log('WebSocket publish error:', error.message);
+    console.log("WebSocket publish error:", error.message);
   }
 }
 
@@ -668,5 +655,5 @@ module.exports = {
   getRoute,
   getCurrentLocation,
   getTrackingHistory,
-  updateDeliveryStatus
+  updateDeliveryStatus,
 };

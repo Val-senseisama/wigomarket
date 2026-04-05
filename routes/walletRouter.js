@@ -6,8 +6,8 @@ const {
   updateBankAccount,
   requestWithdrawal,
   getWithdrawalHistory,
-  getWalletStats
-} = require("../controllers/walletController");
+  getWalletStats,
+} = require("../controllers/wallet");
 const {
   getTransactionHistory,
   getVATSummary,

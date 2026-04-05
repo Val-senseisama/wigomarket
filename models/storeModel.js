@@ -28,6 +28,21 @@ var storeSchema = new mongoose.Schema(
     address: {
       type: String,
     },
+    // GeoJSON location for map display & geospatial queries
+    location: {
+      type: {
+        type: String,
+        enum: ["Point"],
+        default: "Point",
+      },
+      coordinates: {
+        type: [Number], // [longitude, latitude]
+        default: undefined,
+      },
+      formattedAddress: {
+        type: String,
+      },
+    },
     balance: {
       type: Number,
       default: 0,
@@ -59,15 +74,18 @@ var storeSchema = new mongoose.Schema(
         length: 10,
       },
     },
-    subAccountDetails:{
+    subAccountDetails: {
       type: Object,
-      default: {}
-    }
+      default: {},
+    },
   },
   {
     timestamps: true,
-  }
+  },
 );
+
+// Geospatial index for nearby store queries
+storeSchema.index({ location: "2dsphere" });
 
 //Export the model
 module.exports = mongoose.model("Store", storeSchema);

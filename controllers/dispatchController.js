@@ -17,19 +17,15 @@ const { ThrowError } = require("../Helpers/Helpers");
  */
 const createDispatchProfile = asyncHandler(async (req, res) => {
   const { _id } = req.user;
-  const {
-    vehicleInfo,
-    coverageAreas,
-    documents,
-    workingHours,
-    workingDays
-  } = req.body;
+  const { vehicleInfo, coverageAreas, documents, workingHours, workingDays } =
+    req.body;
 
   // Verify user is a delivery agent
   if (!req.userRoles.includes("dispatch")) {
     return res.status(403).json({
       success: false,
-      message: "Access denied. Only delivery agents can create dispatch profiles."
+      message:
+        "Access denied. Only delivery agents can create dispatch profiles.",
     });
   }
 
@@ -38,7 +34,7 @@ const createDispatchProfile = asyncHandler(async (req, res) => {
   if (existingProfile) {
     return res.status(400).json({
       success: false,
-      message: "Dispatch profile already exists for this user"
+      message: "Dispatch profile already exists for this user",
     });
   }
 
@@ -51,38 +47,44 @@ const createDispatchProfile = asyncHandler(async (req, res) => {
         model: vehicleInfo.model,
         year: vehicleInfo.year,
         plateNumber: vehicleInfo.plateNumber,
-        color: vehicleInfo.color
+        color: vehicleInfo.color,
       },
       coverageAreas: coverageAreas || [],
       documents: {
         driverLicense: {
           number: documents.driverLicense.number,
           expiryDate: documents.driverLicense.expiryDate,
-          image: documents.driverLicense.image
+          image: documents.driverLicense.image,
         },
         vehicleRegistration: {
           number: documents.vehicleRegistration.number,
           expiryDate: documents.vehicleRegistration.expiryDate,
-          image: documents.vehicleRegistration.image
+          image: documents.vehicleRegistration.image,
         },
         insurance: {
           provider: documents.insurance.provider,
           policyNumber: documents.insurance.policyNumber,
           expiryDate: documents.insurance.expiryDate,
-          image: documents.insurance.image
-        }
+          image: documents.insurance.image,
+        },
       },
       availability: {
         workingHours: workingHours || { start: "09:00", end: "17:00" },
-        workingDays: workingDays || ["monday", "tuesday", "wednesday", "thursday", "friday"]
+        workingDays: workingDays || [
+          "monday",
+          "tuesday",
+          "wednesday",
+          "thursday",
+          "friday",
+        ],
       },
-      status: "pending"
+      status: "pending",
     });
 
     res.json({
       success: true,
       message: "Dispatch profile created successfully",
-      data: dispatchProfile
+      data: dispatchProfile,
     });
   } catch (error) {
     console.log(error);
@@ -107,7 +109,8 @@ const updateDispatchProfile = asyncHandler(async (req, res) => {
   if (!req.userRoles.includes("dispatch")) {
     return res.status(403).json({
       success: false,
-      message: "Access denied. Only delivery agents can update dispatch profiles."
+      message:
+        "Access denied. Only delivery agents can update dispatch profiles.",
     });
   }
 
@@ -115,20 +118,20 @@ const updateDispatchProfile = asyncHandler(async (req, res) => {
     const dispatchProfile = await DispatchProfile.findOneAndUpdate(
       { user: _id },
       updateData,
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     );
 
     if (!dispatchProfile) {
       return res.status(404).json({
         success: false,
-        message: "Dispatch profile not found"
+        message: "Dispatch profile not found",
       });
     }
 
     res.json({
       success: true,
       message: "Dispatch profile updated successfully",
-      data: dispatchProfile
+      data: dispatchProfile,
     });
   } catch (error) {
     console.log(error);
@@ -148,19 +151,20 @@ const getDispatchProfile = asyncHandler(async (req, res) => {
   const { _id } = req.user;
 
   try {
-    const dispatchProfile = await DispatchProfile.findOne({ user: _id })
-      .populate('user', 'fullName email mobile');
+    const dispatchProfile = await DispatchProfile.findOne({
+      user: _id,
+    }).populate("user", "fullName email mobile");
 
     if (!dispatchProfile) {
       return res.status(404).json({
         success: false,
-        message: "Dispatch profile not found"
+        message: "Dispatch profile not found",
       });
     }
 
     res.json({
       success: true,
-      data: dispatchProfile
+      data: dispatchProfile,
     });
   } catch (error) {
     console.log(error);
@@ -179,13 +183,13 @@ const getDispatchProfile = asyncHandler(async (req, res) => {
  */
 const getEarnings = asyncHandler(async (req, res) => {
   const { _id } = req.user;
-  const { period = 'month' } = req.query;
+  const { period = "month" } = req.query;
 
   // Verify user is a delivery agent
   if (!req.userRoles.includes("dispatch")) {
     return res.status(403).json({
       success: false,
-      message: "Access denied. Only delivery agents can view earnings."
+      message: "Access denied. Only delivery agents can view earnings.",
     });
   }
 
@@ -193,15 +197,15 @@ const getEarnings = asyncHandler(async (req, res) => {
     // Calculate date range based on period
     const now = new Date();
     let startDate;
-    
+
     switch (period) {
-      case 'week':
+      case "week":
         startDate = new Date(now - 7 * 24 * 60 * 60 * 1000);
         break;
-      case 'month':
+      case "month":
         startDate = new Date(now - 30 * 24 * 60 * 60 * 1000);
         break;
-      case 'year':
+      case "year":
         startDate = new Date(now - 365 * 24 * 60 * 60 * 1000);
         break;
       default:
@@ -211,26 +215,32 @@ const getEarnings = asyncHandler(async (req, res) => {
     // Get completed deliveries in period
     const completedDeliveries = await Order.find({
       deliveryAgent: _id,
-      deliveryStatus: 'delivered',
-      actualDeliveryTime: { $gte: startDate, $lte: now }
-    }).select('deliveryFee actualDeliveryTime createdAt');
+      deliveryStatus: "delivered",
+      actualDeliveryTime: { $gte: startDate, $lte: now },
+    }).select("deliveryFee actualDeliveryTime createdAt");
 
     // Calculate earnings
-    const totalEarnings = completedDeliveries.reduce((sum, order) => sum + (order.deliveryFee || 0), 0);
+    const totalEarnings = completedDeliveries.reduce(
+      (sum, order) => sum + (order.deliveryFee || 0),
+      0,
+    );
     const totalDeliveries = completedDeliveries.length;
-    const averageEarningsPerDelivery = totalDeliveries > 0 ? totalEarnings / totalDeliveries : 0;
+    const averageEarningsPerDelivery =
+      totalDeliveries > 0 ? totalEarnings / totalDeliveries : 0;
 
     // Get daily earnings breakdown
     const dailyEarnings = {};
-    completedDeliveries.forEach(order => {
-      const date = order.actualDeliveryTime.toISOString().split('T')[0];
-      dailyEarnings[date] = (dailyEarnings[date] || 0) + (order.deliveryFee || 0);
+    completedDeliveries.forEach((order) => {
+      const date = order.actualDeliveryTime.toISOString().split("T")[0];
+      dailyEarnings[date] =
+        (dailyEarnings[date] || 0) + (order.deliveryFee || 0);
     });
 
     // Get dispatch profile for total stats
     const dispatchProfile = await DispatchProfile.findOne({ user: _id });
     const totalLifetimeEarnings = dispatchProfile?.earnings?.totalEarnings || 0;
-    const totalLifetimeDeliveries = dispatchProfile?.earnings?.totalDeliveries || 0;
+    const totalLifetimeDeliveries =
+      dispatchProfile?.earnings?.totalDeliveries || 0;
 
     res.json({
       success: true,
@@ -240,18 +250,21 @@ const getEarnings = asyncHandler(async (req, res) => {
           totalEarnings: totalEarnings,
           totalDeliveries: totalDeliveries,
           averageEarningsPerDelivery: averageEarningsPerDelivery,
-          dailyEarnings: dailyEarnings
+          dailyEarnings: dailyEarnings,
         },
         lifetime: {
           totalEarnings: totalLifetimeEarnings,
           totalDeliveries: totalLifetimeDeliveries,
-          averageEarningsPerDelivery: totalLifetimeDeliveries > 0 ? totalLifetimeEarnings / totalLifetimeDeliveries : 0
+          averageEarningsPerDelivery:
+            totalLifetimeDeliveries > 0
+              ? totalLifetimeEarnings / totalLifetimeDeliveries
+              : 0,
         },
         dateRange: {
           start: startDate,
-          end: now
-        }
-      }
+          end: now,
+        },
+      },
     });
   } catch (error) {
     console.log(error);
@@ -274,7 +287,7 @@ const getDashboardStats = asyncHandler(async (req, res) => {
   if (!req.userRoles.includes("dispatch")) {
     return res.status(403).json({
       success: false,
-      message: "Access denied. Only delivery agents can view dashboard."
+      message: "Access denied. Only delivery agents can view dashboard.",
     });
   }
 
@@ -287,14 +300,14 @@ const getDashboardStats = asyncHandler(async (req, res) => {
     // Get current active orders
     const activeOrders = await Order.find({
       deliveryAgent: _id,
-      deliveryStatus: { $in: ['assigned', 'picked_up', 'in_transit'] }
+      deliveryStatus: { $in: ["assigned", "picked_up", "in_transit"] },
     }).countDocuments();
 
     // Get today's deliveries
     const todayDeliveries = await Order.find({
       deliveryAgent: _id,
-      deliveryStatus: 'delivered',
-      actualDeliveryTime: { $gte: today }
+      deliveryStatus: "delivered",
+      actualDeliveryTime: { $gte: today },
     }).countDocuments();
 
     // Get this week's earnings
@@ -302,17 +315,17 @@ const getDashboardStats = asyncHandler(async (req, res) => {
       {
         $match: {
           deliveryAgent: _id,
-          deliveryStatus: 'delivered',
-          actualDeliveryTime: { $gte: thisWeek }
-        }
+          deliveryStatus: "delivered",
+          actualDeliveryTime: { $gte: thisWeek },
+        },
       },
       {
         $group: {
           _id: null,
-          totalEarnings: { $sum: '$deliveryFee' },
-          totalDeliveries: { $sum: 1 }
-        }
-      }
+          totalEarnings: { $sum: "$deliveryFee" },
+          totalDeliveries: { $sum: 1 },
+        },
+      },
     ]);
 
     // Get this month's earnings
@@ -320,27 +333,27 @@ const getDashboardStats = asyncHandler(async (req, res) => {
       {
         $match: {
           deliveryAgent: _id,
-          deliveryStatus: 'delivered',
-          actualDeliveryTime: { $gte: thisMonth }
-        }
+          deliveryStatus: "delivered",
+          actualDeliveryTime: { $gte: thisMonth },
+        },
       },
       {
         $group: {
           _id: null,
-          totalEarnings: { $sum: '$deliveryFee' },
-          totalDeliveries: { $sum: 1 }
-        }
-      }
+          totalEarnings: { $sum: "$deliveryFee" },
+          totalDeliveries: { $sum: 1 },
+        },
+      },
     ]);
 
     // Get recent orders
     const recentOrders = await Order.find({
-      deliveryAgent: _id
+      deliveryAgent: _id,
     })
-    .populate('orderedBy', 'fullName mobile')
-    .populate('products.product', 'title listedPrice')
-    .sort({ createdAt: -1 })
-    .limit(5);
+      .populate("orderedBy", "fullName mobile")
+      .populate("products.product", "title listedPrice")
+      .sort({ createdAt: -1 })
+      .limit(5);
 
     // Get dispatch profile
     const dispatchProfile = await DispatchProfile.findOne({ user: _id });
@@ -354,16 +367,16 @@ const getDashboardStats = asyncHandler(async (req, res) => {
           weekEarnings: weekEarnings[0]?.totalEarnings || 0,
           weekDeliveries: weekEarnings[0]?.totalDeliveries || 0,
           monthEarnings: monthEarnings[0]?.totalEarnings || 0,
-          monthDeliveries: monthEarnings[0]?.totalDeliveries || 0
+          monthDeliveries: monthEarnings[0]?.totalDeliveries || 0,
         },
         profile: {
-          status: dispatchProfile?.status || 'pending',
+          status: dispatchProfile?.status || "pending",
           isActive: dispatchProfile?.isActive || false,
           rating: dispatchProfile?.rating?.average || 0,
-          totalReviews: dispatchProfile?.rating?.totalReviews || 0
+          totalReviews: dispatchProfile?.rating?.totalReviews || 0,
         },
-        recentOrders: recentOrders
-      }
+        recentOrders: recentOrders,
+      },
     });
   } catch (error) {
     console.log(error);
@@ -388,7 +401,7 @@ const updateAvailability = asyncHandler(async (req, res) => {
   if (!req.userRoles.includes("dispatch")) {
     return res.status(403).json({
       success: false,
-      message: "Access denied. Only delivery agents can update availability."
+      message: "Access denied. Only delivery agents can update availability.",
     });
   }
 
@@ -396,24 +409,24 @@ const updateAvailability = asyncHandler(async (req, res) => {
   if (!status || !validStatuses.includes(status)) {
     return res.status(400).json({
       success: false,
-      message: "Invalid status. Must be one of: " + validStatuses.join(", ")
+      message: "Invalid status. Must be one of: " + validStatuses.join(", "),
     });
   }
 
   try {
     const dispatchProfile = await DispatchProfile.findOneAndUpdate(
       { user: _id },
-      { 
+      {
         "availability.status": status,
-        lastActiveAt: new Date()
+        lastActiveAt: new Date(),
       },
-      { new: true }
+      { new: true },
     );
 
     if (!dispatchProfile) {
       return res.status(404).json({
         success: false,
-        message: "Dispatch profile not found"
+        message: "Dispatch profile not found",
       });
     }
 
@@ -422,8 +435,8 @@ const updateAvailability = asyncHandler(async (req, res) => {
       message: `Availability updated to ${status}`,
       data: {
         status: status,
-        lastActiveAt: dispatchProfile.lastActiveAt
-      }
+        lastActiveAt: dispatchProfile.lastActiveAt,
+      },
     });
   } catch (error) {
     console.log(error);
@@ -432,21 +445,7 @@ const updateAvailability = asyncHandler(async (req, res) => {
 });
 
 // Legacy functions (keeping for backward compatibility)
-const takeDispatch = asyncHandler(async (req, res) => {
-  const { orderedBy } = req.body;
-  const { _id } = req.dispatch._id;
-  try {
-    const dispatchTaken = await Order.findOneAndUpdate(
-      { orderedBy: orderedBy },
-      { $set: { dispatch: _id } },
-      { new: true }
-    );
-
-    res.json(dispatchTaken);
-  } catch (error) {
-    throw new Error(error);
-  }
-});
+const takeDispatch = require("./dispatch/takeDispatch");
 
 const getDispatchOrders = asyncHandler(async (req, res) => {
   try {
@@ -480,7 +479,7 @@ const getDispatchOrders = asyncHandler(async (req, res) => {
 
 const dispatchCommission = asyncHandler(async (req, res) => {});
 
-module.exports = { 
+module.exports = {
   createDispatchProfile,
   updateDispatchProfile,
   getDispatchProfile,
@@ -489,5 +488,5 @@ module.exports = {
   updateAvailability,
   takeDispatch,
   getDispatchOrders,
-  dispatchCommission
+  dispatchCommission,
 };

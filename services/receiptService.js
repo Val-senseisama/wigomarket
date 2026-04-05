@@ -1,8 +1,8 @@
-const puppeteer = require('puppeteer');
-const handlebars = require('handlebars');
-const fs = require('fs');
-const path = require('path');
-const { MakeID } = require('../Helpers/Helpers');
+const puppeteer = require("puppeteer");
+const handlebars = require("handlebars");
+const fs = require("fs");
+const path = require("path");
+const { MakeID } = require("../Helpers/Helpers");
 
 /**
  * Receipt Generation Service
@@ -10,8 +10,8 @@ const { MakeID } = require('../Helpers/Helpers');
  */
 class ReceiptService {
   constructor() {
-    this.templatesDir = path.join(__dirname, '../templates');
-    this.outputDir = path.join(__dirname, '../public/receipts');
+    this.templatesDir = path.join(__dirname, "../templates");
+    this.outputDir = path.join(__dirname, "../public/receipts");
     this.ensureOutputDir();
   }
 
@@ -37,65 +37,71 @@ class ReceiptService {
       const receiptData = {
         receiptNumber: transaction.transactionId,
         orderNumber: order.paymentIntent.id,
-        date: new Date().toLocaleDateString('en-NG'),
-        time: new Date().toLocaleTimeString('en-NG'),
-        
+        date: new Date().toLocaleDateString("en-NG"),
+        time: new Date().toLocaleTimeString("en-NG"),
+
         // Customer information
         customer: {
-          name: order.orderedBy.fullName || 'Customer',
+          name: order.orderedBy.fullName || "Customer",
           email: order.orderedBy.email,
-          phone: order.orderedBy.mobile || 'N/A',
-          address: order.deliveryAddress || 'N/A'
+          phone: order.orderedBy.mobile || "N/A",
+          address: order.deliveryAddress || "N/A",
         },
-        
+
         // Order items
-        items: order.products.map(item => ({
+        items: order.products.map((item) => ({
           name: item.product.title,
           store: item.store.name,
           quantity: item.count,
           unitPrice: item.product.listedPrice,
-          totalPrice: item.product.listedPrice * item.count
+          totalPrice: item.product.listedPrice * item.count,
         })),
-        
+
         // Financial breakdown
-        subtotal: order.paymentIntent.amount - vatData.amount - (order.deliveryFee || 0),
+        subtotal:
+          order.paymentIntent.amount -
+          vatData.amount -
+          (order.deliveryFee || 0),
         deliveryFee: order.deliveryFee || 0,
         vat: {
           rate: vatData.rate,
           amount: vatData.amount,
-          responsibility: vatData.responsibility
+          responsibility: vatData.responsibility,
         },
         total: order.paymentIntent.amount,
-        
+
         // Payment information
         payment: {
           method: order.paymentMethod,
           status: order.paymentStatus,
           transactionId: transaction.transactionId,
-          paidAt: order.paymentIntent.paid_at || new Date()
+          paidAt: order.paymentIntent.paid_at || new Date(),
         },
-        
+
         // Commission breakdown
         commission: {
           platformRate: commissionData.platformRate,
           platformAmount: commissionData.platformAmount,
           vendorAmount: commissionData.vendorAmount,
-          dispatchAmount: commissionData.dispatchAmount
+          dispatchAmount: commissionData.dispatchAmount,
         },
-        
+
         // Company information
         company: {
-          name: 'WigoMarket',
-          address: 'Lagos, Nigeria',
-          phone: '+234 XXX XXX XXXX',
-          email: 'support@wigomarket.com',
-          website: 'www.wigomarket.com'
-        }
+          name: "WigoMarket",
+          address: "Lagos, Nigeria",
+          phone: "+234 XXX XXX XXXX",
+          email: "support@wigomarket.com",
+          website: "www.wigomarket.com",
+        },
       };
 
       const html = await this.renderReceiptTemplate(receiptData);
-      const pdfPath = await this.generatePDF(html, `receipt_${transaction.transactionId}.pdf`);
-      
+      const pdfPath = await this.generatePDF(
+        html,
+        `receipt_${transaction.transactionId}.pdf`,
+      );
+
       return pdfPath;
     } catch (error) {
       throw new Error(`Failed to generate payment receipt: ${error.message}`);
@@ -112,58 +118,84 @@ class ReceiptService {
   async generateTransactionStatement(user, transactions, filters = {}) {
     try {
       const statementData = {
-        statementNumber: `STMT_${Date.now()}_${MakeID(6)}`,
+        statementNumber: `STMT_${Date.now()}_${MakeID(16)}`,
         period: {
-          from: filters.startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toLocaleDateString('en-NG'),
-          to: filters.endDate || new Date().toLocaleDateString('en-NG')
+          from:
+            filters.startDate ||
+            new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toLocaleDateString(
+              "en-NG",
+            ),
+          to: filters.endDate || new Date().toLocaleDateString("en-NG"),
         },
-        generatedAt: new Date().toLocaleString('en-NG'),
-        
+        generatedAt: new Date().toLocaleString("en-NG"),
+
         // User information
         user: {
-          name: user.fullName || 'User',
+          name: user.fullName || "User",
           email: user.email,
-          phone: user.mobile || 'N/A',
-          roles: user.role.join(', ')
+          phone: user.mobile || "N/A",
+          roles: user.role.join(", "),
         },
-        
+
         // Transaction summary
         summary: {
           totalTransactions: transactions.length,
-          totalAmount: transactions.reduce((sum, txn) => sum + txn.totalAmount, 0),
-          totalDebits: transactions.reduce((sum, txn) => 
-            sum + txn.entries.reduce((entrySum, entry) => entrySum + entry.debit, 0), 0),
-          totalCredits: transactions.reduce((sum, txn) => 
-            sum + txn.entries.reduce((entrySum, entry) => entrySum + entry.credit, 0), 0)
+          totalAmount: transactions.reduce(
+            (sum, txn) => sum + txn.totalAmount,
+            0,
+          ),
+          totalDebits: transactions.reduce(
+            (sum, txn) =>
+              sum +
+              txn.entries.reduce(
+                (entrySum, entry) => entrySum + entry.debit,
+                0,
+              ),
+            0,
+          ),
+          totalCredits: transactions.reduce(
+            (sum, txn) =>
+              sum +
+              txn.entries.reduce(
+                (entrySum, entry) => entrySum + entry.credit,
+                0,
+              ),
+            0,
+          ),
         },
-        
+
         // Transactions
-        transactions: transactions.map(txn => ({
+        transactions: transactions.map((txn) => ({
           id: txn.transactionId,
           reference: txn.reference,
           type: txn.type,
-          date: txn.createdAt.toLocaleDateString('en-NG'),
+          date: txn.createdAt.toLocaleDateString("en-NG"),
           amount: txn.totalAmount,
           status: txn.status,
-          description: txn.entries[0]?.description || 'Transaction'
+          description: txn.entries[0]?.description || "Transaction",
         })),
-        
+
         // Company information
         company: {
-          name: 'WigoMarket',
-          address: 'Lagos, Nigeria',
-          phone: '+234 XXX XXX XXXX',
-          email: 'support@wigomarket.com',
-          website: 'www.wigomarket.com'
-        }
+          name: "WigoMarket",
+          address: "Lagos, Nigeria",
+          phone: "+234 XXX XXX XXXX",
+          email: "support@wigomarket.com",
+          website: "www.wigomarket.com",
+        },
       };
 
       const html = await this.renderStatementTemplate(statementData);
-      const pdfPath = await this.generatePDF(html, `statement_${statementData.statementNumber}.pdf`);
-      
+      const pdfPath = await this.generatePDF(
+        html,
+        `statement_${statementData.statementNumber}.pdf`,
+      );
+
       return pdfPath;
     } catch (error) {
-      throw new Error(`Failed to generate transaction statement: ${error.message}`);
+      throw new Error(
+        `Failed to generate transaction statement: ${error.message}`,
+      );
     }
   }
 
@@ -175,11 +207,16 @@ class ReceiptService {
   async generateWithdrawalReceipt(receiptData) {
     try {
       const html = await this.renderWithdrawalReceiptTemplate(receiptData);
-      const pdfPath = await this.generatePDF(html, `withdrawal_receipt_${receiptData.receiptNumber}.pdf`);
-      
+      const pdfPath = await this.generatePDF(
+        html,
+        `withdrawal_receipt_${receiptData.receiptNumber}.pdf`,
+      );
+
       return pdfPath;
     } catch (error) {
-      throw new Error(`Failed to generate withdrawal receipt: ${error.message}`);
+      throw new Error(
+        `Failed to generate withdrawal receipt: ${error.message}`,
+      );
     }
   }
 
@@ -192,29 +229,36 @@ class ReceiptService {
   async generateVATReport(vatSummary, filters = {}) {
     try {
       const reportData = {
-        reportNumber: `VAT_${Date.now()}_${MakeID(6)}`,
+        reportNumber: `VAT_${Date.now()}_${MakeID(16)}`,
         period: {
-          from: filters.startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toLocaleDateString('en-NG'),
-          to: filters.endDate || new Date().toLocaleDateString('en-NG')
+          from:
+            filters.startDate ||
+            new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toLocaleDateString(
+              "en-NG",
+            ),
+          to: filters.endDate || new Date().toLocaleDateString("en-NG"),
         },
-        generatedAt: new Date().toLocaleString('en-NG'),
-        
+        generatedAt: new Date().toLocaleString("en-NG"),
+
         // VAT summary
         summary: vatSummary,
-        
+
         // Company information
         company: {
-          name: 'WigoMarket',
-          address: 'Lagos, Nigeria',
-          phone: '+234 XXX XXX XXXX',
-          email: 'support@wigomarket.com',
-          website: 'www.wigomarket.com'
-        }
+          name: "WigoMarket",
+          address: "Lagos, Nigeria",
+          phone: "+234 XXX XXX XXXX",
+          email: "support@wigomarket.com",
+          website: "www.wigomarket.com",
+        },
       };
 
       const html = await this.renderVATReportTemplate(reportData);
-      const pdfPath = await this.generatePDF(html, `vat_report_${reportData.reportNumber}.pdf`);
-      
+      const pdfPath = await this.generatePDF(
+        html,
+        `vat_report_${reportData.reportNumber}.pdf`,
+      );
+
       return pdfPath;
     } catch (error) {
       throw new Error(`Failed to generate VAT report: ${error.message}`);
@@ -227,14 +271,14 @@ class ReceiptService {
    * @returns {Promise<string>} - Rendered HTML
    */
   async renderReceiptTemplate(data) {
-    const templatePath = path.join(this.templatesDir, 'receipt.hbs');
-    
+    const templatePath = path.join(this.templatesDir, "receipt.hbs");
+
     if (!fs.existsSync(templatePath)) {
       // Create default receipt template if it doesn't exist
       await this.createDefaultReceiptTemplate();
     }
-    
-    const template = fs.readFileSync(templatePath, 'utf8');
+
+    const template = fs.readFileSync(templatePath, "utf8");
     const compiledTemplate = handlebars.compile(template);
     return compiledTemplate(data);
   }
@@ -245,14 +289,14 @@ class ReceiptService {
    * @returns {Promise<string>} - Rendered HTML
    */
   async renderStatementTemplate(data) {
-    const templatePath = path.join(this.templatesDir, 'statement.hbs');
-    
+    const templatePath = path.join(this.templatesDir, "statement.hbs");
+
     if (!fs.existsSync(templatePath)) {
       // Create default statement template if it doesn't exist
       await this.createDefaultStatementTemplate();
     }
-    
-    const template = fs.readFileSync(templatePath, 'utf8');
+
+    const template = fs.readFileSync(templatePath, "utf8");
     const compiledTemplate = handlebars.compile(template);
     return compiledTemplate(data);
   }
@@ -263,14 +307,14 @@ class ReceiptService {
    * @returns {Promise<string>} - Rendered HTML
    */
   async renderWithdrawalReceiptTemplate(data) {
-    const templatePath = path.join(this.templatesDir, 'withdrawal-receipt.hbs');
-    
+    const templatePath = path.join(this.templatesDir, "withdrawal-receipt.hbs");
+
     if (!fs.existsSync(templatePath)) {
       // Create default withdrawal receipt template if it doesn't exist
       await this.createDefaultWithdrawalReceiptTemplate();
     }
-    
-    const template = fs.readFileSync(templatePath, 'utf8');
+
+    const template = fs.readFileSync(templatePath, "utf8");
     const compiledTemplate = handlebars.compile(template);
     return compiledTemplate(data);
   }
@@ -281,14 +325,14 @@ class ReceiptService {
    * @returns {Promise<string>} - Rendered HTML
    */
   async renderVATReportTemplate(data) {
-    const templatePath = path.join(this.templatesDir, 'vat-report.hbs');
-    
+    const templatePath = path.join(this.templatesDir, "vat-report.hbs");
+
     if (!fs.existsSync(templatePath)) {
       // Create default VAT report template if it doesn't exist
       await this.createDefaultVATReportTemplate();
     }
-    
-    const template = fs.readFileSync(templatePath, 'utf8');
+
+    const template = fs.readFileSync(templatePath, "utf8");
     const compiledTemplate = handlebars.compile(template);
     return compiledTemplate(data);
   }
@@ -302,26 +346,26 @@ class ReceiptService {
   async generatePDF(html, filename) {
     const browser = await puppeteer.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
     });
-    
+
     try {
       const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle0' });
-      
+      await page.setContent(html, { waitUntil: "networkidle0" });
+
       const pdfPath = path.join(this.outputDir, filename);
       await page.pdf({
         path: pdfPath,
-        format: 'A4',
+        format: "A4",
         printBackground: true,
         margin: {
-          top: '20mm',
-          right: '20mm',
-          bottom: '20mm',
-          left: '20mm'
-        }
+          top: "20mm",
+          right: "20mm",
+          bottom: "20mm",
+          left: "20mm",
+        },
       });
-      
+
       return pdfPath;
     } finally {
       await browser.close();
@@ -332,12 +376,12 @@ class ReceiptService {
    * Create default receipt template
    */
   async createDefaultReceiptTemplate() {
-    const templatePath = path.join(this.templatesDir, 'receipt.hbs');
-    
+    const templatePath = path.join(this.templatesDir, "receipt.hbs");
+
     if (!fs.existsSync(this.templatesDir)) {
       fs.mkdirSync(this.templatesDir, { recursive: true });
     }
-    
+
     const template = `
 <!DOCTYPE html>
 <html>
@@ -422,7 +466,7 @@ class ReceiptService {
     </div>
 </body>
 </html>`;
-    
+
     fs.writeFileSync(templatePath, template);
   }
 
@@ -430,8 +474,8 @@ class ReceiptService {
    * Create default statement template
    */
   async createDefaultStatementTemplate() {
-    const templatePath = path.join(this.templatesDir, 'statement.hbs');
-    
+    const templatePath = path.join(this.templatesDir, "statement.hbs");
+
     const template = `
 <!DOCTYPE html>
 <html>
@@ -514,7 +558,7 @@ class ReceiptService {
     </div>
 </body>
 </html>`;
-    
+
     fs.writeFileSync(templatePath, template);
   }
 
@@ -522,12 +566,12 @@ class ReceiptService {
    * Create default withdrawal receipt template
    */
   async createDefaultWithdrawalReceiptTemplate() {
-    const templatePath = path.join(this.templatesDir, 'withdrawal-receipt.hbs');
-    
+    const templatePath = path.join(this.templatesDir, "withdrawal-receipt.hbs");
+
     if (!fs.existsSync(this.templatesDir)) {
       fs.mkdirSync(this.templatesDir, { recursive: true });
     }
-    
+
     const template = `
 <!DOCTYPE html>
 <html>
@@ -619,7 +663,7 @@ class ReceiptService {
     </div>
 </body>
 </html>`;
-    
+
     fs.writeFileSync(templatePath, template);
   }
 
@@ -627,8 +671,8 @@ class ReceiptService {
    * Create default VAT report template
    */
   async createDefaultVATReportTemplate() {
-    const templatePath = path.join(this.templatesDir, 'vat-report.hbs');
-    
+    const templatePath = path.join(this.templatesDir, "vat-report.hbs");
+
     const template = `
 <!DOCTYPE html>
 <html>
@@ -676,7 +720,7 @@ class ReceiptService {
     </div>
 </body>
 </html>`;
-    
+
     fs.writeFileSync(templatePath, template);
   }
 }

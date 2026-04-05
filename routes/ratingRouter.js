@@ -6,7 +6,7 @@ const {
   updateRating,
   deleteRating,
   reportRating
-} = require("../controllers/ratingController");
+} = require("../controllers/rating");
 const { authMiddleware } = require("../middleware/authMiddleware");
 const router = express.Router();
 

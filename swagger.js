@@ -103,6 +103,10 @@ const options = {
         description: 'PDF receipt and document generation',
       },
       {
+        name: 'Orders',
+        description: 'Order placement, tracking, and delivery confirmation',
+      },
+      {
         name: 'Wishlist',
         description: 'User wishlist and saved products management',
       },
@@ -113,9 +117,10 @@ const options = {
     ],
   },
   apis: [
-    './routes/authRouter.js', 
-    './routes/productRouter.js', 
+    './routes/authRouter.js',
+    './routes/productRouter.js',
     './routes/storeRouter.js',
+    './routes/orderRouter.js',
     './routes/deliveryAgentRouter.js',
     './routes/paymentRouter.js',
     './routes/locationTrackingRouter.js',
@@ -125,8 +130,8 @@ const options = {
     './routes/walletRouter.js',
     './routes/websocketRouter.js',
     './routes/wishlistRouter.js',
-    './routes/sellerDiscoveryRouter.js'
-  ], // Path to your API route files
+    './routes/sellerDiscoveryRouter.js',
+  ],
 };
 
 const specs = swaggerJsdoc(options);

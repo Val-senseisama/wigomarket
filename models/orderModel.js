@@ -27,9 +27,10 @@ var orderSchema = new mongoose.Schema(
       enum: [
         "Not yet processed",
         "Pending",
+        "Processing",
         "Dispatched",
         "Cancelled",
-        "Filled",
+        "Delivered",
       ],
     },
     orderedBy: {
@@ -52,6 +53,21 @@ var orderSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    // GeoJSON coordinates for map display & distance calculation
+    deliveryLocation: {
+      type: {
+        type: String,
+        enum: ["Point"],
+        default: "Point",
+      },
+      coordinates: {
+        type: [Number], // [longitude, latitude]
+        default: undefined,
+      },
+      formattedAddress: {
+        type: String,
+      },
+    },
     deliveryStatus: {
       type: String,
       enum: [
@@ -67,9 +83,6 @@ var orderSchema = new mongoose.Schema(
     deliveryAgent: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: function () {
-        return this.deliveryMethod === "delivery_agent";
-      },
     },
     deliveryFee: {
       type: Number,
@@ -91,15 +104,41 @@ var orderSchema = new mongoose.Schema(
       storeAddress: String,
       fallback: Boolean, // true if dynamic calculation failed
       error: String, // error message if fallback used
+      deliveredAt: Date, // when delivery was confirmed
+      confirmedByAgent: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    },
+    deliveryConfirmation: {
+      agentConfirmed: { type: Boolean, default: false },
+      agentConfirmedAt: Date,
+      customerConfirmed: { type: Boolean, default: false },
+      customerConfirmedAt: Date,
+    },
+    // Optimistic lock used by the pending-payment cron
+    // Prevents duplicate wallet credits if two server instances race
+    processingLock: {
+      type: Boolean,
+      default: false,
+      index: true,
     },
     paymentStatus: {
       type: String,
-      default: "Not yet paid",
-      enum: ["Not yet paid", "Paid"],
+      default: "Unpaid",
+      enum: ["Unpaid", "Pending", "Paid", "Refunded", "Failed", "Not yet paid"],
     },
     paymentMethod: {
       type: String,
       enum: ["cash", "card", "bank"],
+    },
+    // ID provided by the client (frontend) to prevent duplicate orders
+    // from the same action (e.g. double-click)
+    clientSideId: {
+      type: String,
+      index: true,
+      sparse: true,
+      unique: true,
     },
   },
   {

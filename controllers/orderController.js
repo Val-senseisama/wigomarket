@@ -369,6 +369,13 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
   }
 });
 
+const {
+  createOrder,
+  getOrders,
+  getOrderById,
+  updateOrderStatus,
+} = require("./order");
+
 module.exports = {
   createOrder,
   getOrders,

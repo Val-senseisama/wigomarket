@@ -8,12 +8,32 @@ const {
   generatePaymentReceipt,
   generateTransactionStatement,
   generateVATReport,
-} = require("../controllers/paymentController");
+} = require("../controllers/payment");
 const {
   handleFlutterwaveWebhook,
 } = require("../controllers/webhookController");
+const { runPendingPaymentCheck } = require("../services/pendingPaymentCron");
 const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
+const rateLimit = require("express-rate-limit");
 const router = express.Router();
+
+/**
+ * Rate limiter for payment initialisation.
+ * Keyed by authenticated user ID to prevent card-testing attacks.
+ * 10 attempts per 15-minute window per user.
+ */
+const paymentInitLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.user?._id?.toString() || req.ip,
+  message: {
+    success: false,
+    message: "Too many payment attempts. Please try again after 15 minutes.",
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: false,
+});
 
 /**
  * @swagger
@@ -87,7 +107,7 @@ router.post("/webhook", handleFlutterwaveWebhook);
  *       404:
  *         description: Order not found
  */
-router.post("/initialize", authMiddleware, initializePayment);
+router.post("/initialize", authMiddleware, paymentInitLimiter, initializePayment);
 
 /**
  * @swagger
@@ -507,5 +527,48 @@ router.get("/statement", authMiddleware, generateTransactionStatement);
  *                   example: "Failed to download VAT report"
  */
 router.get("/vat-report", authMiddleware, isAdmin, generateVATReport);
+
+/**
+ * @swagger
+ * /api/payment/admin/run-pending-check:
+ *   post:
+ *     summary: Manually trigger pending payment recovery (Admin only)
+ *     description: |
+ *       Runs the same logic as the 5-minute cron — verifies all pending Flutterwave
+ *       transactions and credits wallets for any that are now confirmed paid.
+ *       Idempotent and race-condition safe.
+ *     tags:
+ *       - Payment
+ *       - Admin
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Check completed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *       403:
+ *         description: Admin only
+ */
+router.post(
+  "/admin/run-pending-check",
+  authMiddleware,
+  isAdmin,
+  async (req, res) => {
+    try {
+      await runPendingPaymentCheck();
+      res.json({ success: true, message: "Pending payment check completed" });
+    } catch (err) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  },
+);
 
 module.exports = router;

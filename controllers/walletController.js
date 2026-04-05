@@ -17,24 +17,24 @@ const { ThrowError, MakeID } = require("../Helpers/Helpers");
  */
 const createWallet = asyncHandler(async (req, res) => {
   const { _id } = req.user;
-  
+
   try {
     // Check if user already has a wallet
     const existingWallet = await Wallet.findOne({ user: _id });
     if (existingWallet) {
       return res.status(400).json({
         success: false,
-        message: "User already has a wallet"
+        message: "User already has a wallet",
       });
     }
-    
+
     // Create new wallet
     const wallet = await Wallet.createWallet(_id);
-    
+
     res.json({
       success: true,
       message: "Wallet created successfully",
-      data: wallet
+      data: wallet,
     });
   } catch (error) {
     throw new Error(error.message);
@@ -51,20 +51,20 @@ const createWallet = asyncHandler(async (req, res) => {
  */
 const getWallet = asyncHandler(async (req, res) => {
   const { _id } = req.user;
-  
+
   try {
     const wallet = await Wallet.getWalletByUser(_id);
-    
+
     if (!wallet) {
       return res.status(404).json({
         success: false,
-        message: "Wallet not found"
+        message: "Wallet not found",
       });
     }
-    
+
     res.json({
       success: true,
-      data: wallet
+      data: wallet,
     });
   } catch (error) {
     throw new Error(error.message);
@@ -83,40 +83,40 @@ const getWallet = asyncHandler(async (req, res) => {
 const updateBankAccount = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   const { accountName, accountNumber, bankCode, bankName } = req.body;
-  
+
   // Validate required fields
   if (!accountName || !accountNumber || !bankCode || !bankName) {
     return res.status(400).json({
       success: false,
-      message: "All bank account fields are required"
+      message: "All bank account fields are required",
     });
   }
-  
+
   try {
     const wallet = await Wallet.findOne({ user: _id });
-    
+
     if (!wallet) {
       return res.status(404).json({
         success: false,
-        message: "Wallet not found"
+        message: "Wallet not found",
       });
     }
-    
+
     // Update bank account information
     wallet.bankAccount = {
       accountName,
       accountNumber,
       bankCode,
       bankName,
-      isVerified: false // Will be verified separately
+      isVerified: false, // Will be verified separately
     };
-    
+
     await wallet.save();
-    
+
     res.json({
       success: true,
       message: "Bank account updated successfully",
-      data: wallet
+      data: wallet,
     });
   } catch (error) {
     throw new Error(error.message);
@@ -135,101 +135,101 @@ const updateBankAccount = asyncHandler(async (req, res) => {
 const requestWithdrawal = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   const { amount } = req.body;
-  
+
   // Validate amount
   if (!amount || amount <= 0) {
     return res.status(400).json({
       success: false,
-      message: "Valid withdrawal amount is required"
+      message: "Valid withdrawal amount is required",
     });
   }
-  
+
   const session = await mongoose.startSession();
-  
+
   try {
     await session.withTransaction(async () => {
       const wallet = await Wallet.findOne({ user: _id }).session(session);
-      
+
       if (!wallet) {
         throw new Error("Wallet not found");
       }
-      
-      if (wallet.status !== 'active') {
+
+      if (wallet.status !== "active") {
         throw new Error("Wallet is not active");
       }
-      
+
       if (!wallet.bankAccount.accountNumber) {
         throw new Error("Bank account not configured");
       }
-      
+
       if (!wallet.canWithdraw) {
         throw new Error("Withdrawal limit exceeded");
       }
-      
+
       if (wallet.balance < amount) {
         throw new Error("Insufficient wallet balance");
       }
-      
+
       // Calculate withdrawal fee (1% or minimum 100 NGN)
       const withdrawalFee = Math.max(amount * 0.01, 100);
       const totalDeduction = amount + withdrawalFee;
-      
+
       if (wallet.balance < totalDeduction) {
         throw new Error("Insufficient balance for withdrawal and fees");
       }
-      
+
       // Deduct funds from wallet
-      await wallet.deductFunds(totalDeduction, 'withdrawal');
-      
+      await wallet.deductFunds(totalDeduction, "withdrawal", session);
+
       // Create transaction record
-      const transactionId = `WD_${Date.now()}_${MakeID(6)}`;
+      const transactionId = `WD_${Date.now()}_${MakeID(16)}`;
       const transaction = await Transaction.createTransaction({
         transactionId,
         reference: `Withdrawal-${transactionId}`,
-        type: 'wallet_withdrawal',
+        type: "wallet_withdrawal",
         totalAmount: amount,
         entries: [
           {
-            account: 'accounts_payable',
+            account: "accounts_payable",
             userId: _id,
             debit: amount,
             credit: 0,
-            description: `Withdrawal to ${wallet.bankAccount.bankName}`
+            description: `Withdrawal to ${wallet.bankAccount.bankName}`,
           },
           {
-            account: 'wallet_vendor',
+            account: "wallet_vendor",
             userId: _id,
             debit: 0,
             credit: amount,
-            description: 'Wallet withdrawal'
+            description: "Wallet withdrawal",
           },
           {
-            account: 'bank_transfer_fees',
+            account: "bank_transfer_fees",
             userId: _id,
             debit: withdrawalFee,
             credit: 0,
-            description: 'Withdrawal processing fee'
+            description: "Withdrawal processing fee",
           },
           {
-            account: 'wallet_vendor',
+            account: "wallet_vendor",
             userId: _id,
             debit: 0,
             credit: withdrawalFee,
-            description: 'Fee deduction'
-          }
+            description: "Fee deduction",
+          },
         ],
         relatedEntity: {
-          type: 'withdrawal',
-          id: wallet._id
+          type: "withdrawal",
+          id: wallet._id,
         },
-        status: 'pending',
+        status: "pending",
         metadata: {
-          paymentMethod: 'bank_transfer',
+          paymentMethod: "bank_transfer",
           bankReference: wallet.bankAccount.accountNumber,
-          notes: `Withdrawal request for ${amount} NGN`
-        }
+          notes: `Withdrawal request for ${amount} NGN`,
+        },
       });
-      
+
       res.json({
         success: true,
         message: "Withdrawal request submitted successfully",
@@ -239,8 +239,8 @@ const requestWithdrawal = asyncHandler(async (req, res) => {
           fee: withdrawalFee,
           totalDeduction: totalDeduction,
           remainingBalance: wallet.balance,
-          estimatedProcessingTime: "1-3 business days"
-        }
+          estimatedProcessingTime: "1-3 business days",
+        },
       });
     });
   } catch (error) {
@@ -262,15 +262,18 @@ const requestWithdrawal = asyncHandler(async (req, res) => {
 const getWithdrawalHistory = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   const { page = 1, limit = 20 } = req.query;
-  
+
   try {
-    const transactions = await Transaction.getTransactionsByUser(_id, parseInt(limit));
-    
-    // Filter withdrawal transactions
-    const withdrawalTransactions = transactions.filter(txn => 
-      txn.type === 'wallet_withdrawal'
+    const transactions = await Transaction.getTransactionsByUser(
+      _id,
+      parseInt(limit),
     );
-    
+
+    // Filter withdrawal transactions
+    const withdrawalTransactions = transactions.filter(
+      (txn) => txn.type === "wallet_withdrawal",
+    );
+
     res.json({
       success: true,
       data: {
@@ -278,9 +281,9 @@ const getWithdrawalHistory = asyncHandler(async (req, res) => {
         pagination: {
           currentPage: parseInt(page),
           totalTransactions: withdrawalTransactions.length,
-          hasMore: withdrawalTransactions.length === parseInt(limit)
-        }
-      }
+          hasMore: withdrawalTransactions.length === parseInt(limit),
+        },
+      },
     });
   } catch (error) {
     throw new Error(error.message);
@@ -297,23 +300,23 @@ const getWithdrawalHistory = asyncHandler(async (req, res) => {
  */
 const getWalletStats = asyncHandler(async (req, res) => {
   const { _id } = req.user;
-  
+
   try {
     const wallet = await Wallet.getWalletByUser(_id);
-    
+
     if (!wallet) {
       return res.status(404).json({
         success: false,
-        message: "Wallet not found"
+        message: "Wallet not found",
       });
     }
-    
+
     // Get transaction statistics
     const transactions = await Transaction.find({
       "entries.userId": _id,
-      status: 'completed'
+      status: "completed",
     });
-    
+
     const stats = {
       currentBalance: wallet.balance,
       totalEarnings: wallet.metadata.totalEarnings,
@@ -324,16 +327,16 @@ const getWalletStats = asyncHandler(async (req, res) => {
         daily: wallet.limits.dailyWithdrawal,
         monthly: wallet.limits.monthlyWithdrawal,
         dailyUsed: wallet.withdrawalStats.dailyWithdrawn.amount,
-        monthlyUsed: wallet.withdrawalStats.monthlyWithdrawn.amount
+        monthlyUsed: wallet.withdrawalStats.monthlyWithdrawn.amount,
       },
       transactionCount: transactions.length,
       lastTransactionAt: wallet.metadata.lastTransactionAt,
-      canWithdraw: wallet.canWithdraw
+      canWithdraw: wallet.canWithdraw,
     };
-    
+
     res.json({
       success: true,
-      data: stats
+      data: stats,
     });
   } catch (error) {
     throw new Error(error.message);
@@ -346,5 +349,5 @@ module.exports = {
   updateBankAccount,
   requestWithdrawal,
   getWithdrawalHistory,
-  getWalletStats
+  getWalletStats,
 };

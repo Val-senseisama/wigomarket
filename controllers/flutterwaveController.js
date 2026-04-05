@@ -1,16 +1,9 @@
 const asyncHandler = require("express-async-handler");
 const axios = require("axios");
-const Redis = require("ioredis");
+const redisClient = require("../config/redisClient");
 const { validateMongodbId } = require("../utils/validateMongodbId");
 const { Validate } = require("../Helpers/Validate");
 const { ThrowError } = require("../Helpers/Helpers");
-
-// Redis client for caching
-const redisClient = new Redis(process.env.REDIS_URL || "redis://localhost:6379", {
-  retryDelayOnFailover: 100,
-  enableReadyCheck: false,
-  maxRetriesPerRequest: null,
-});
 
 
 // Flutterwave API configuration

@@ -3,7 +3,7 @@ const {
   getPopularSellers,
   getNearbySellers,
   getSellerStats
-} = require("../controllers/storeController");
+} = require("../controllers/store");
 
 const router = express.Router();
 

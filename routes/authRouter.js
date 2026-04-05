@@ -24,7 +24,7 @@ const {
   changeActiveRole,
   googleAuth,
   resetPassword,
-} = require("../controllers/userController");
+} = require("../controllers/user");
 const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
 const { commissionHandler } = require("../controllers/paymentController");
 const router = express.Router();

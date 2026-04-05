@@ -1,210 +1,237 @@
 const mongoose = require("mongoose");
 
 // Transaction ledger schema for double-entry accounting
-const transactionSchema = new mongoose.Schema({
-  // Transaction identification
-  transactionId: {
-    type: String,
-    required: true,
-    unique: true,
-    index: true
-  },
-  reference: {
-    type: String,
-    required: true,
-    index: true
-  },
-  
-  // Transaction details
-  type: {
-    type: String,
-    enum: [
-      // Order related
-      "order_payment",
-      "order_refund",
-      "order_cancellation",
-      
-      // Commission related
-      "platform_commission",
-      "vendor_commission",
-      "dispatch_commission",
-      
-      // VAT related
-      "vat_collection",
-      "vat_remittance",
-      
-      // Wallet operations
-      "wallet_deposit",
-      "wallet_withdrawal",
-      "wallet_transfer",
-      
-      // Payment processing
-      "payment_processing_fee",
-      "bank_transfer_fee",
-      
-      // System operations
-      "system_adjustment",
-      "reconciliation"
-    ],
-    required: true,
-    index: true
-  },
-  
-  // Double-entry accounting
-  entries: [{
-    account: {
+const transactionSchema = new mongoose.Schema(
+  {
+    // Transaction identification
+    transactionId: {
       type: String,
-      enum: [
-        // Asset accounts
-        "cash_account",
-        "bank_account",
-        "wallet_vendor",
-        "wallet_dispatch",
-        "wallet_platform",
-        "accounts_receivable",
-        
-        // Liability accounts
-        "accounts_payable",
-        "vat_payable",
-        "commission_payable",
-        
-        // Revenue accounts
-        "platform_revenue",
-        "commission_revenue",
-        "vat_revenue",
-        
-        // Expense accounts
-        "payment_processing_fees",
-        "bank_transfer_fees",
-        "operating_expenses"
-      ],
-      required: true
+      required: true,
+      unique: true,
+      index: true,
     },
-    userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      index: true
-    },
-    debit: {
-      type: Number,
-      default: 0,
-      min: 0
-    },
-    credit: {
-      type: Number,
-      default: 0,
-      min: 0
-    },
-    description: String
-  }],
-  
-  // Transaction amounts
-  totalAmount: {
-    type: Number,
-    required: true,
-    min: 0
-  },
-  currency: {
-    type: String,
-    default: "NGN",
-    enum: ["NGN", "USD", "EUR"]
-  },
-  
-  // VAT information
-  vat: {
-    rate: {
-      type: Number,
-      default: 7.5 // Nigerian VAT rate
-    },
-    amount: {
-      type: Number,
-      default: 0
-    },
-    responsibility: {
+    reference: {
       type: String,
-      enum: ["platform", "vendor"],
-      default: "platform"
+      required: true,
+      index: true,
     },
-    collected: {
-      type: Boolean,
-      default: false
-    },
-    remitted: {
-      type: Boolean,
-      default: false
-    },
-    remittanceDate: Date
-  },
-  
-  // Commission information
-  commission: {
-    platformRate: {
-      type: Number,
-      default: 0
-    },
-    platformAmount: {
-      type: Number,
-      default: 0
-    },
-    vendorAmount: {
-      type: Number,
-      default: 0
-    },
-    dispatchAmount: {
-      type: Number,
-      default: 0
-    }
-  },
-  
-  // Related entities
-  relatedEntity: {
+
+    // Transaction details
     type: {
       type: String,
-      enum: ["order", "withdrawal", "payment", "adjustment"]
+      enum: [
+        // Order related
+        "order_payment",
+        "order_refund",
+        "order_cancellation",
+
+        // Commission related
+        "platform_commission",
+        "vendor_commission",
+        "dispatch_commission",
+
+        // VAT related
+        "vat_collection",
+        "vat_remittance",
+
+        // Wallet operations
+        "wallet_deposit",
+        "wallet_withdrawal",
+        "wallet_transfer",
+
+        // Payment processing
+        "payment_processing_fee",
+        "bank_transfer_fee",
+
+        // System operations
+        "system_adjustment",
+        "reconciliation",
+      ],
+      required: true,
+      index: true,
     },
-    id: {
-      type: mongoose.Schema.Types.ObjectId
-    }
-  },
-  
-  // Transaction status
-  status: {
-    type: String,
-    enum: ["pending", "completed", "failed", "cancelled", "reversed"],
-    default: "pending",
-    index: true
-  },
-  
-  // Audit information
-  audit: {
-    createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User"
+
+    // Double-entry accounting
+    entries: [
+      {
+        account: {
+          type: String,
+          enum: [
+            // Asset accounts
+            "cash_account",
+            "bank_account",
+            "wallet_vendor",
+            "wallet_dispatch",
+            "wallet_platform",
+            "accounts_receivable",
+
+            // Liability accounts
+            "accounts_payable",
+            "vat_payable",
+            "commission_payable",
+
+            // Revenue accounts
+            "platform_revenue",
+            "commission_revenue",
+            "vat_revenue",
+
+            // Expense accounts
+            "payment_processing_fees",
+            "bank_transfer_fees",
+            "operating_expenses",
+          ],
+          required: true,
+        },
+        userId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          index: true,
+        },
+        debit: {
+          type: Number,
+          default: 0,
+          min: 0,
+        },
+        credit: {
+          type: Number,
+          default: 0,
+          min: 0,
+        },
+        description: String,
+      },
+    ],
+
+    // Transaction amounts
+    totalAmount: {
+      type: Number,
+      required: true,
+      min: 0,
     },
-    approvedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User"
+    currency: {
+      type: String,
+      default: "NGN",
+      enum: ["NGN", "USD", "EUR"],
     },
-    approvedAt: Date,
-    reversalReason: String,
-    reversedAt: Date,
-    reversedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User"
-    }
+
+    // VAT information
+    vat: {
+      rate: {
+        type: Number,
+        default: 7.5, // Nigerian VAT rate
+      },
+      amount: {
+        type: Number,
+        default: 0,
+      },
+      responsibility: {
+        type: String,
+        enum: ["platform", "vendor"],
+        default: "platform",
+      },
+      collected: {
+        type: Boolean,
+        default: false,
+      },
+      remitted: {
+        type: Boolean,
+        default: false,
+      },
+      remittanceDate: Date,
+    },
+
+    // Commission information
+    commission: {
+      platformRate: {
+        type: Number,
+        default: 0,
+      },
+      platformAmount: {
+        type: Number,
+        default: 0,
+      },
+      vendorAmount: {
+        type: Number,
+        default: 0,
+      },
+      dispatchAmount: {
+        type: Number,
+        default: 0,
+      },
+    },
+
+    // Related entities
+    relatedEntity: {
+      type: {
+        type: String,
+        enum: ["order", "withdrawal", "payment", "adjustment"],
+      },
+      id: {
+        type: mongoose.Schema.Types.ObjectId,
+      },
+    },
+
+    // Transaction status
+    // pending     → created, not yet processed
+    // processing  → actively being processed (DB session open); cleanup cron marks
+    //               these 'abandoned' if they're stuck for > 10 minutes
+    // completed   → successfully finished
+    // failed      → processing error; may be retried
+    // cancelled   → intentionally cancelled (e.g. rejected withdrawal)
+    // reversed    → completed but then reversed via Transaction.reverse()
+    // abandoned   → was 'processing' but timed out without completing
+    status: {
+      type: String,
+      enum: [
+        "pending",
+        "processing",
+        "completed",
+        "failed",
+        "cancelled",
+        "reversed",
+        "abandoned",
+      ],
+      default: "pending",
+      index: true,
+    },
+
+    // Audit information
+    audit: {
+      createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+      approvedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+      approvedAt: Date,
+      reversalReason: String,
+      reversedAt: Date,
+      reversedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    },
+
+    // Additional metadata
+    metadata: {
+      paymentMethod: String,
+      bankReference: String,
+      externalTransactionId: String,
+      externalEventId: {
+        type: String,
+        index: true,
+        sparse: true,
+        unique: true,
+      },
+      notes: String,
+      tags: [String],
+    },
   },
-  
-  // Additional metadata
-  metadata: {
-    paymentMethod: String,
-    bankReference: String,
-    externalTransactionId: String,
-    notes: String,
-    tags: [String]
-  }
-}, {
-  timestamps: true
-});
+  {
+    timestamps: true,
+  },
+);
 
 // Indexes for efficient queries
 transactionSchema.index({ transactionId: 1 });
@@ -217,103 +244,183 @@ transactionSchema.index({ "relatedEntity.type": 1, "relatedEntity.id": 1 });
 transactionSchema.index({ "vat.remitted": 1, "vat.remittanceDate": 1 });
 
 // Pre-save middleware to validate double-entry
-transactionSchema.pre('save', function(next) {
+transactionSchema.pre("save", function (next) {
   // Validate that total debits equal total credits
   const totalDebits = this.entries.reduce((sum, entry) => sum + entry.debit, 0);
-  const totalCredits = this.entries.reduce((sum, entry) => sum + entry.credit, 0);
-  
-  if (Math.abs(totalDebits - totalCredits) > 0.01) { // Allow for small rounding differences
-    return next(new Error('Transaction is not balanced: debits must equal credits'));
+  const totalCredits = this.entries.reduce(
+    (sum, entry) => sum + entry.credit,
+    0,
+  );
+
+  if (Math.abs(totalDebits - totalCredits) > 0.01) {
+    // Allow for small rounding differences
+    return next(
+      new Error("Transaction is not balanced: debits must equal credits"),
+    );
   }
-  
+
   // Validate that total amount matches transaction total
   if (Math.abs(totalDebits - this.totalAmount) > 0.01) {
-    return next(new Error('Transaction total does not match entry totals'));
+    return next(new Error("Transaction total does not match entry totals"));
   }
-  
+
   next();
 });
 
 // Virtual for transaction balance validation
-transactionSchema.virtual('isBalanced').get(function() {
+transactionSchema.virtual("isBalanced").get(function () {
   const totalDebits = this.entries.reduce((sum, entry) => sum + entry.debit, 0);
-  const totalCredits = this.entries.reduce((sum, entry) => sum + entry.credit, 0);
+  const totalCredits = this.entries.reduce(
+    (sum, entry) => sum + entry.credit,
+    0,
+  );
   return Math.abs(totalDebits - totalCredits) < 0.01;
 });
 
 // Method to add entry to transaction
-transactionSchema.methods.addEntry = function(account, userId, debit = 0, credit = 0, description = '') {
+transactionSchema.methods.addEntry = function (
+  account,
+  userId,
+  debit = 0,
+  credit = 0,
+  description = "",
+) {
   this.entries.push({
     account,
     userId,
     debit,
     credit,
-    description
+    description,
   });
   return this;
 };
 
 // Method to reverse transaction
-transactionSchema.methods.reverse = function(reason, reversedBy) {
-  if (this.status !== 'completed') {
-    throw new Error('Only completed transactions can be reversed');
+// [STABLE] Implements Standard 14 (Immutable Ledger).
+// Instead of modifying the original entries, it creates a new reversal record
+// and atomically synchronizes the associated wallet balances.
+transactionSchema.methods.reverse = async function (
+  reason,
+  reversedBy,
+  session,
+) {
+  if (this.status !== "completed") {
+    throw new Error("Only completed transactions can be reversed");
   }
-  
-  this.status = 'reversed';
+
+  // 1. Mark original as reversed (status-only update)
+  this.status = "reversed";
   this.audit.reversalReason = reason;
   this.audit.reversedAt = new Date();
   this.audit.reversedBy = reversedBy;
-  
-  // Reverse all entries
-  this.entries.forEach(entry => {
-    const tempDebit = entry.debit;
-    entry.debit = entry.credit;
-    entry.credit = tempDebit;
+  await this.save({ session });
+
+  // 2. Create NEW reversal transaction entries (swapped debits/credits)
+  const reversalEntries = this.entries.map((entry) => ({
+    account: entry.account,
+    userId: entry.userId,
+    debit: entry.credit, // Debit what was credited
+    credit: entry.debit, // Credit what was debited
+    description: `REVERSAL of ${this.transactionId}: ${reason}`,
+  }));
+
+  const reversalId = `REV_${Date.now()}_${require("../Helpers/Helpers").MakeID(16)}`;
+
+  const reversal = await this.constructor.createTransaction(
+    {
+      transactionId: reversalId,
+      reference: `Reversal-${this.transactionId}`,
+      type: "system_adjustment",
+      totalAmount: this.totalAmount,
+      entries: reversalEntries,
+      relatedEntity: this.relatedEntity,
+      status: "completed",
+      metadata: {
+        originalTransactionId: this.transactionId,
+        reversalReason: reason,
+        reversedBy,
+      },
+    },
+    session,
+  );
+
+  // 3. Synchronize Wallets atomically
+  const Wallet = mongoose.model("Wallet");
+  for (const entry of this.entries) {
+    if (entry.account.startsWith("wallet_") && entry.userId) {
+      const wallet = await Wallet.findOne({ user: entry.userId }).session(
+        session,
+      );
+      if (wallet) {
+        // If original was a credit (entry.credit > 0), we must now DEDUCT
+        if (entry.credit > 0) {
+          await wallet.deductFunds(entry.credit, "reversal", session);
+        }
+        // If original was a debit (entry.debit > 0), we must now CREDIT
+        if (entry.debit > 0) {
+          await wallet.addFunds(entry.debit, "reversal", session);
+        }
+      }
+    }
+  }
+
+  // 4. Audit the reversal action
+  require("../services/auditService").error({
+    action: "transaction.reversed",
+    resource: { type: "transaction", id: this.transactionId },
+    metadata: { reason, reversedBy, reversalId: reversal.transactionId },
   });
-  
-  return this.save();
+
+  return reversal;
 };
 
 // Static method to create transaction
-transactionSchema.statics.createTransaction = function(transactionData) {
+// Pass a mongoose ClientSession as the second argument when calling inside a withTransaction block.
+transactionSchema.statics.createTransaction = function (
+  transactionData,
+  session,
+) {
   const transaction = new this(transactionData);
-  
+
   // Generate unique transaction ID
   if (!transaction.transactionId) {
-    transaction.transactionId = `TXN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    transaction.transactionId = `TXN_${Date.now()}_${require("../Helpers/Helpers").MakeID(16)}`;
   }
-  
-  return transaction.save();
+
+  return transaction.save(session ? { session } : undefined);
 };
 
 // Static method to get transactions by user
-transactionSchema.statics.getTransactionsByUser = function(userId, limit = 50) {
+transactionSchema.statics.getTransactionsByUser = function (
+  userId,
+  limit = 50,
+) {
   return this.find({
-    "entries.userId": userId
+    "entries.userId": userId,
   })
-  .sort({ createdAt: -1 })
-  .limit(limit)
-  .populate('audit.createdBy', 'fullName email')
-  .populate('audit.approvedBy', 'fullName email');
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .populate("audit.createdBy", "fullName email")
+    .populate("audit.approvedBy", "fullName email");
 };
 
 // Static method to get VAT summary
-transactionSchema.statics.getVATSummary = function(startDate, endDate) {
+transactionSchema.statics.getVATSummary = function (startDate, endDate) {
   return this.aggregate([
     {
       $match: {
         createdAt: { $gte: startDate, $lte: endDate },
-        "vat.collected": true
-      }
+        "vat.collected": true,
+      },
     },
     {
       $group: {
         _id: "$vat.responsibility",
         totalVATCollected: { $sum: "$vat.amount" },
         totalTransactions: { $sum: 1 },
-        totalAmount: { $sum: "$totalAmount" }
-      }
-    }
+        totalAmount: { $sum: "$totalAmount" },
+      },
+    },
   ]);
 };
 

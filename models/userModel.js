@@ -45,6 +45,33 @@ var userSchema = new mongoose.Schema(
     residentialAddress: {
       type: String,
     },
+    // Saved delivery addresses with map coordinates
+    savedAddresses: [
+      {
+        label: {
+          type: String,
+          default: "Home", // 'Home', 'Office', etc.
+        },
+        formattedAddress: {
+          type: String,
+          required: true,
+        },
+        location: {
+          type: {
+            type: String,
+            enum: ["Point"],
+            default: "Point",
+          },
+          coordinates: {
+            type: [Number], // [longitude, latitude]
+          },
+        },
+        isDefault: {
+          type: Boolean,
+          default: false,
+        },
+      },
+    ],
     city: {
       type: String,
     },

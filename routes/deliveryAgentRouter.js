@@ -4,7 +4,7 @@ const {
   selectOrder,
   updateDeliveryStatus,
   getMyDeliveries,
-  updateAvailability
+  updateAvailability,
 } = require("../controllers/deliveryAgentController");
 const {
   createDispatchProfile,
@@ -12,7 +12,8 @@ const {
   getDispatchProfile,
   getEarnings,
   getDashboardStats,
-} = require("../controllers/dispatchController");
+  takeDispatch,
+} = require("../controllers/dispatch");
 const {
   getNotifications,
   markAsRead,
@@ -21,6 +22,10 @@ const {
   getUnreadCount,
 } = require("../controllers/notificationController");
 const { authMiddleware, isDispatch } = require("../middleware/authMiddleware");
+const asyncHandler = require("express-async-handler");
+const {
+  agentConfirmDelivery,
+} = require("../services/dispatchEarningsService");
 const router = express.Router();
 
 /**
@@ -166,6 +171,53 @@ router.post("/orders/select", authMiddleware, isDispatch, selectOrder);
 
 /**
  * @swagger
+ * /api/delivery-agent/orders/take:
+ *   post:
+ *     summary: Take an available order
+ *     description: |
+ *       Atomically assigns the requesting dispatch agent to a pending order.
+ *       The order must have deliveryStatus of "pending_assignment". If two agents
+ *       request the same order simultaneously, only one will succeed.
+ *       The customer is notified by email when an agent is assigned.
+ *     tags: [Delivery Agent]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - orderId
+ *             properties:
+ *               orderId:
+ *                 type: string
+ *                 description: ID of the order to take
+ *     responses:
+ *       200:
+ *         description: Order assigned successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   description: The updated order document
+ *       400:
+ *         description: orderId missing or invalid
+ *       403:
+ *         description: Not a dispatch agent
+ *       404:
+ *         description: Order not found or already assigned to another agent
+ */
+router.post("/orders/take", authMiddleware, isDispatch, takeDispatch);
+
+/**
+ * @swagger
  * /api/delivery-agent/delivery-agent/orders/status:
  *   put:
  *     summary: Update delivery status
@@ -268,7 +320,12 @@ router.put("/orders/status", authMiddleware, isDispatch, updateDeliveryStatus);
  *       403:
  *         description: Access denied - not a delivery agent
  */
-router.get("/orders/my-deliveries", authMiddleware, isDispatch, getMyDeliveries);
+router.get(
+  "/orders/my-deliveries",
+  authMiddleware,
+  isDispatch,
+  getMyDeliveries,
+);
 
 /**
  * @swagger
@@ -321,6 +378,87 @@ router.get("/orders/my-deliveries", authMiddleware, isDispatch, getMyDeliveries)
  *         description: Delivery agent profile not found
  */
 router.put("/availability", authMiddleware, isDispatch, updateAvailability);
+
+/**
+ * @swagger
+ * /api/delivery-agent/orders/confirm-delivery:
+ *   post:
+ *     summary: Confirm order delivered and credit earnings to wallet
+ *     description: |
+ *       Dispatch agent calls this when they hand the parcel to the customer.
+ *       Atomically marks the order as Delivered and credits the delivery fee
+ *       to the agent's wallet. Idempotent — safe to call more than once.
+ *     tags: [Delivery Agent]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - orderId
+ *             properties:
+ *               orderId:
+ *                 type: string
+ *                 description: ID of the order being delivered
+ *     responses:
+ *       200:
+ *         description: Delivery confirmed and earnings credited
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     credited:
+ *                       type: boolean
+ *                     amount:
+ *                       type: number
+ *                     walletBalance:
+ *                       type: number
+ *       400:
+ *         description: Order not paid, already delivered, or agent mismatch
+ *       403:
+ *         description: Not a dispatch agent
+ */
+router.post(
+  "/orders/confirm-delivery",
+  authMiddleware,
+  isDispatch,
+  asyncHandler(async (req, res) => {
+    const { orderId } = req.body;
+    const { _id: agentUserId } = req.user;
+
+    if (!orderId) {
+      return res
+        .status(400)
+        .json({ success: false, message: "orderId is required" });
+    }
+
+    const result = await agentConfirmDelivery(orderId, agentUserId, {
+      ip: req.headers?.["x-forwarded-for"]?.split(",")[0] || req.ip,
+      userAgent: req.headers?.["user-agent"],
+    });
+
+    res.json({
+      success: true,
+      message: result.credited
+        ? `Delivery confirmed. ₦${result.amount} credited to your wallet.`
+        : result.reason === "awaiting_customer_confirmation"
+          ? "Confirmed. Waiting for the customer to confirm receipt."
+          : `Already recorded (${result.reason}).`,
+      data: result,
+    });
+  }),
+);
 
 // Dispatch Profile Management Routes
 /**
@@ -599,7 +737,12 @@ router.post("/notifications/read", authMiddleware, isDispatch, markAsRead);
  *       200:
  *         description: All notifications marked as read
  */
-router.post("/notifications/read-all", authMiddleware, isDispatch, markAllAsRead);
+router.post(
+  "/notifications/read-all",
+  authMiddleware,
+  isDispatch,
+  markAllAsRead,
+);
 
 /**
  * @swagger
@@ -623,7 +766,12 @@ router.post("/notifications/read-all", authMiddleware, isDispatch, markAllAsRead
  *       404:
  *         description: Notification not found
  */
-router.delete("/notifications/:notificationId", authMiddleware, isDispatch, deleteNotification);
+router.delete(
+  "/notifications/:notificationId",
+  authMiddleware,
+  isDispatch,
+  deleteNotification,
+);
 
 /**
  * @swagger
@@ -638,6 +786,11 @@ router.delete("/notifications/:notificationId", authMiddleware, isDispatch, dele
  *       200:
  *         description: Unread count retrieved successfully
  */
-router.get("/notifications/unread-count", authMiddleware, isDispatch, getUnreadCount);
+router.get(
+  "/notifications/unread-count",
+  authMiddleware,
+  isDispatch,
+  getUnreadCount,
+);
 
 module.exports = router;

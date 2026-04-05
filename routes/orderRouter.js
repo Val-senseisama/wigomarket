@@ -4,7 +4,8 @@ const {
   getOrders,
   getOrderById,
   updateOrderStatus,
-} = require("../controllers/orderController");
+  confirmDelivery,
+} = require("../controllers/order");
 const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
 const router = express.Router();
 
@@ -117,5 +118,61 @@ router.get("/:id", authMiddleware, getOrderById);
  *         description: Status updated
  */
 router.put("/:id/status", authMiddleware, isAdmin, updateOrderStatus);
+
+/**
+ * @swagger
+ * /api/order/confirm-delivery:
+ *   post:
+ *     summary: Customer confirms delivery receipt
+ *     description: |
+ *       Called by the customer when they physically receive their order.
+ *       If the delivery agent has already confirmed on their end, the agent's
+ *       earnings are credited immediately and both parties are notified by email.
+ *       If the agent has not yet confirmed, the customer's confirmation is recorded
+ *       and earnings will be credited once the agent confirms.
+ *     tags: [Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - orderId
+ *             properties:
+ *               orderId:
+ *                 type: string
+ *                 description: ID of the order being confirmed
+ *     responses:
+ *       200:
+ *         description: Confirmation recorded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     credited:
+ *                       type: boolean
+ *                     amount:
+ *                       type: number
+ *                     walletBalance:
+ *                       type: number
+ *                     reason:
+ *                       type: string
+ *       400:
+ *         description: orderId missing, order already delivered, or order does not belong to user
+ *       401:
+ *         description: Unauthorized
+ */
+router.post("/confirm-delivery", authMiddleware, confirmDelivery);
 
 module.exports = router;

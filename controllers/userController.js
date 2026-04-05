@@ -19,6 +19,7 @@ const {
   welcome,
   forgotPasswordTemplate,
 } = require("../templates/Emails");
+const audit = require("../services/auditService");
 // ==================== BUYER SIGNUP ====================
 /**
  * @function createBuyer
@@ -489,6 +490,16 @@ const loginUser = asyncHandler(async (req, res) => {
       maxAge: 72 * 60 * 60 * 1000,
     });
     console.log(updateUser);
+    audit.log({
+      action: "user.login",
+      actor: {
+        userId: findUser._id,
+        email: findUser.email,
+        role: findUser.activeRole,
+      },
+      resource: { type: "user", id: findUser._id },
+    });
+
     res.json({
       _id: findUser?._id,
       status: findUser?.status,
@@ -497,6 +508,11 @@ const loginUser = asyncHandler(async (req, res) => {
       token: generateToken(findUser?._id),
     });
   } else {
+    audit.error({
+      action: "user.login",
+      actor: { email },
+      metadata: { error: "Invalid Credentials" },
+    });
     throw new Error("Invalid Credentials");
   }
 });
@@ -739,6 +755,14 @@ const deleteAUser = asyncHandler(async (req, res) => {
   validateMongodbId(id);
   try {
     const deleteUser = await User.findByIdAndDelete(id);
+
+    audit.log({
+      action: "user.deleted",
+      actor: audit.actor(req),
+      resource: { type: "user", id },
+      metadata: { email: deleteUser?.email },
+    });
+
     res.json(deleteUser);
   } catch (error) {
     throw new Error(error);
@@ -768,6 +792,13 @@ const blockUser = asyncHandler(async (req, res) => {
         new: true,
       },
     );
+
+    audit.error({
+      action: "user.blocked",
+      actor: audit.actor(req),
+      resource: { type: "user", id },
+    });
+
     res.json(block);
   } catch (error) {
     throw new Error(error);
@@ -796,6 +827,13 @@ const unblockUser = asyncHandler(async (req, res) => {
         new: true,
       },
     );
+
+    audit.error({
+      action: "user.unblocked",
+      actor: audit.actor(req),
+      resource: { type: "user", id },
+    });
+
     res.json(unblock);
   } catch (error) {
     throw new Error(error);

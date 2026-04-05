@@ -1,89 +1,85 @@
-const axios = require("axios");
+const googleMapsService = require("../services/googleMapsService");
 const appConfig = require("../config/appConfig");
 
 /**
  * @class DeliveryFeeService
- * @description Calculate delivery fees based on distance using HERE Maps API
+ * @description Calculate delivery fees based on road distance using Google Maps Distance Matrix API
  */
 class DeliveryFeeService {
   constructor() {
-    this.config = appConfig.maps.hereMaps;
     this.deliveryConfig = appConfig.delivery;
   }
 
   /**
-   * Calculate delivery fee based on store and user addresses
-   * @param {string} storeAddress - Store address
-   * @param {Object|string} userAddress - User delivery address (object or string)
-   * @returns {Promise<{fee: number, distance: number, estimatedTime: number, route: object}>}
+   * Calculate delivery fee based on store and user addresses / coordinates.
+   *
+   * @param {string|{lat:number,lng:number}} storeLocation  - Store address string OR coords object
+   * @param {string|{lat:number,lng:number}} userLocation   - User address string  OR coords object
+   * @returns {Promise<{fee:number, distance:number, estimatedTime:number, route:object}>}
    */
-  async calculateDeliveryFee(storeAddress, userAddress) {
+  async calculateDeliveryFee(storeLocation, userLocation) {
     try {
-      // Validate HERE Maps configuration
-      if (!this.config.validate()) {
-        console.warn("HERE Maps not configured, using fallback base fee");
+      // Validate Google Maps is configured
+      if (!googleMapsService.isConfigured()) {
+        console.warn(
+          "[DeliveryFee] Google Maps not configured, using fallback base fee",
+        );
         return this.getFallbackFee();
       }
 
-      // Parse user address if it's an object
-      const userAddressString =
-        typeof userAddress === "object"
-          ? `${userAddress.street || ""}, ${userAddress.city || ""}, ${userAddress.state || ""}, ${userAddress.country || ""}`.trim()
-          : userAddress;
-
-      // Geocode both addresses
-      const [storeCoords, userCoords] = await Promise.all([
-        this.getCoordinatesFromAddress(storeAddress),
-        this.getCoordinatesFromAddress(userAddressString),
-      ]);
+      // Resolve to coordinate objects
+      const storeCoords = await this._resolveCoords(storeLocation);
+      const userCoords = await this._resolveCoords(userLocation);
 
       if (!storeCoords || !userCoords) {
-        console.warn("Geocoding failed, using fallback base fee");
+        console.warn(
+          "[DeliveryFee] Coordinate resolution failed, using fallback base fee",
+        );
         return this.getFallbackFee();
       }
 
-      // Calculate route and distance
-      const route = await this.getRoute(storeCoords, userCoords);
+      // Get road distance via Distance Matrix
+      const matrix = await googleMapsService.getDistanceMatrix(
+        storeCoords,
+        userCoords,
+      );
 
-      if (!route) {
-        console.warn("Route calculation failed, using fallback base fee");
+      if (!matrix) {
+        console.warn(
+          "[DeliveryFee] Distance Matrix failed, using fallback base fee",
+        );
         return this.getFallbackFee();
       }
 
-      // Convert distance from meters to kilometers
-      const distanceKm = route.distance / 1000;
+      const distanceKm = matrix.distanceMeters / 1000;
 
-      // Check if distance exceeds maximum
+      // Check maximum delivery range
       if (distanceKm > this.deliveryConfig.distanceRates.maxDistance) {
         throw new Error(
-          `Delivery distance (${distanceKm.toFixed(2)}km) exceeds maximum allowed distance (${this.deliveryConfig.distanceRates.maxDistance}km)`,
+          `Delivery distance (${distanceKm.toFixed(2)}km) exceeds maximum allowed ` +
+            `(${this.deliveryConfig.distanceRates.maxDistance}km)`,
         );
       }
 
-      // Calculate fee based on distance
       const fee = this.calculateFeeFromDistance(distanceKm);
-
-      // Estimated time in minutes
-      const estimatedTime = Math.ceil(route.duration / 60);
+      const estimatedTime = Math.ceil(matrix.durationSeconds / 60); // minutes
 
       return {
         fee: Math.round(fee),
-        distance: Math.round(distanceKm * 100) / 100, // Round to 2 decimals
+        distance: Math.round(distanceKm * 100) / 100,
         estimatedTime,
-        route: {
-          duration: route.duration,
-          polyline: route.polyline,
-        },
+        distanceText: matrix.distanceText,
+        durationText: matrix.durationText,
       };
     } catch (error) {
       if (error.message.includes("exceeds maximum")) {
-        throw error; // Re-throw distance errors
+        throw error; // Re-throw distance limit errors
       }
 
-      console.error("Delivery fee calculation error:", error.message);
+      console.error("[DeliveryFee] Calculation error:", error.message);
 
       if (this.deliveryConfig.fallbackToBaseFee) {
-        console.warn("Using fallback base fee due to error");
+        console.warn("[DeliveryFee] Using fallback base fee due to error");
         return this.getFallbackFee();
       }
 
@@ -92,9 +88,34 @@ class DeliveryFeeService {
   }
 
   /**
-   * Calculate fee from distance using configured pricing
-   * @param {number} distanceKm - Distance in kilometers
-   * @returns {number} - Calculated fee in NGN
+   * Resolve a location value (string address OR {lat,lng} object) to a coords object.
+   * @private
+   * @param {string|{lat:number,lng:number}} location
+   * @returns {Promise<{lat:number,lng:number}|null>}
+   */
+  async _resolveCoords(location) {
+    if (!location) return null;
+
+    // Already coordinates
+    if (typeof location === "object" && location.lat !== undefined) {
+      return { lat: parseFloat(location.lat), lng: parseFloat(location.lng) };
+    }
+
+    // String address → geocode
+    const addressStr =
+      typeof location === "object"
+        ? `${location.street || ""}, ${location.city || ""}, ${location.state || ""}, ${location.country || ""}`.trim()
+        : String(location);
+
+    const geocoded = await googleMapsService.geocodeAddress(addressStr);
+    if (!geocoded) return null;
+    return { lat: geocoded.lat, lng: geocoded.lng };
+  }
+
+  /**
+   * Calculate fee from distance using configured pricing tiers.
+   * @param {number} distanceKm
+   * @returns {number} Fee in NGN
    */
   calculateFeeFromDistance(distanceKm) {
     const { baseFee, distanceRates } = this.deliveryConfig;
@@ -104,14 +125,11 @@ class DeliveryFeeService {
     }
 
     const extraDistance = distanceKm - distanceRates.baseDistance;
-    const extraFee = extraDistance * distanceRates.perKm;
-
-    return baseFee + extraFee;
+    return baseFee + extraDistance * distanceRates.perKm;
   }
 
   /**
-   * Get fallback fee (base fee with no distance calculation)
-   * @returns {{fee: number, distance: number, estimatedTime: number}}
+   * Fallback fee when maps API is unavailable.
    */
   getFallbackFee() {
     return {
@@ -121,84 +139,6 @@ class DeliveryFeeService {
       fallback: true,
     };
   }
-
-  /**
-   * Get coordinates from address using HERE Maps Geocoding API
-   * @param {string} address - Address to geocode
-   * @returns {Promise<[number, number]|null>} - [longitude, latitude] or null
-   */
-  async getCoordinatesFromAddress(address) {
-    if (!address || typeof address !== "string") {
-      return null;
-    }
-
-    try {
-      const response = await axios.get(`${this.config.baseUrl}/v1/geocode`, {
-        params: {
-          q: address.trim(),
-          apikey: this.config.apiKey,
-          limit: 1,
-        },
-        timeout: 5000,
-      });
-
-      if (
-        response.data &&
-        response.data.items &&
-        response.data.items.length > 0
-      ) {
-        const item = response.data.items[0];
-        return [item.position.lng, item.position.lat];
-      }
-
-      return null;
-    } catch (error) {
-      console.error("Geocoding error:", error.message);
-      return null;
-    }
-  }
-
-  /**
-   * Get route information using HERE Maps Routing API
-   * @param {[number, number]} start - Start coordinates [lng, lat]
-   * @param {[number, number]} end - End coordinates [lng, lat]
-   * @returns {Promise<{distance: number, duration: number, polyline: string}|null>}
-   */
-  async getRoute(start, end) {
-    try {
-      const response = await axios.get(`${this.config.baseUrl}/v8/routes`, {
-        params: {
-          origin: `${start[1]},${start[0]}`, // lat,lng format
-          destination: `${end[1]},${end[0]}`,
-          apikey: this.config.apiKey,
-          transportMode: "car",
-          return: "polyline,summary",
-        },
-        timeout: 5000,
-      });
-
-      if (
-        response.data &&
-        response.data.routes &&
-        response.data.routes.length > 0
-      ) {
-        const route = response.data.routes[0];
-        const section = route.sections[0];
-
-        return {
-          distance: section.summary.length, // in meters
-          duration: section.summary.duration, // in seconds
-          polyline: section.polyline,
-        };
-      }
-
-      return null;
-    } catch (error) {
-      console.error("Routing error:", error.message);
-      return null;
-    }
-  }
 }
 
-// Export singleton instance
 module.exports = new DeliveryFeeService();

@@ -1,14 +1,11 @@
 const WebSocket = require('ws');
-const Redis = require('ioredis');
 const jwt = require('jsonwebtoken');
 const User = require('../models/userModel');
+const { createRedisConnection } = require('../config/redisClient');
 
-// Redis client for subscribing to location updates
-const redisClient = new Redis(process.env.REDIS_URL || "redis://localhost:6379", {
-  retryDelayOnFailover: 100,
-  enableReadyCheck: false,
-  maxRetriesPerRequest: null,
-});
+// Dedicated subscriber connection — must be separate from the shared client
+// because a client in subscribe mode cannot send regular Redis commands.
+const redisClient = createRedisConnection();
 
 
 class LocationWebSocketServer {

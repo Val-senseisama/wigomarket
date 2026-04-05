@@ -1,9 +1,9 @@
 const asyncHandler = require("express-async-handler");
+const mongoose = require("mongoose");
 const Rating = require("../models/ratingModel");
 const Order = require("../models/orderModel");
-const User = require("../models/userModel");
 const DispatchProfile = require("../models/dispatchProfileModel");
-const { validateMongodbId } = require("../utils/validateMongodbId");
+const validateMongodbId = require("../utils/validateMongodbId");
 const { Validate } = require("../Helpers/Validate");
 const { ThrowError } = require("../Helpers/Helpers");
 
@@ -163,23 +163,17 @@ const getDeliveryAgentRatings = asyncHandler(async (req, res) => {
 
     // Get rating statistics
     const stats = await Rating.aggregate([
-      { $match: { deliveryAgent: deliveryAgentId, status: 'active' } },
+      { $match: { deliveryAgent: new mongoose.Types.ObjectId(deliveryAgentId), status: 'active' } },
       {
         $group: {
           _id: null,
           averageRating: { $avg: '$rating' },
           totalReviews: { $sum: 1 },
-          ratingDistribution: {
-            $push: '$rating'
-          },
-          averageBreakdown: {
-            $avg: {
-              punctuality: '$breakdown.punctuality',
-              communication: '$breakdown.communication',
-              handling: '$breakdown.handling',
-              professionalism: '$breakdown.professionalism'
-            }
-          }
+          ratingDistribution: { $push: '$rating' },
+          avgPunctuality: { $avg: '$breakdown.punctuality' },
+          avgCommunication: { $avg: '$breakdown.communication' },
+          avgHandling: { $avg: '$breakdown.handling' },
+          avgProfessionalism: { $avg: '$breakdown.professionalism' },
         }
       }
     ]);
@@ -207,12 +201,12 @@ const getDeliveryAgentRatings = asyncHandler(async (req, res) => {
           averageRating: stats[0]?.averageRating ? Math.round(stats[0].averageRating * 10) / 10 : 0,
           totalReviews: stats[0]?.totalReviews || 0,
           ratingDistribution: distribution,
-          averageBreakdown: stats[0]?.averageBreakdown || {
-            punctuality: 0,
-            communication: 0,
-            handling: 0,
-            professionalism: 0
-          }
+          averageBreakdown: stats[0] ? {
+            punctuality: Math.round((stats[0].avgPunctuality || 0) * 10) / 10,
+            communication: Math.round((stats[0].avgCommunication || 0) * 10) / 10,
+            handling: Math.round((stats[0].avgHandling || 0) * 10) / 10,
+            professionalism: Math.round((stats[0].avgProfessionalism || 0) * 10) / 10,
+          } : { punctuality: 0, communication: 0, handling: 0, professionalism: 0 }
         }
       }
     });

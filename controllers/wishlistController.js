@@ -2,7 +2,7 @@ const asyncHandler = require("express-async-handler");
 const Wishlist = require("../models/wishlistModel");
 const Product = require("../models/productModel");
 const { ThrowError } = require("../Helpers/Helpers");
-const { validateMongodbId } = require("../utils/validateMongodbId");
+const validateMongodbId = require("../utils/validateMongodbId");
 
 /**
  * @function addToWishlist
@@ -19,9 +19,7 @@ const addToWishlist = asyncHandler(async (req, res) => {
   const userId = req.user._id;
 
   // Validate product ID
-  if (!validateMongodbId(productId)) {
-    ThrowError("Invalid product ID");
-  }
+  validateMongodbId(productId);
 
   // Check if product exists
   const product = await Product.findById(productId);
@@ -67,9 +65,7 @@ const removeFromWishlist = asyncHandler(async (req, res) => {
   const userId = req.user._id;
 
   // Validate product ID
-  if (!validateMongodbId(productId)) {
-    ThrowError("Invalid product ID");
-  }
+  validateMongodbId(productId);
 
   // Get user's wishlist
   const wishlist = await Wishlist.findOne({ user: userId });
@@ -180,9 +176,7 @@ const checkProductInWishlist = asyncHandler(async (req, res) => {
   const userId = req.user._id;
 
   // Validate product ID
-  if (!validateMongodbId(productId)) {
-    ThrowError("Invalid product ID");
-  }
+  validateMongodbId(productId);
 
   // Get user's wishlist
   const wishlist = await Wishlist.findOne({ user: userId });
@@ -288,9 +282,7 @@ const getPublicWishlist = asyncHandler(async (req, res) => {
   const { userId } = req.params;
 
   // Validate user ID
-  if (!validateMongodbId(userId)) {
-    ThrowError("Invalid user ID");
-  }
+  validateMongodbId(userId);
 
   // Get public wishlist
   const wishlist = await Wishlist.findOne({ 

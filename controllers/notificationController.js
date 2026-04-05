@@ -6,14 +6,7 @@ const { validateMongodbId } = require("../utils/validateMongodbId");
 const { Validate } = require("../Helpers/Validate");
 const { ThrowError } = require("../Helpers/Helpers");
 const firebaseNotificationService = require("../services/firebaseNotificationService");
-const Redis = require("ioredis");
-
-// Redis client for real-time notifications
-const redisClient = new Redis(process.env.REDIS_URL || "redis://localhost:6379", {
-  retryDelayOnFailover: 100,
-  enableReadyCheck: false,
-  maxRetriesPerRequest: null,
-});
+const redisClient = require("../config/redisClient");
 
 
 /**
