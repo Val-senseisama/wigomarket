@@ -27,8 +27,8 @@ const audit = require("../../services/auditService");
  * @throws {Error} - Throws error if validation fails, store already exists, or creation fails
  */
 const createStore = asyncHandler(async (req, res) => {
-const { _id, mobile,role, email } = req.user;
-const { name, address, storeMobile, storeEmail, storeImage } = req.body;
+  const { _id, mobile, role, email } = req.user;
+  const { name, address, storeMobile, storeEmail, storeImage } = req.body;
 
   if (!Validate.string(name)) {
     ThrowError("Invalid Name");
@@ -42,7 +42,6 @@ const { name, address, storeMobile, storeEmail, storeImage } = req.body;
     ThrowError("Invalid Mobile Number");
   }
 
-
   if (!Validate.string(storeMobile)) {
     ThrowError("Invalid Store Mobile Number");
   }
@@ -54,18 +53,21 @@ const { name, address, storeMobile, storeEmail, storeImage } = req.body;
   if (!Validate.string(storeImage)) {
     ThrowError("Invalid Store Image");
   }
-try {
-  
+  try {
     const [findStore, userStore] = await Promise.all([
       Store.findOne({ name }, { _id: 1 }),
       Store.findOne({ owner: _id }, { _id: 1 }),
     ]);
 
     if (userStore) {
-      return res.status(400).json({ success: false, message: "You already have a store" });
+      return res
+        .status(400)
+        .json({ success: false, message: "You already have a store" });
     }
     if (findStore) {
-      return res.status(400).json({ success: false, message: "Store name already taken" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Store name already taken" });
     }
 
     const newStore = await Store.create({
@@ -78,15 +80,21 @@ try {
     });
 
     if (!role.includes("seller")) {
-      await User.findOneAndUpdate({ _id }, { $set: { role: [...role, "seller"] } });
+      await User.findOneAndUpdate(
+        { _id },
+        { $set: { role: [...role, "seller"] } },
+      );
     }
 
-    sendEmail({
-      to: email,
-      text: `Hello ${name}`,
-      subject: "Store Creation - WigoMarket",
-      htm: storeCreationSuccessTemplate(name, address),
-    });
+    sendEmail(
+      {
+        to: email,
+        text: `Hello ${name}`,
+        subject: "Store Creation - WigoMarket",
+        htm: storeCreationSuccessTemplate(name, address),
+      },
+      true,
+    );
 
     audit.log({
       action: "store.created",
@@ -96,11 +104,10 @@ try {
     });
 
     res.json(newStore);
-} catch (error) {
-  console.log(error);
-  ThrowError(error);
-}
-
+  } catch (error) {
+    console.log(error);
+    ThrowError(error);
+  }
 });
 
 module.exports = createStore;

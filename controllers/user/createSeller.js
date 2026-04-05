@@ -104,8 +104,8 @@ const createSeller = asyncHandler(async (req, res) => {
         htm: verificationCodeTemplate(fullName || "User", code),
       };
 
-      sendEmail(data1);
-      sendEmail(data2);
+      sendEmail(data1, true);
+      sendEmail(data2, true);
 
       audit.log({
         action: "user.created",

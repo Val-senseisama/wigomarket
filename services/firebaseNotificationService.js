@@ -51,6 +51,7 @@ try {
  * @param {string} body - Notification body
  * @param {Object} data - Additional data payload
  * @param {string} type - Notification type (orderUpdates, deliveryUpdates, etc.)
+ * @param {boolean} skipQueue - If true, sends immediately (used by background worker)
  * @returns {Object} - Send result
  */
 const sendNotificationToUser = async (
@@ -59,7 +60,21 @@ const sendNotificationToUser = async (
   body,
   data = {},
   type = "systemUpdates",
+  skipQueue = false,
 ) => {
+  if (!skipQueue) {
+    const taskQueue = require("./taskQueue");
+    if (taskQueue.isAvailable()) {
+      await taskQueue.enqueue("push_notification", {
+        userId,
+        title,
+        body,
+        data,
+        type,
+      });
+      return { success: true, status: "queued" };
+    }
+  }
   try {
     // Check if Firebase is initialized
     if (!firebaseApp) {

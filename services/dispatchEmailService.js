@@ -34,10 +34,11 @@ function orderRef(order) {
 
 async function sendAgentAssignedEmail(customer, agent, order) {
   try {
-    await sendEmail({
-      to: customer.email,
-      subject: `Delivery agent assigned — Order #${orderRef(order)}`,
-      htm: wrap(`
+    await sendEmail(
+      {
+        to: customer.email,
+        subject: `Delivery agent assigned — Order #${orderRef(order)}`,
+        htm: wrap(`
         <h3>Good news, ${customer.fullName || "there"}!</h3>
         <p>A delivery agent has been assigned to your order.</p>
         <table style="width:100%;border-collapse:collapse;margin:16px 0">
@@ -47,7 +48,9 @@ async function sendAgentAssignedEmail(customer, agent, order) {
         </table>
         <p>Your agent will pick up your order shortly. We'll notify you when it's on the way.</p>
       `),
-    });
+      },
+      true,
+    );
   } catch (err) {
     console.error("[Email] sendAgentAssignedEmail failed:", err.message);
   }
@@ -57,16 +60,19 @@ async function sendAgentAssignedEmail(customer, agent, order) {
 
 async function sendPickedUpEmail(customer, order) {
   try {
-    await sendEmail({
-      to: customer.email,
-      subject: `Your order has been picked up — Order #${orderRef(order)}`,
-      htm: wrap(`
+    await sendEmail(
+      {
+        to: customer.email,
+        subject: `Your order has been picked up — Order #${orderRef(order)}`,
+        htm: wrap(`
         <h3>Your order is on the move, ${customer.fullName || "there"}!</h3>
         <p>Your delivery agent has picked up Order <strong>#${orderRef(order)}</strong> from the store.</p>
         <p>They are on their way to you. You'll get another update when they're in transit.</p>
         <p style="color:#666;font-size:14px">Delivery address: ${order.deliveryAddress}</p>
       `),
-    });
+      },
+      true,
+    );
   } catch (err) {
     console.error("[Email] sendPickedUpEmail failed:", err.message);
   }
@@ -76,16 +82,19 @@ async function sendPickedUpEmail(customer, order) {
 
 async function sendInTransitEmail(customer, order) {
   try {
-    await sendEmail({
-      to: customer.email,
-      subject: `Your order is on the way — Order #${orderRef(order)}`,
-      htm: wrap(`
+    await sendEmail(
+      {
+        to: customer.email,
+        subject: `Your order is on the way — Order #${orderRef(order)}`,
+        htm: wrap(`
         <h3>Almost there, ${customer.fullName || "there"}!</h3>
         <p>Your delivery agent is now in transit with Order <strong>#${orderRef(order)}</strong>.</p>
         <p>Please make sure someone is available to receive the package at:</p>
         <p style="padding:12px;background:#f5f5f5;border-radius:4px"><strong>${order.deliveryAddress}</strong></p>
       `),
-    });
+      },
+      true,
+    );
   } catch (err) {
     console.error("[Email] sendInTransitEmail failed:", err.message);
   }
@@ -95,18 +104,24 @@ async function sendInTransitEmail(customer, order) {
 
 async function sendConfirmDeliveryRequestEmail(customer, order) {
   try {
-    await sendEmail({
-      to: customer.email,
-      subject: `Please confirm delivery — Order #${orderRef(order)}`,
-      htm: wrap(`
+    await sendEmail(
+      {
+        to: customer.email,
+        subject: `Please confirm delivery — Order #${orderRef(order)}`,
+        htm: wrap(`
         <h3>Did you receive your order?</h3>
         <p>Hi ${customer.fullName || "there"}, your delivery agent has marked Order <strong>#${orderRef(order)}</strong> as delivered.</p>
         <p>Please open the <strong>WigoMarket app</strong> and confirm that you received your package to complete the delivery.</p>
         <p style="color:#666;font-size:14px">If you did not receive your order, please contact our support team immediately.</p>
       `),
-    });
+      },
+      true,
+    );
   } catch (err) {
-    console.error("[Email] sendConfirmDeliveryRequestEmail failed:", err.message);
+    console.error(
+      "[Email] sendConfirmDeliveryRequestEmail failed:",
+      err.message,
+    );
   }
 }
 
@@ -114,10 +129,11 @@ async function sendConfirmDeliveryRequestEmail(customer, order) {
 
 async function sendEarningsCreditedEmail(agent, order, amount) {
   try {
-    await sendEmail({
-      to: agent.email,
-      subject: `Delivery confirmed — ₦${amount} credited to your wallet`,
-      htm: wrap(`
+    await sendEmail(
+      {
+        to: agent.email,
+        subject: `Delivery confirmed — ₦${amount} credited to your wallet`,
+        htm: wrap(`
         <h3>Payment received!</h3>
         <p>Hi ${agent.fullName || "there"}, the customer has confirmed delivery of Order <strong>#${orderRef(order)}</strong>.</p>
         <table style="width:100%;border-collapse:collapse;margin:16px 0">
@@ -126,7 +142,9 @@ async function sendEarningsCreditedEmail(agent, order, amount) {
         </table>
         <p>The amount has been added to your WigoMarket wallet. Great work!</p>
       `),
-    });
+      },
+      true,
+    );
   } catch (err) {
     console.error("[Email] sendEarningsCreditedEmail failed:", err.message);
   }

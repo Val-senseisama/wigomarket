@@ -28,6 +28,7 @@ const BillPayment = require("../models/billPaymentModel");
 const vtpass = require("../services/vtpassService");
 const { MakeID } = require("../Helpers/Helpers");
 const audit = require("../services/auditService");
+const taskQueue = require("../services/taskQueue");
 
 const CALLBACK_URL = `${process.env.BACKEND_URL || "https://api.wigomarket.com"}/api/bills/webhook/vtpass`;
 
@@ -395,7 +396,7 @@ const purchaseAirtime = asyncHandler(async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
-    let finalStatus, billRecord, requestId;
+    let finalStatus, billRecord, requestId, txId, wallet;
 
     // 1. Initial State: Create records and debit wallet (Atomic Transaction)
     await session.withTransaction(async () => {
@@ -414,63 +415,23 @@ const purchaseAirtime = asyncHandler(async (req, res) => {
       wallet = init.wallet;
     });
 
-    // 2. External Action: Call VTpass (Outside DB Transaction)
-    // This prevents connection starvation if the API is slow.
-    let vtpassResponse;
-    try {
-      vtpassResponse = await vtpass.pay(
-        { request_id: requestId, serviceID, amount: amt, phone },
-        CALLBACK_URL,
-      );
-    } catch (apiError) {
-      console.error("VTpass API error during airtime purchase:", apiError);
-      // Log API error
-      audit.error({
-        action: "bill.api_error",
-        actor: audit.actor(req),
-        resource: { type: "bill_payment", id: requestId },
-        metadata: { error: apiError.message, service: "airtime" },
-      });
-      // Treat as pending for cron to resolve later, or handle retry
-      vtpassResponse = { code: "999", response_description: "API_TIMEOUT" };
-    }
-
-    // 3. Final State: Resolve record and ledger (Atomic Transaction)
-    await session.withTransaction(async () => {
-      const freshBillRecord = await BillPayment.findOne({ requestId }).session(
-        session,
-      );
-      const freshWallet = await Wallet.findOne({ user: userId }).session(
-        session,
-      );
-
-      finalStatus = await finalisePurchase(session, {
-        billRecord: freshBillRecord,
-        vtpassResponse,
-        txId,
-        userId,
-        amount: amt,
-        wallet: freshWallet,
-      });
+    // 2. Offload External Action to Task Queue
+    await taskQueue.enqueue("bill_payment_api", {
+      requestId,
+      serviceID,
+      amount: amt,
+      phone,
+      userId,
+      txId,
+      serviceType: "airtime",
     });
 
-    audit.log({
-      action: "bill.airtime_purchase",
-      actor: audit.actor(req),
-      resource: { type: "bill_payment", id: requestId },
-      changes: { after: { network, phone, amount: amt, status: finalStatus } },
-    });
     res.json({
-      success: finalStatus !== "failed",
-      message:
-        finalStatus === "completed"
-          ? "Airtime purchased successfully"
-          : finalStatus === "failed"
-            ? "Airtime purchase failed. Your wallet has been refunded."
-            : "Airtime purchase is processing",
+      success: true,
+      message: "Airtime purchase is processing",
       data: {
         request_id: requestId,
-        status: finalStatus,
+        status: "processing",
         network,
         phone,
         amount: amt,
@@ -520,7 +481,7 @@ const purchaseData = asyncHandler(async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
-    let finalStatus, requestId;
+    let finalStatus, requestId, txId, wallet;
 
     // 1. Initial State: Create records and debit wallet (Atomic Transaction)
     await session.withTransaction(async () => {
@@ -542,68 +503,25 @@ const purchaseData = asyncHandler(async (req, res) => {
       wallet = init.wallet;
     });
 
-    // 2. External Action: Call VTpass (Outside DB Transaction)
-    let vtpassResponse;
-    try {
-      vtpassResponse = await vtpass.pay(
-        {
-          request_id: requestId,
-          serviceID,
-          billersCode: phone,
-          variation_code,
-          phone,
-        },
-        CALLBACK_URL,
-      );
-    } catch (apiError) {
-      console.error("VTpass API error during data purchase:", apiError);
-      vtpassResponse = { code: "999", response_description: "API_TIMEOUT" };
-    }
-
-    // 3. Final State: Resolve (Atomic Transaction)
-    await session.withTransaction(async () => {
-      const freshBillRecord = await BillPayment.findOne({ requestId }).session(
-        session,
-      );
-      const freshWallet = await Wallet.findOne({ user: userId }).session(
-        session,
-      );
-
-      finalStatus = await finalisePurchase(session, {
-        billRecord: freshBillRecord,
-        vtpassResponse,
-        txId,
-        userId,
-        amount: amt,
-        wallet: freshWallet,
-      });
+    // 2. Offload External Action to Task Queue
+    await taskQueue.enqueue("bill_payment_api", {
+      requestId,
+      serviceID,
+      amount: amt,
+      phone,
+      billersCode: phone,
+      variation_code,
+      userId,
+      txId,
+      serviceType: "data",
     });
 
-    audit.log({
-      action: "bill.data_purchase",
-      actor: audit.actor(req),
-      resource: { type: "bill_payment", id: requestId },
-      changes: {
-        after: {
-          network,
-          phone,
-          variation_code,
-          amount: amt,
-          status: finalStatus,
-        },
-      },
-    });
     res.json({
-      success: finalStatus !== "failed",
-      message:
-        finalStatus === "completed"
-          ? `${bundle.name} data purchased successfully`
-          : finalStatus === "failed"
-            ? "Data purchase failed. Your wallet has been refunded."
-            : "Data purchase is processing",
+      success: true,
+      message: `${bundle.name} data purchase is processing`,
       data: {
         request_id: requestId,
-        status: finalStatus,
+        status: "processing",
         network,
         phone,
         bundle: bundle.name,
@@ -674,7 +592,7 @@ const payElectricity = asyncHandler(async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
-    let finalStatus, requestId, deliveryToken, units;
+    let finalStatus, requestId, deliveryToken, units, txId, wallet;
 
     // 1. Initial State: Create records and debit wallet (Atomic Transaction)
     await session.withTransaction(async () => {
@@ -697,80 +615,28 @@ const payElectricity = asyncHandler(async (req, res) => {
       wallet = init.wallet;
     });
 
-    // 2. External Action: Call VTpass (Outside DB Transaction)
-    let vtpassResponse;
-    try {
-      vtpassResponse = await vtpass.pay(
-        {
-          request_id: requestId,
-          serviceID,
-          billersCode: meter_number,
-          variation_code: meter_type,
-          amount: amt,
-          phone,
-        },
-        CALLBACK_URL,
-      );
-    } catch (apiError) {
-      console.error("VTpass API error during electricity payment:", apiError);
-      vtpassResponse = { code: "999", response_description: "API_TIMEOUT" };
-    }
-
-    deliveryToken =
-      vtpassResponse.content?.transactions?.token ||
-      vtpassResponse.purchased_code ||
-      null;
-    units = vtpassResponse.content?.transactions?.units || null;
-
-    // 3. Final State: Resolve (Atomic Transaction)
-    await session.withTransaction(async () => {
-      const freshBillRecord = await BillPayment.findOne({ requestId }).session(
-        session,
-      );
-      const freshWallet = await Wallet.findOne({ user: userId }).session(
-        session,
-      );
-
-      finalStatus = await finalisePurchase(session, {
-        billRecord: freshBillRecord,
-        vtpassResponse,
-        txId,
-        userId,
-        amount: amt,
-        wallet: freshWallet,
-        extractExtras: () => ({ deliveryToken, units }),
-      });
+    // 2. Offload External Action to Task Queue
+    await taskQueue.enqueue("bill_payment_api", {
+      requestId,
+      serviceID,
+      amount: amt,
+      phone,
+      billersCode: meter_number,
+      variation_code: meter_type,
+      userId,
+      txId,
+      serviceType: "electricity",
     });
 
-    audit.log({
-      action: "bill.electricity_payment",
-      actor: audit.actor(req),
-      resource: { type: "bill_payment", id: requestId },
-      changes: {
-        after: {
-          provider: providerKey,
-          meter_number,
-          amount: amt,
-          status: finalStatus,
-        },
-      },
-    });
     res.json({
-      success: finalStatus !== "failed",
-      message:
-        finalStatus === "completed"
-          ? "Electricity payment successful"
-          : finalStatus === "failed"
-            ? "Electricity payment failed. Your wallet has been refunded."
-            : "Electricity payment is processing",
+      success: true,
+      message: "Electricity payment is processing",
       data: {
         request_id: requestId,
-        status: finalStatus,
+        status: "processing",
         provider: providerKey,
         meter_number,
         amount: amt,
-        token: deliveryToken,
-        units,
       },
     });
   } finally {
@@ -827,7 +693,7 @@ const payCableTv = asyncHandler(async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
-    let finalStatus, requestId;
+    let finalStatus, requestId, txId, wallet;
 
     // 1. Initial State: Create records and debit wallet (Atomic Transaction)
     await session.withTransaction(async () => {
@@ -845,69 +711,25 @@ const payCableTv = asyncHandler(async (req, res) => {
       wallet = init.wallet;
     });
 
-    // 2. External Action: Call VTpass (Outside DB Transaction)
-    let vtpassResponse;
-    try {
-      vtpassResponse = await vtpass.pay(
-        {
-          request_id: requestId,
-          serviceID: vtpass.CABLE_TV_PROVIDERS[providerKey],
-          billersCode: smartcard_number,
-          variation_code,
-          phone,
-          subscription_type: "change",
-        },
-        CALLBACK_URL,
-      );
-    } catch (apiError) {
-      console.error("VTpass API error during cable TV payment:", apiError);
-      vtpassResponse = { code: "999", response_description: "API_TIMEOUT" };
-    }
-
-    // 3. Final State: Resolve (Atomic Transaction)
-    await session.withTransaction(async () => {
-      const freshBillRecord = await BillPayment.findOne({ requestId }).session(
-        session,
-      );
-      const freshWallet = await Wallet.findOne({ user: userId }).session(
-        session,
-      );
-
-      finalStatus = await finalisePurchase(session, {
-        billRecord: freshBillRecord,
-        vtpassResponse,
-        txId,
-        userId,
-        amount: amt,
-        wallet: freshWallet,
-      });
+    // 2. Offload External Action to Task Queue
+    await taskQueue.enqueue("bill_payment_api", {
+      requestId,
+      serviceID: vtpass.CABLE_TV_PROVIDERS[providerKey],
+      amount: amt,
+      phone,
+      billersCode: smartcard_number,
+      variation_code,
+      userId,
+      txId,
+      serviceType: "cable_tv",
     });
 
-    audit.log({
-      action: "bill.cable_tv_payment",
-      actor: audit.actor(req),
-      resource: { type: "bill_payment", id: requestId },
-      changes: {
-        after: {
-          provider: providerKey,
-          smartcard_number,
-          variation_code,
-          amount: amt,
-          status: finalStatus,
-        },
-      },
-    });
     res.json({
-      success: finalStatus !== "failed",
-      message:
-        finalStatus === "completed"
-          ? `${provider.toUpperCase()} subscription successful`
-          : finalStatus === "failed"
-            ? "Cable TV payment failed. Your wallet has been refunded."
-            : "Cable TV payment is processing",
+      success: true,
+      message: `${provider.toUpperCase()} payment is processing`,
       data: {
         request_id: requestId,
-        status: finalStatus,
+        status: "processing",
         provider: providerKey,
         smartcard_number,
         plan: plan.name,

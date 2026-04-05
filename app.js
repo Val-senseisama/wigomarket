@@ -28,6 +28,7 @@ const { swaggerUi, specs } = require("./swagger");
 const LocationWebSocketServer = require("./websocket/locationWebSocket");
 const { startCron } = require("./services/pendingPaymentCron");
 const paymentQueue = require("./services/paymentQueue");
+const taskQueue = require("./services/taskQueue");
 
 // ── Attach global uncaughtException / unhandledRejection handlers ─────────────
 // Must be called before any async work starts so nothing slips through.
@@ -100,8 +101,8 @@ const startServer = async () => {
     await dbConnect();
 
     // Enable persistent log transports now that the DB is connected
-    logger.enableMongoTransport();  // stores info+ in app_logs collection
-    logger.enableAxiomTransport();  // optional: free external viewer (set AXIOM_TOKEN + AXIOM_DATASET)
+    logger.enableMongoTransport(); // stores info+ in app_logs collection
+    logger.enableAxiomTransport(); // optional: free external viewer (set AXIOM_TOKEN + AXIOM_DATASET)
 
     // Start HTTP server
     server = app.listen(PORT, () => {
@@ -118,8 +119,14 @@ const startServer = async () => {
 
     // Initialise payment queue (BullMQ + Redis, with in-process fallback)
     await paymentQueue.init();
+
+    // Initialise secondary task queue (Email, Push, Bill API)
+    await taskQueue.init();
   } catch (error) {
-    logger.error("Failed to start server", { error: error.message, stack: error.stack });
+    logger.error("Failed to start server", {
+      error: error.message,
+      stack: error.stack,
+    });
     process.exit(1);
   }
 };
@@ -145,6 +152,9 @@ const gracefulShutdown = async (signal) => {
 
     await paymentQueue.close();
     logger.info("Payment queue closed");
+
+    await taskQueue.close();
+    logger.info("Task queue closed");
 
     await dbDisconnect();
     logger.info("Database disconnected — process exiting cleanly");

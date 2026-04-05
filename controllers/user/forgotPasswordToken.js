@@ -64,7 +64,7 @@ const forgotPasswordToken = asyncHandler(async (req, res) => {
       htm: forgotPasswordTemplate(user?.fullName || "User", token),
     };
 
-    sendEmail(data);
+    sendEmail(data, true);
 
     audit.log({
       action: "user.password_reset_requested",

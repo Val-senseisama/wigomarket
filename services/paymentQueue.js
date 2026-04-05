@@ -36,18 +36,28 @@ function getConnectionConfig() {
   const url = process.env.REDIS_URL || "redis://localhost:6379";
   try {
     const parsed = new URL(url);
-    return {
+    const options = {
       host: parsed.hostname,
       port: parseInt(parsed.port, 10) || 6379,
       // Redis 6 ACL: include username only when it's not the legacy "default"
       ...(parsed.username && parsed.username !== "default"
         ? { username: decodeURIComponent(parsed.username) }
         : {}),
-      ...(parsed.password ? { password: decodeURIComponent(parsed.password) } : {}),
+      ...(parsed.password
+        ? { password: decodeURIComponent(parsed.password) }
+        : {}),
       // Both options are required by BullMQ
       maxRetriesPerRequest: null,
       enableReadyCheck: false,
     };
+
+    // Render's managed Redis requires TLS.
+    // rediss:// means SSL/TLS connection.
+    if (parsed.protocol === "rediss:") {
+      options.tls = {};
+    }
+
+    return options;
   } catch {
     return {
       host: "localhost",
