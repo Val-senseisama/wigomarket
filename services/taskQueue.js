@@ -90,7 +90,7 @@ async function init() {
             // This handles the Step 2 & 3 of bill payment
             const vtpass = require("./vtpassService");
             const BillPayment = require("../models/billPaymentModel");
-            const Wallet = require("../models/walletModel");
+            const ledgerService = require("./billPaymentLedgerService");
             const mongoose = require("mongoose");
 
             // Logic moved from controller to allow background retry
@@ -138,14 +138,14 @@ async function init() {
                   session,
                 );
 
-                // Helper logic from controller (finalisePurchase)
                 const code = vtRes?.code;
                 const deliveredStatus = vtRes?.content?.transactions?.status;
                 let finalStatus = "pending";
                 if (code === "000" && deliveredStatus === "delivered")
                   finalStatus = "completed";
                 else if (code === "000") finalStatus = "pending";
-                else if (code === "016") finalStatus = "failed";
+                else if (code === "011" || code === "016")
+                  finalStatus = "failed";
 
                 billRecord.status = finalStatus;
                 billRecord.vtpassResponse = vtRes;
@@ -153,7 +153,7 @@ async function init() {
                   billRecord.completedAt = new Date();
                 if (finalStatus === "failed") billRecord.failedAt = new Date();
 
-                // Extract extras (token/units)
+                // Extract extras
                 if (
                   vtRes.content?.transactions?.token ||
                   vtRes.purchased_code
@@ -167,14 +167,79 @@ async function init() {
 
                 await billRecord.save({ session });
 
-                if (finalStatus === "failed") {
-                  await wallet.creditEarning(amount, session, false);
-                  billRecord.status = "refunded";
-                  billRecord.refundedAt = new Date();
-                  await billRecord.save({ session });
+                if (finalStatus === "completed") {
+                  await ledgerService.completeBillTransaction(
+                    billRecord,
+                    session,
+                  );
+                } else if (finalStatus === "failed") {
+                  await ledgerService.refundBillTransaction(
+                    billRecord,
+                    session,
+                  );
+                }
+              });
+            } finally {
+              await session.endSession();
+            }
+            break;
+          }
+          case "bill_payment_webhook": {
+            const BillPayment = require("../models/billPaymentModel");
+            const ledgerService = require("./billPaymentLedgerService");
+            const vtpass = require("./vtpassService");
+            const mongoose = require("mongoose");
 
-                  // Transaction ledger logic would go here too if we want full recovery
-                  // For now keeping it simple as the controller already created the pending entries
+            const { requestId } = data;
+            const bill = await BillPayment.findOne({ requestId });
+
+            // 1. Initial sanity check
+            if (
+              !bill ||
+              bill.status === "completed" ||
+              bill.status === "refunded" ||
+              bill.status === "failed"
+            )
+              return;
+
+            // 2. ZERO TRUST: Requery VTpass to verify the webhook payload
+            let vtRes;
+            try {
+              vtRes = await vtpass.requeryTransaction(requestId);
+            } catch (err) {
+              logger.error(
+                `[TaskQueue] Webhook requery failed for ${requestId}: ${err.message}`,
+              );
+              throw err; // retry
+            }
+
+            const code = vtRes?.code;
+            const status = vtRes?.content?.transactions?.status;
+
+            // 3. Process the verified status
+            const session = await mongoose.startSession();
+            try {
+              await session.withTransaction(async () => {
+                let finalStatus = "pending";
+                if (
+                  code === "000" &&
+                  (status === "delivered" || status === "successful")
+                ) {
+                  finalStatus = "completed";
+                } else if (code === "016" || code === "011") {
+                  finalStatus = "failed";
+                }
+
+                if (finalStatus === "completed") {
+                  bill.status = "completed";
+                  bill.completedAt = new Date();
+                  bill.vtpassResponse = vtRes;
+                  bill.deliveryToken =
+                    vtRes.content?.transactions?.token || vtRes.purchased_code;
+                  await bill.save({ session });
+                  await ledgerService.completeBillTransaction(bill, session);
+                } else if (finalStatus === "failed") {
+                  await ledgerService.refundBillTransaction(bill, session);
                 }
               });
             } finally {

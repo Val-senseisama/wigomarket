@@ -776,85 +776,67 @@ const getMyBillPayments = asyncHandler(async (req, res) => {
   });
 });
 
-/**
- * GET /api/bills/requery/:requestId — manual status check for a pending tx
- */
 const requeryBillPayment = asyncHandler(async (req, res) => {
   const { requestId } = req.params;
-  const userId = req.user._id;
+  const { _id: userId } = req.user;
+  const ledgerService = require("../services/billPaymentLedgerService");
 
   const billRecord = await BillPayment.findOne({ requestId, user: userId });
-  if (!billRecord)
+  if (!billRecord) {
     return res
       .status(404)
-      .json({ success: false, message: "Bill payment not found" });
+      .json({ success: false, message: "Record not found" });
+  }
 
-  if (billRecord.status !== "pending") {
-    return res.json({
-      success: true,
-      data: { status: billRecord.status, request_id: requestId },
-    });
+  // Already final? Return as is
+  if (billRecord.status === "completed" || billRecord.status === "refunded") {
+    return res.json({ success: true, data: billRecord });
   }
 
   const vtRes = await vtpass.requeryTransaction(requestId);
   const code = vtRes?.code;
   const deliveredStatus = vtRes?.content?.transactions?.status;
 
-  let newStatus = "pending";
-  if (code === "000" && deliveredStatus === "delivered")
-    newStatus = "completed";
-  else if (code === "016") newStatus = "failed";
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      let newStatus = "pending";
+      if (code === "000" && deliveredStatus === "delivered")
+        newStatus = "completed";
+      else if (code === "016") newStatus = "failed";
 
-  if (newStatus !== "pending") {
-    billRecord.status = newStatus;
-    billRecord.vtpassResponse = vtRes;
-    if (newStatus === "completed") {
-      billRecord.completedAt = new Date();
-      billRecord.deliveryToken = vtRes.content?.transactions?.token || null;
-      billRecord.units = vtRes.content?.transactions?.units || null;
-    } else {
-      billRecord.failedAt = new Date();
-      // Atomically refund wallet on failure — session-bound so record + credit are atomic
-      const refundSession = await mongoose.startSession();
-      try {
-        await refundSession.withTransaction(async () => {
-          const wallet = await Wallet.findOne({ user: userId }).session(
-            refundSession,
-          );
-          if (wallet) {
-            await wallet.creditEarning(billRecord.amount, refundSession);
-            billRecord.refundedAt = new Date();
-            billRecord.status = "refunded";
-            await billRecord.save({ session: refundSession });
-          }
-        });
-      } finally {
-        await refundSession.endSession();
+      if (newStatus !== "pending") {
+        billRecord.status = newStatus;
+        billRecord.vtpassResponse = vtRes;
+
+        if (newStatus === "completed") {
+          billRecord.completedAt = new Date();
+          billRecord.deliveryToken =
+            vtRes.content?.transactions?.token || vtRes.purchased_code;
+          await billRecord.save({ session });
+          await ledgerService.completeBillTransaction(billRecord, session);
+        } else if (newStatus === "failed") {
+          await ledgerService.refundBillTransaction(billRecord, session);
+        }
       }
-      // billRecord already saved inside the transaction; skip the save below
-      return res.json({
-        success: true,
-        data: {
-          status: billRecord.status,
-          request_id: requestId,
-          token: billRecord.deliveryToken || null,
-          units: billRecord.units || null,
-          vtpass_code: code,
-        },
-      });
-    }
-    await billRecord.save();
+    });
+  } finally {
+    await session.endSession();
   }
 
-  res.json({
-    success: true,
-    data: {
-      status: billRecord.status,
-      request_id: requestId,
-      token: billRecord.deliveryToken || null,
-      units: billRecord.units || null,
-      vtpass_code: code,
-    },
+  res.json({ success: true, data: billRecord });
+});
+
+/**
+ * POST /api/bills/webhook/vtpass
+ * VTpass push notification when a transaction status changes.
+ */
+const handleVtpassWebhook = asyncHandler(async (req, res) => {
+  const taskQueue = require("../services/taskQueue");
+  if (!req.body.requestId) return res.status(400).send("No requestId");
+  res.status(200).send("OK");
+  taskQueue.enqueue("bill_payment_webhook", req.body).catch((err) => {
+    console.error("[Webhook] VTpass enqueue error:", err.message);
   });
 });
 
@@ -869,4 +851,5 @@ module.exports = {
   payCableTv,
   getMyBillPayments,
   requeryBillPayment,
+  handleVtpassWebhook,
 };

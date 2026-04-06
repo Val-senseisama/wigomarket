@@ -12,6 +12,7 @@ const {
   payCableTv,
   getMyBillPayments,
   requeryBillPayment,
+  handleVtpassWebhook,
 } = require("../controllers/billPaymentController");
 
 // ── Service discovery (no wallet required) ──────────────────────────────────
@@ -344,5 +345,18 @@ router.get("/history", authMiddleware, getMyBillPayments);
  *         description: Updated status (and token if electricity)
  */
 router.get("/requery/:requestId", authMiddleware, requeryBillPayment);
+
+/**
+ * @swagger
+ * /api/bills/webhook/vtpass:
+ *   post:
+ *     summary: VTpass status push notification
+ *     tags: [Bills]
+ *     description: Real-time update from VTpass. No authentication (IP whitelist recommended).
+ *     responses:
+ *       200:
+ *         description: Webhook received
+ */
+router.post("/webhook/vtpass", handleVtpassWebhook);
 
 module.exports = router;

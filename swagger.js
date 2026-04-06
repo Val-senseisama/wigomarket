@@ -115,6 +115,11 @@ const options = {
         name: "Seller Discovery",
         description: "Popular sellers and location-based seller discovery",
       },
+      {
+        name: "Search",
+        description:
+          "Global fuzzy search, autocomplete, recent & trending queries",
+      },
     ],
   },
   apis: [
@@ -133,6 +138,7 @@ const options = {
     "./routes/wishlistRouter.js",
     "./routes/sellerDiscoveryRouter.js",
     "./routes/billPaymentRouter.js",
+    "./routes/searchRouter.js",
   ],
 };
 

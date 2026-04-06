@@ -21,11 +21,14 @@ const Wallet = require("../models/walletModel");
 const Transaction = require("../models/transactionModel");
 const VATConfig = require("../models/vatConfigModel");
 const User = require("../models/userModel");
+const BillPayment = require("../models/billPaymentModel");
+const ledgerService = require("./billPaymentLedgerService");
 const appConfig = require("../config/appConfig");
 const { PaymentStatus, OrderStatus } = require("../utils/constants");
 const { MakeID } = require("../Helpers/Helpers");
 const audit = require("./auditService");
 const { calculateCommissionBreakdown } = require("./commissionService");
+const vtpass = require("./vtpassService");
 
 // Lazy FLW instance
 let flw = null;
@@ -402,6 +405,85 @@ async function cleanupStuckTransactions() {
 }
 
 /**
+ * Bill Payment Requery Tick: finds pending VTpass purchases and verifies status.
+ */
+async function runBillPaymentCheck() {
+  console.log("[Cron] 🧾 Checking pending bill payments...");
+  try {
+    const pendingBills = await BillPayment.findPendingForRequery(10);
+    if (!pendingBills.length) {
+      console.log("[Cron] ✅ No pending bill payments found.");
+      return;
+    }
+
+    console.log(`[Cron] Found ${pendingBills.length} pending bill(s) to check`);
+
+    for (const bill of pendingBills) {
+      const session = await mongoose.startSession();
+      try {
+        await session.withTransaction(async () => {
+          const res = await vtpass.requeryTransaction(bill.requestId);
+          const code = res?.code;
+          const deliveredStatus = res?.content?.transactions?.status;
+          let finalStatus = "pending";
+
+          if (code === "000") {
+            if (
+              deliveredStatus === "delivered" ||
+              deliveredStatus === "successful"
+            ) {
+              finalStatus = "completed";
+              bill.vtpassResponse = res;
+              if (res.content?.transactions?.token || res.purchased_code) {
+                bill.deliveryToken =
+                  res.content?.transactions?.token || res.purchased_code;
+              }
+            } else if (deliveredStatus === "failed") {
+              finalStatus = "failed";
+            }
+          } else if (code === "016" || code === "011") {
+            finalStatus = "failed";
+          }
+
+          if (finalStatus === "completed") {
+            await ledgerService.completeBillTransaction(bill, session);
+          } else if (finalStatus === "failed") {
+            await ledgerService.refundBillTransaction(bill, session);
+          }
+        });
+      } catch (err) {
+        console.error(
+          `[Cron] Requery failed for bill ${bill.requestId}:`,
+          err.message,
+        );
+      }
+    }
+  } catch (err) {
+    console.error("[Cron] Bill check failed:", err.message);
+  }
+}
+
+/** Helper to refund a failed bill atomically. */
+async function refundBill(bill, vtRes) {
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      const wallet = await Wallet.findOne({ user: bill.user }).session(session);
+      if (wallet) {
+        await wallet.creditEarning(bill.amount, session, false);
+      }
+      bill.status = "refunded";
+      bill.refundedAt = new Date();
+      bill.vtpassResponse = vtRes;
+      await bill.save({ session });
+      console.log(`[Cron] 🔄 Bill ${bill.requestId} refunded due to failure`);
+    });
+  } finally {
+    await session.endSession();
+  }
+}
+
+/**
  * Run the wallet health reconciliation: compare each wallet's stored balance
  * against the balance derived from the transaction ledger. Log any drift.
  *
@@ -445,11 +527,26 @@ function startCron() {
     }
   };
 
-  cron.schedule("*/5 * * * *", wrap("pending-payment-check", runPendingPaymentCheck));
-  cron.schedule("*/15 * * * *", wrap("stuck-transaction-cleanup", cleanupStuckTransactions));
-  cron.schedule("0 2 * * *", wrap("wallet-reconciliation", runWalletReconciliation));
+  cron.schedule(
+    "*/5 * * * *",
+    wrap("pending-payment-check", runPendingPaymentCheck),
+  );
+  cron.schedule(
+    "*/10 * * * *",
+    wrap("bill-payment-check", runBillPaymentCheck),
+  );
+  cron.schedule(
+    "*/15 * * * *",
+    wrap("stuck-transaction-cleanup", cleanupStuckTransactions),
+  );
+  cron.schedule(
+    "0 2 * * *",
+    wrap("wallet-reconciliation", runWalletReconciliation),
+  );
 
-  console.log("⏰ Crons scheduled: payment-check (5 min), stuck-cleanup (15 min), reconciliation (02:00)");
+  console.log(
+    "⏰ Crons scheduled: payment-check (5m), bill-check (10m), stuck-cleanup (15m), reconciliation (02:00)",
+  );
 }
 
 module.exports = {
