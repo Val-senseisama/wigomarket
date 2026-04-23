@@ -24,6 +24,7 @@ const {
   changeActiveRole,
   googleAuth,
   resetPassword,
+  verifyResetToken,
 } = require("../controllers/user");
 const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
 const { commissionHandler } = require("../controllers/paymentController");
@@ -498,6 +499,36 @@ router.post("/forgot-password-token", forgotPasswordToken);
  *       400:
  *         description: Invalid token or user not found
  */
+/**
+ * @swagger
+ * /api/user/verify-reset-token:
+ *   post:
+ *     summary: Verify a password reset token without resetting the password
+ *     tags:
+ *       - Users
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - token
+ *               - email
+ *             properties:
+ *               token:
+ *                 type: string
+ *                 example: "123456"
+ *               email:
+ *                 type: string
+ *                 example: "user@example.com"
+ *     responses:
+ *       200:
+ *         description: Token is valid
+ *       400:
+ *         description: Invalid or expired token
+ */
+router.post("/verify-reset-token", verifyResetToken);
 router.put("/reset-password", resetPassword);
 /**
  * @swagger
@@ -777,6 +808,38 @@ router.get("/get-cart", authMiddleware, getUserCart);
  *       400:
  *         description: Invalid MongoDB ID or database operation fails
  */
+/**
+ * @swagger
+ * /api/user/me:
+ *   get:
+ *     summary: Get current authenticated user's information
+ *     tags:
+ *       - Users
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Current user information
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                 roles:
+ *                   type: array
+ *                 activeRole:
+ *                   type: string
+ *       404:
+ *         description: User not found
+ *       401:
+ *         description: Unauthorized
+ */
+router.get("/me", authMiddleware, getCurrentUser);
+
 router.get("/:id", authMiddleware, isAdmin, getAUser);
 /**
  * @swagger
@@ -1393,7 +1456,7 @@ router.post("/verify", verifyOtp);
  *       401:
  *         description: Unauthorized
  */
-router.get("/me", authMiddleware, getCurrentUser);
+// router.get("/me", authMiddleware, getCurrentUser); // REMOVED FROM HERE
 
 /**
  * @swagger

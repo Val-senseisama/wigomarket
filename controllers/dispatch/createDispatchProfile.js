@@ -17,19 +17,14 @@ const { ThrowError } = require("../../Helpers/Helpers");
  */
 const createDispatchProfile = asyncHandler(async (req, res) => {
   const { _id } = req.user;
-  const {
-    vehicleInfo,
-    coverageAreas,
-    documents,
-    workingHours,
-    workingDays
-  } = req.body;
+  const { vehicleInfo, coverageAreas, documents, workingDays } = req.body;
 
   // Verify user is a delivery agent
   if (!req.userRoles.includes("dispatch")) {
     return res.status(403).json({
       success: false,
-      message: "Access denied. Only delivery agents can create dispatch profiles."
+      message:
+        "Access denied. Only delivery agents can create dispatch profiles.",
     });
   }
 
@@ -38,7 +33,7 @@ const createDispatchProfile = asyncHandler(async (req, res) => {
   if (existingProfile) {
     return res.status(400).json({
       success: false,
-      message: "Dispatch profile already exists for this user"
+      message: "Dispatch profile already exists for this user",
     });
   }
 
@@ -51,44 +46,46 @@ const createDispatchProfile = asyncHandler(async (req, res) => {
         model: vehicleInfo.model,
         year: vehicleInfo.year,
         plateNumber: vehicleInfo.plateNumber,
-        color: vehicleInfo.color
+        color: vehicleInfo.color,
       },
       coverageAreas: coverageAreas || [],
       documents: {
         driverLicense: {
           number: documents.driverLicense.number,
           expiryDate: documents.driverLicense.expiryDate,
-          image: documents.driverLicense.image
+          image: documents.driverLicense.image,
         },
         vehicleRegistration: {
           number: documents.vehicleRegistration.number,
           expiryDate: documents.vehicleRegistration.expiryDate,
-          image: documents.vehicleRegistration.image
+          image: documents.vehicleRegistration.image,
         },
-        insurance: {
-          provider: documents.insurance.provider,
-          policyNumber: documents.insurance.policyNumber,
-          expiryDate: documents.insurance.expiryDate,
-          image: documents.insurance.image
-        }
+        nin: {
+          number: documents.nin.number,
+          image: documents.nin.image,
+        },
       },
       availability: {
-        workingHours: workingHours || { start: "09:00", end: "17:00" },
-        workingDays: workingDays || ["monday", "tuesday", "wednesday", "thursday", "friday"]
+        workingDays: workingDays || [
+          "monday",
+          "tuesday",
+          "wednesday",
+          "thursday",
+          "friday",
+        ],
       },
-      status: "pending"
+      status: "pending",
     });
 
     res.json({
       success: true,
       message: "Dispatch profile created successfully",
-      data: dispatchProfile
+      data: dispatchProfile,
     });
   } catch (error) {
     console.log(error);
     throw new Error(error.message || "Failed to create dispatch profile");
   }
-
 });
 
 module.exports = createDispatchProfile;

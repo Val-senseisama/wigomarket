@@ -36,7 +36,18 @@ const { getFlutterwaveInstance } = require("../config/flutterwaveClient");
  */
 const createStore = asyncHandler(async (req, res) => {
   const { _id, mobile, role, email } = req.user;
-  const { name, address, storeMobile, storeEmail, storeImage } = req.body;
+  const {
+    name,
+    address,
+    storeMobile,
+    storeEmail,
+    storeImage,
+    businessType,
+    city,
+    state,
+    ownerNIN,
+    description,
+  } = req.body;
 
   if (!Validate.string(name)) {
     ThrowError("Invalid Name");
@@ -60,6 +71,22 @@ const createStore = asyncHandler(async (req, res) => {
 
   if (!Validate.string(storeImage)) {
     ThrowError("Invalid Store Image");
+  }
+
+  if (!Validate.string(businessType)) {
+    ThrowError("Business Type is required");
+  }
+
+  if (!Validate.string(city)) {
+    ThrowError("City is required");
+  }
+
+  if (!Validate.string(state)) {
+    ThrowError("State is required");
+  }
+
+  if (!Validate.string(ownerNIN)) {
+    ThrowError("Owner NIN image is required for verification");
   }
   try {
     const findStore = await Store.findOne({ name: name }, { _id: 1 });
@@ -92,6 +119,11 @@ const createStore = asyncHandler(async (req, res) => {
         email: storeEmail ?? email,
         owner: _id,
         address: address,
+        businessType,
+        city,
+        state,
+        ownerNIN,
+        description,
         ...(locationData && { location: locationData }),
       });
       if (!role.includes("seller")) {

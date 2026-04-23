@@ -74,16 +74,7 @@ var dispatchProfileSchema = new mongoose.Schema(
         enum: ["online", "offline", "busy", "unavailable"],
         default: "offline",
       },
-      workingHours: {
-        start: {
-          type: String, // Format: "09:00"
-          default: "09:00",
-        },
-        end: {
-          type: String, // Format: "17:00"
-          default: "17:00",
-        },
-      },
+    },
       workingDays: {
         type: [String],
         enum: [
@@ -133,17 +124,9 @@ var dispatchProfileSchema = new mongoose.Schema(
           default: false,
         },
       },
-      insurance: {
-        provider: {
+      nin: {
+        number: {
           type: String,
-          required: true,
-        },
-        policyNumber: {
-          type: String,
-          required: true,
-        },
-        expiryDate: {
-          type: Date,
           required: true,
         },
         image: {

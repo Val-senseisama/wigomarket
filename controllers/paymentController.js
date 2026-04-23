@@ -20,7 +20,10 @@ const {
 } = require("../utils/constants");
 const appConfig = require("../config/appConfig");
 const audit = require("../services/auditService");
-const { calculateCommissionBreakdown } = require("../services/commissionService");
+const redisClient = require("../config/redisClient");
+const {
+  calculateCommissionBreakdown,
+} = require("../services/commissionService");
 
 // Lazy-load Flutterwave instance
 let flw = null;
@@ -82,6 +85,31 @@ const initializePayment = asyncHandler(async (req, res) => {
   }
 
   validateMongodbId(orderId);
+
+  // ── Distributed lock: prevent concurrent init for the same order ──
+  const lockKey = `lock:pay_init:${orderId}`;
+  let lockAcquired = false;
+  try {
+    const result = await redisClient.set(
+      lockKey,
+      _id.toString(),
+      "EX",
+      30,
+      "NX",
+    );
+    lockAcquired = result === "OK";
+  } catch (_) {
+    // Redis unavailable — skip lock, proceed normally
+    lockAcquired = true;
+  }
+
+  if (!lockAcquired) {
+    return res.status(429).json({
+      success: false,
+      message:
+        "Payment is already being processed for this order. Please wait.",
+    });
+  }
 
   try {
     // Check if user has a wallet (create if doesn't exist)

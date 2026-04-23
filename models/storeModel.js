@@ -43,6 +43,31 @@ var storeSchema = new mongoose.Schema(
         type: String,
       },
     },
+    businessType: {
+      type: String,
+      required: true,
+      index: true,
+    },
+    city: {
+      type: String,
+      required: true,
+    },
+    state: {
+      type: String,
+      required: true,
+    },
+    ownerNIN: {
+      type: String, // URL/Ref to image
+      required: true,
+    },
+    description: {
+      type: String,
+    },
+    status: {
+      type: String,
+      enum: ["pending", "active", "suspended"],
+      default: "pending",
+    },
     balance: {
       type: Number,
       default: 0,

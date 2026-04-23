@@ -521,25 +521,13 @@ router.post(
  *                         format: date
  *                       image:
  *                         type: string
- *                   insurance:
+ *                   nin:
  *                     type: object
  *                     properties:
- *                       provider:
+ *                       number:
  *                         type: string
- *                       policyNumber:
- *                         type: string
- *                       expiryDate:
- *                         type: string
- *                         format: date
  *                       image:
  *                         type: string
- *               workingHours:
- *                 type: object
- *                 properties:
- *                   start:
- *                     type: string
- *                   end:
- *                     type: string
  *               workingDays:
  *                 type: array
  *                 items:
@@ -548,6 +536,17 @@ router.post(
  *     responses:
  *       200:
  *         description: Dispatch profile created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   $ref: '#/components/schemas/DispatchProfile'
  *       400:
  *         description: Invalid request or profile already exists
  *       403:
@@ -567,6 +566,15 @@ router.post("/profile", authMiddleware, isDispatch, createDispatchProfile);
  *     responses:
  *       200:
  *         description: Dispatch profile retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   $ref: '#/components/schemas/DispatchProfile'
  *       404:
  *         description: Dispatch profile not found
  */
@@ -596,8 +604,6 @@ router.get("/profile", authMiddleware, isDispatch, getDispatchProfile);
  *                   type: string
  *               documents:
  *                 type: object
- *               workingHours:
- *                 type: object
  *               workingDays:
  *                 type: array
  *                 items:
@@ -605,6 +611,17 @@ router.get("/profile", authMiddleware, isDispatch, getDispatchProfile);
  *     responses:
  *       200:
  *         description: Dispatch profile updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   $ref: '#/components/schemas/DispatchProfile'
  *       404:
  *         description: Dispatch profile not found
  */
@@ -791,4 +808,100 @@ router.get(
   getUnreadCount,
 );
 
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     DispatchProfile:
+ *       type: object
+ *       properties:
+ *         _id:
+ *           type: string
+ *         user:
+ *           type: string
+ *           description: User ID
+ *         vehicleInfo:
+ *           type: object
+ *           properties:
+ *             type:
+ *               type: string
+ *               enum: [bike, motorcycle, car, van, truck, bicycle, feet, bus]
+ *             make:
+ *               type: string
+ *             model:
+ *               type: string
+ *             year:
+ *               type: number
+ *             plateNumber:
+ *               type: string
+ *             color:
+ *               type: string
+ *         coverageAreas:
+ *           type: array
+ *           items:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               coordinates:
+ *                 type: object
+ *                 properties:
+ *                   latitude:
+ *                     type: number
+ *                   longitude:
+ *                     type: number
+ *               radius:
+ *                 type: number
+ *         availability:
+ *           type: object
+ *           properties:
+ *             status:
+ *               type: string
+ *               enum: [online, offline, busy, unavailable]
+ *             workingDays:
+ *               type: array
+ *               items:
+ *                 type: string
+ *         documents:
+ *           type: object
+ *           properties:
+ *             driverLicense:
+ *               type: object
+ *               properties:
+ *                 number:
+ *                   type: string
+ *                 expiryDate:
+ *                   type: string
+ *                   format: date
+ *                 image:
+ *                   type: string
+ *                 verified:
+ *                   type: boolean
+ *             vehicleRegistration:
+ *               type: object
+ *               properties:
+ *                 number:
+ *                   type: string
+ *                 expiryDate:
+ *                   type: string
+ *                   format: date
+ *                 image:
+ *                   type: string
+ *                 verified:
+ *                   type: boolean
+ *             nin:
+ *               type: object
+ *               properties:
+ *                 number:
+ *                   type: string
+ *                 image:
+ *                   type: string
+ *                 verified:
+ *                   type: boolean
+ *         status:
+ *           type: string
+ *           enum: [pending, approved, rejected, suspended]
+ *         isActive: { type: boolean }
+ *         lastActiveAt: { type: string, format: date-time }
+ */
 module.exports = router;

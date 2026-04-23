@@ -8,6 +8,12 @@ var userSchema = new mongoose.Schema(
     fullName: {
       type: String,
     },
+    firstname: {
+      type: String,
+    },
+    lastname: {
+      type: String,
+    },
     email: {
       type: String,
       required: true,

@@ -35,6 +35,10 @@ const router = express.Router();
  *               - storeMobile
  *               - storeEmail
  *               - storeImage
+ *               - businessType
+ *               - city
+ *               - state
+ *               - ownerNIN
  *             properties:
  *               name:
  *                 type: string
@@ -45,6 +49,20 @@ const router = express.Router();
  *               storeEmail:
  *                 type: string
  *               storeImage:
+ *                 type: string
+ *               businessType:
+ *                 type: string
+ *                 example: "Retail"
+ *               city:
+ *                 type: string
+ *                 example: "Lagos"
+ *               state:
+ *                 type: string
+ *                 example: "Lagos State"
+ *               ownerNIN:
+ *                 type: string
+ *                 description: "URL or image string for verify"
+ *               description:
  *                 type: string
  *     responses:
  *       200:
