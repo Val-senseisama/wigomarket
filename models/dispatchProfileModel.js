@@ -74,7 +74,6 @@ var dispatchProfileSchema = new mongoose.Schema(
         enum: ["online", "offline", "busy", "unavailable"],
         default: "offline",
       },
-    },
       workingDays: {
         type: [String],
         enum: [
