@@ -12,6 +12,7 @@ const Validate = require("../Helpers/Validate");
 const Order = require("../models/orderModel");
 const Product = require("../models/productModel");
 const Store = require("../models/storeModel");
+const Wallet = require("../models/walletModel");
 const uniqid = require("uniqid");
 const { ThrowError, MakeID } = require("../Helpers/Helpers");
 const {
@@ -500,11 +501,15 @@ const loginUser = asyncHandler(async (req, res) => {
       resource: { type: "user", id: findUser._id },
     });
 
+    const wallet = await Wallet.findOne({ user: findUser._id }).select("bankAccount");
+    const hasPaymentSetup = !!(wallet && wallet.bankAccount && wallet.bankAccount.accountNumber);
+
     res.json({
       _id: findUser?._id,
       status: findUser?.status,
       role: findUser?.role,
       activeRole: findUser?.activeRole,
+      hasPaymentSetup,
       token: generateToken(findUser?._id),
     });
   } else {
@@ -1413,6 +1418,9 @@ const getCurrentUser = asyncHandler(async (req, res) => {
 
     // Populate related data based on user roles
     let populatedUser = { ...user.toObject() };
+
+    const wallet = await Wallet.findOne({ user: user._id }).select("bankAccount");
+    populatedUser.hasPaymentSetup = !!(wallet && wallet.bankAccount && wallet.bankAccount.accountNumber);
 
     // If user is a seller, populate store information
     if (user.role.includes("seller")) {

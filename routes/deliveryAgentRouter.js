@@ -11,6 +11,7 @@ const {
   updateDispatchProfile,
   getDispatchProfile,
   getEarnings,
+  getEarningsHistory,
   getDashboardStats,
   takeDispatch,
 } = require("../controllers/dispatch");
@@ -652,6 +653,69 @@ router.put("/profile", authMiddleware, isDispatch, updateDispatchProfile);
  *         description: Access denied - delivery agent only
  */
 router.get("/earnings", authMiddleware, isDispatch, getEarnings);
+
+/**
+ * @swagger
+ * /api/delivery-agent/earnings-history:
+ *   get:
+ *     summary: Get detailed history of earned orders
+ *     description: Get a paginated list of completed orders that generated earnings for the agent
+ *     tags: [Delivery Agent]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *     responses:
+ *       200:
+ *         description: Earnings history retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     orders:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Order'
+ *                     pagination:
+ *                       type: object
+ *                       properties:
+ *                         currentPage:
+ *                           type: integer
+ *                         totalPages:
+ *                           type: integer
+ *                         totalOrders:
+ *                           type: integer
+ *                         hasNext:
+ *                           type: boolean
+ *                         hasPrev:
+ *                           type: boolean
+ */
+router.get("/earnings-history", authMiddleware, isDispatch, getEarningsHistory);
 
 /**
  * @swagger

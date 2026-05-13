@@ -4,6 +4,7 @@ const updateBankAccount = require('./updateBankAccount');
 const requestWithdrawal = require('./requestWithdrawal');
 const getWithdrawalHistory = require('./getWithdrawalHistory');
 const getWalletStats = require('./getWalletStats');
+const getEarningsOverview = require('./getEarningsOverview');
 
 module.exports = {
   createWallet,
@@ -11,5 +12,6 @@ module.exports = {
   updateBankAccount,
   requestWithdrawal,
   getWithdrawalHistory,
-  getWalletStats
+  getWalletStats,
+  getEarningsOverview
 };

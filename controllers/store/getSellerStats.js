@@ -33,7 +33,7 @@ const getSellerStats = asyncHandler(async (req, res) => {
     ] = await Promise.all([
       Product.countDocuments({ store: storeId }),
       Order.countDocuments({
-        "products.stores": storeId,
+        "products.store": storeId,
         orderStatus: "Delivered",
       }),
       Store.aggregate([
@@ -71,7 +71,7 @@ const getSellerStats = asyncHandler(async (req, res) => {
           }
         }
       ]),
-      Order.find({ "products.stores": storeId })
+      Order.find({ "products.store": storeId })
         .populate("orderedBy", "fullName email mobile")
         .sort({ createdAt: -1 })
         .limit(5)

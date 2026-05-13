@@ -7,11 +7,14 @@ const updateAvailability = require('./updateAvailability');
 const takeDispatch = require('./takeDispatch');
 const getDispatchOrders = require('./getDispatchOrders');
 
+const getEarningsHistory = require('./getEarningsHistory');
+
 module.exports = {
   createDispatchProfile,
   updateDispatchProfile,
   getDispatchProfile,
   getEarnings,
+  getEarningsHistory,
   getDashboardStats,
   updateAvailability,
   takeDispatch,

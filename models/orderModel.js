@@ -14,7 +14,7 @@ var orderSchema = new mongoose.Schema(
           required: true,
           min: 1, // Ensure count is at least 1
         },
-        stores: {
+        store: {
           type: mongoose.Schema.Types.ObjectId,
           ref: "Store",
         },

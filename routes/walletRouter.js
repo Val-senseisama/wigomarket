@@ -7,6 +7,7 @@ const {
   requestWithdrawal,
   getWithdrawalHistory,
   getWalletStats,
+  getEarningsOverview,
 } = require("../controllers/wallet");
 const {
   getTransactionHistory,
@@ -507,6 +508,20 @@ router.get("/withdrawals", authMiddleware, getWithdrawalHistory);
  *         description: Unauthorized
  */
 router.get("/stats", authMiddleware, getWalletStats);
+
+/**
+ * @swagger
+ * /api/wallet/earnings-overview:
+ *   get:
+ *     tags: [Wallet]
+ *     summary: Get user earnings overview (today, week, total, pending)
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Earnings overview retrieved successfully
+ */
+router.get("/earnings-overview", authMiddleware, getEarningsOverview);
 
 // Transaction Routes
 

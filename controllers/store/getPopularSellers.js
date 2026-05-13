@@ -41,7 +41,7 @@ const getPopularSellers = asyncHandler(async (req, res) => {
             {
               $match: {
                 $expr: {
-                  $in: ["$$storeId", "$products.stores"]
+                  $in: ["$$storeId", "$products.store"]
                 },
                 orderStatus: "Delivered"
               }
@@ -74,7 +74,7 @@ const getPopularSellers = asyncHandler(async (req, res) => {
                         $filter: {
                           input: "$$order.products",
                           as: "product",
-                          cond: { $eq: ["$$product.stores", "$_id"] }
+                          cond: { $eq: ["$$product.store", "$_id"] }
                         }
                       },
                       as: "item",
