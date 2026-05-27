@@ -690,7 +690,7 @@ router.put("/reset-password", resetPassword);
  *                   example: "buyer"
  *                 token:
  *                   type: string
- *                   description: JWT access token — include as `Authorization: Bearer <token>` on authenticated requests
+ *                   description: "JWT access token — include as `Authorization: Bearer <token>` on authenticated requests"
  *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
  *                 refreshToken:
  *                   type: string
@@ -1564,7 +1564,7 @@ router.post("/empty-cart", authMiddleware, emptyCart);
  *                   example: "seller"
  *                 token:
  *                   type: string
- *                   description: JWT access token — include as `Authorization: Bearer <token>` on authenticated requests. Valid for 1 day.
+ *                   description: "JWT access token — include as `Authorization: Bearer <token>` on authenticated requests. Valid for 1 day."
  *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
  *                 refreshToken:
  *                   type: string
