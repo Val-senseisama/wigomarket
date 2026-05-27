@@ -1,17 +1,24 @@
 const createWallet = require('./createWallet');
 const getWallet = require('./getWallet');
-const updateBankAccount = require('./updateBankAccount');
+const addBankAccount = require('./updateBankAccount');        // POST  /bank-account
+const setDefaultBankAccount = require('./setDefaultBankAccount'); // PUT /bank-account/:id/default
+const deleteBankAccount = require('./deleteBankAccount');     // DELETE /bank-account/:id
 const requestWithdrawal = require('./requestWithdrawal');
 const getWithdrawalHistory = require('./getWithdrawalHistory');
 const getWalletStats = require('./getWalletStats');
 const getEarningsOverview = require('./getEarningsOverview');
+const { createWithdrawalPin, changeWithdrawalPin } = require('./withdrawalPin');
 
 module.exports = {
   createWallet,
   getWallet,
-  updateBankAccount,
+  addBankAccount,
+  setDefaultBankAccount,
+  deleteBankAccount,
   requestWithdrawal,
   getWithdrawalHistory,
   getWalletStats,
-  getEarningsOverview
+  getEarningsOverview,
+  createWithdrawalPin,
+  changeWithdrawalPin,
 };

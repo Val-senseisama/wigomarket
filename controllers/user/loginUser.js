@@ -25,6 +25,9 @@ const { ThrowError, MakeID } = require("../../Helpers/Helpers");
  * @returns {Object} - User data and authentication tokens
  * @throws {Error} - Throws error if credentials are invalid
  */
+// Access token lifetime in milliseconds — must stay in sync with jwt.js expiresIn
+const ACCESS_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 1 day
+
 const loginUser = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   if (!Validate.email(email)) {
@@ -35,36 +38,43 @@ const loginUser = asyncHandler(async (req, res) => {
     ThrowError("Invalid Password");
   }
 
-  //   Check if user exists
+  // Check if user exists
   const findUser = await User.findOne(
     { email },
     { password: 1, status: 1, isBlocked: 1, role: 1, activeRole: 1, _id: 1 },
   );
-  if (findUser && (await findUser.isPasswordMatched(password))) {
-    if (findUser.isBlocked) {
-      return res.status(403).json({ success: false, message: "Account is blocked" });
-    }
-    const refreshToken = await generateRefreshToken(findUser?._id);
-    await User.findByIdAndUpdate(
-      findUser.id,
-      { refreshToken: refreshToken },
-      { new: true },
-    );
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      maxAge: 72 * 60 * 60 * 1000,
-    });
-    res.json({
-      _id: findUser?._id,
-      status: findUser?.status,
-      role: findUser?.role,
-      activeRole: findUser?.activeRole,
-      token: generateToken(findUser?._id),
-    });
-  } else {
+
+  if (!findUser || !(await findUser.isPasswordMatched(password))) {
     throw new Error("Invalid Credentials");
   }
 
+  if (findUser.isBlocked) {
+    return res.status(403).json({ success: false, message: "Account is blocked" });
+  }
+
+  const accessToken = generateToken(findUser._id);
+  const refreshToken = await generateRefreshToken(findUser._id);
+  const tokenExpiresAt = new Date(Date.now() + ACCESS_TOKEN_TTL_MS).toISOString();
+
+  await User.findByIdAndUpdate(findUser._id, { refreshToken }, { new: true });
+
+  // HTTP-only cookie for web clients
+  res.cookie("refreshToken", refreshToken, {
+    httpOnly: true,
+    maxAge: 3 * 24 * 60 * 60 * 1000, // 3 days
+    sameSite: "Strict",
+    secure: process.env.NODE_ENV === "production",
+  });
+
+  res.json({
+    _id: findUser._id,
+    status: findUser.status,
+    role: findUser.role,
+    activeRole: findUser.activeRole,
+    token: accessToken,
+    refreshToken,      // returned in body for mobile clients
+    tokenExpiresAt,
+  });
 });
 
 module.exports = loginUser;

@@ -179,12 +179,13 @@ router.post("/register", createUser);
  *                           items:
  *                             type: string
  *                           example: ["buyer"]
+ *                         activeRole:
+ *                           type: string
+ *                           example: "buyer"
  *                         status:
  *                           type: string
  *                           example: "pending"
- *                     verificationCode:
- *                       type: string
- *                       description: "For testing purposes only"
+ *                           description: Account is pending email verification
  *       400:
  *         description: Validation error or user already exists
  */
@@ -278,12 +279,16 @@ router.post("/register/buyer", createBuyer);
  *                           items:
  *                             type: string
  *                           example: ["seller"]
+ *                         activeRole:
+ *                           type: string
+ *                           example: "seller"
  *                         status:
  *                           type: string
  *                           example: "pending"
+ *                           description: Account is pending email verification
  *                     verificationCode:
  *                       type: string
- *                       description: "For testing purposes only"
+ *                       description: "For testing purposes only — remove in production"
  *       400:
  *         description: Validation error or user already exists
  */
@@ -398,9 +403,13 @@ router.post("/register/seller", createSeller);
  *                           items:
  *                             type: string
  *                           example: ["dispatch"]
+ *                         activeRole:
+ *                           type: string
+ *                           example: "dispatch"
  *                         status:
  *                           type: string
  *                           example: "pending"
+ *                           description: Account is pending email verification
  *                         nextOfKin:
  *                           type: object
  *                           properties:
@@ -408,16 +417,11 @@ router.post("/register/seller", createSeller);
  *                               type: string
  *                             mobile:
  *                               type: string
- *                             gender:
- *                               type: string
- *                               enum: [male, female, other]
- *                             address:
- *                               type: string
  *                         modeOfTransport:
  *                           type: string
  *                     verificationCode:
  *                       type: string
- *                       description: "For testing purposes only"
+ *                       description: "For testing purposes only — remove in production"
  *       400:
  *         description: Validation error, missing required fields, or user already exists
  */
@@ -534,8 +538,14 @@ router.put("/reset-password", resetPassword);
  * @swagger
  * /api/user/login:
  *   post:
- *     summary: Authenticate user and generate tokens
- *     description: Authenticate user and generate tokens
+ *     summary: Log in and receive auth tokens
+ *     description: >
+ *       Authenticates the user with email and password. Returns an access token
+ *       (valid 1 day) and a refresh token (valid 3 days). The refresh token is
+ *       also set as an HTTP-only cookie for web clients. Mobile clients should
+ *       store the `refreshToken` from the response body securely (e.g. device
+ *       keychain / secure storage) and use it to call POST /api/user/refresh
+ *       when the access token expires.
  *     tags:
  *       - Auth
  *     requestBody:
@@ -550,13 +560,17 @@ router.put("/reset-password", resetPassword);
  *             properties:
  *               email:
  *                 type: string
- *                 description: User's email address
+ *                 format: email
+ *                 description: The email address used during registration
+ *                 example: "user@example.com"
  *               password:
  *                 type: string
- *                 description: User's password
+ *                 format: password
+ *                 description: The user's password
+ *                 example: "password123"
  *     responses:
  *       200:
- *         description: User data and authentication tokens
+ *         description: Login successful — full auth payload returned
  *         content:
  *           application/json:
  *             schema:
@@ -564,18 +578,48 @@ router.put("/reset-password", resetPassword);
  *               properties:
  *                 _id:
  *                   type: string
+ *                   description: The user's unique ID
+ *                   example: "665f1a2b3c4d5e6f7a8b9c0d"
  *                 status:
  *                   type: string
+ *                   description: Account status
+ *                   example: "active"
  *                 role:
  *                   type: array
+ *                   description: All roles assigned to this user
  *                   items:
  *                     type: string
+ *                   example: ["buyer"]
  *                 activeRole:
  *                   type: string
+ *                   description: The role currently in use (relevant for multi-role accounts)
+ *                   example: "buyer"
  *                 token:
  *                   type: string
+ *                   description: JWT access token — include as `Authorization: Bearer <token>` on authenticated requests
+ *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *                 refreshToken:
+ *                   type: string
+ *                   description: >
+ *                     Refresh token used to obtain a new access token without re-logging in.
+ *                     Valid for 3 days. Also set as an HTTP-only cookie for web clients.
+ *                     Mobile clients must store this securely and send it in the body of
+ *                     POST /api/user/refresh.
+ *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *                 tokenExpiresAt:
+ *                   type: string
+ *                   format: date-time
+ *                   description: >
+ *                     ISO 8601 timestamp of when the access token expires.
+ *                     Use this on the client to schedule silent token refresh before
+ *                     the token expires (recommended: refresh ~60 seconds before expiry).
+ *                   example: "2026-05-28T12:00:00.000Z"
  *       400:
- *         description: Invalid credentials
+ *         description: Invalid email or password format
+ *       401:
+ *         description: Incorrect credentials
+ *       403:
+ *         description: Account is blocked
  */
 router.post("/login", loginUser);
 /**
@@ -668,25 +712,49 @@ router.get("/status-users", authMiddleware, isAdmin, getUsersByStatus);
 /**
  * @swagger
  * /api/user/refresh:
- *   get:
- *     summary: Get new access token using refresh token
- *     description: Get new access token using refresh token
+ *   post:
+ *     summary: Get a new access token using a refresh token
+ *     description: >
+ *       Issues a new access token given a valid refresh token.
+ *       Web clients send the token via HTTP-only cookie (automatic).
+ *       Mobile clients send it in the request body as `refreshToken`.
  *     tags:
  *       - Auth
+ *     requestBody:
+ *       description: Required for mobile clients (web uses the cookie automatically)
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *                 description: The refresh token received at login or email verification
  *     responses:
  *       200:
- *         description: New access token
+ *         description: New access token issued
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
  *                 token:
  *                   type: string
- *       400:
- *         description: Invalid refresh token
+ *                   description: New JWT access token (valid for 1 day)
+ *                 tokenExpiresAt:
+ *                   type: string
+ *                   format: date-time
+ *                   description: ISO timestamp of when the new access token expires
+ *                   example: "2026-05-28T12:00:00.000Z"
+ *       401:
+ *         description: No refresh token provided
+ *       403:
+ *         description: Invalid, expired, or revoked refresh token
  */
-router.get("/refresh", handleRefreshToken);
+router.post("/refresh", handleRefreshToken);
 /**
  * @swagger
  * /api/user/logout:
@@ -1341,8 +1409,16 @@ router.post("/empty-cart", authMiddleware, emptyCart);
  * @swagger
  * /api/user/verify:
  *   post:
- *     summary: Verify user's email verification code
- *     description: Verify user's email verification code
+ *     summary: Verify email OTP — activates account and returns auth tokens
+ *     description: >
+ *       Submits the verification code that was emailed after registration.
+ *       On success the account status changes from `pending` to `active` and a
+ *       full auth payload is returned — the user is immediately logged in with
+ *       no separate login call required. This is the correct place to obtain
+ *       the first access token, including for sellers and riders who need to
+ *       authenticate during the post-registration onboarding steps (e.g. wallet
+ *       creation). The refresh token is also set as an HTTP-only cookie for
+ *       web clients.
  *     tags:
  *       - Auth
  *     requestBody:
@@ -1357,22 +1433,86 @@ router.post("/empty-cart", authMiddleware, emptyCart);
  *             properties:
  *               email:
  *                 type: string
- *                 description: User's email address
+ *                 format: email
+ *                 description: The same email used during registration
+ *                 example: "user@example.com"
  *               code:
  *                 type: string
- *                 description: Verification code
+ *                 description: The verification code sent to the email inbox
+ *                 example: "A1B2C3"
  *     responses:
  *       200:
- *         description: Verification status message
+ *         description: Email verified — account is active and user is logged in
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 message:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 msg:
  *                   type: string
+ *                   example: "Email verified successfully"
+ *                 _id:
+ *                   type: string
+ *                   description: The user's unique ID
+ *                   example: "665f1a2b3c4d5e6f7a8b9c0d"
+ *                 role:
+ *                   type: array
+ *                   description: All roles assigned to this user
+ *                   items:
+ *                     type: string
+ *                   example: ["seller"]
+ *                 activeRole:
+ *                   type: string
+ *                   description: The role currently in use
+ *                   example: "seller"
+ *                 token:
+ *                   type: string
+ *                   description: JWT access token — include as `Authorization: Bearer <token>` on authenticated requests. Valid for 1 day.
+ *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *                 refreshToken:
+ *                   type: string
+ *                   description: >
+ *                     Refresh token used to silently renew the access token. Valid for 3 days.
+ *                     Also set as an HTTP-only cookie for web clients. Mobile clients must store
+ *                     this securely and send it in the body of POST /api/user/refresh.
+ *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *                 tokenExpiresAt:
+ *                   type: string
+ *                   format: date-time
+ *                   description: >
+ *                     ISO 8601 timestamp of when the access token expires.
+ *                     Use this to schedule silent refresh on the client side
+ *                     (recommended: call POST /api/user/refresh ~60 seconds before expiry).
+ *                   example: "2026-05-28T12:00:00.000Z"
  *       400:
- *         description: Invalid email or code
+ *         description: Code is invalid, does not match, or has already been used
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 msg:
+ *                   type: string
+ *                   example: "Invalid code"
+ *       404:
+ *         description: No pending account found for this email
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 msg:
+ *                   type: string
+ *                   example: "User not found"
  */
 router.post("/verify", verifyOtp);
 

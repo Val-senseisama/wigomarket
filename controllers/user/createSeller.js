@@ -114,10 +114,10 @@ const createSeller = asyncHandler(async (req, res) => {
         metadata: { role: newUser.role },
       });
 
-      res.json({
+      res.status(201).json({
         success: true,
         message:
-          "Seller account created successfully. Please check your email for verification code.",
+          "Seller account created successfully. Please check your email for your verification code.",
         data: {
           user: {
             _id: createUser._id,
@@ -125,10 +125,11 @@ const createSeller = asyncHandler(async (req, res) => {
             mobile: createUser.mobile,
             fullName: createUser.fullName,
             role: createUser.role,
+            activeRole: createUser.activeRole,
             status: createUser.status,
             gender: createUser.gender,
           },
-          verificationCode: code, // For testing purposes
+          verificationCode: code, // For testing purposes — remove in production
         },
       });
     } catch (error) {

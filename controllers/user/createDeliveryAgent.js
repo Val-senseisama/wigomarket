@@ -149,10 +149,10 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
         metadata: { role: newUser.role },
       });
 
-      res.json({
+      res.status(201).json({
         success: true,
         message:
-          "Delivery agent account created successfully. Please check your email for verification code.",
+          "Delivery agent account created successfully. Please check your email for your verification code.",
         data: {
           user: {
             _id: createUser._id,
@@ -160,12 +160,13 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
             mobile: createUser.mobile,
             fullName: createUser.fullName,
             role: createUser.role,
+            activeRole: createUser.activeRole,
             gender: createUser.gender,
             status: createUser.status,
             nextOfKin: createUser.nextOfKin,
             modeOfTransport: createUser.modeOfTransport,
           },
-          verificationCode: code, // For testing purposes
+          verificationCode: code, // For testing purposes — remove in production
         },
       });
     } else {

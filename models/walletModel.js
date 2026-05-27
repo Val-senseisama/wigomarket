@@ -63,17 +63,40 @@ const walletSchema = new mongoose.Schema(
         },
       },
     },
-    // Bank account for withdrawals
-    bankAccount: {
-      accountName: String,
-      accountNumber: String,
-      bankCode: String,
-      bankName: String,
-      isVerified: {
-        type: Boolean,
-        default: false,
+    // Bank accounts for withdrawals (up to 3)
+    bankAccounts: {
+      type: [
+        {
+          accountName: { type: String, required: true },
+          accountNumber: { type: String, required: true },
+          bankName: { type: String, required: true },
+          // bankCode is stored internally for Flutterwave payouts.
+          // The mobile bank picker returns it along with bankName — users
+          // never type it manually, so it does not appear as a UI field.
+          bankCode: { type: String },
+          phoneNumber: { type: String, required: true },
+          isDefault: { type: Boolean, default: false },
+          isVerified: { type: Boolean, default: false },
+          verifiedAt: Date,
+        },
+      ],
+      validate: {
+        validator: function (accounts) {
+          return accounts.length <= 3;
+        },
+        message: "A wallet can have a maximum of 3 bank accounts",
       },
-      verifiedAt: Date,
+      default: [],
+    },
+    // Withdrawal PIN (hashed)
+    withdrawalPin: {
+      hash: { type: String, select: false },
+      createdAt: Date,
+      updatedAt: Date,
+      attempts: {
+        count: { type: Number, default: 0 },
+        lockedUntil: Date,
+      },
     },
     // Wallet metadata
     metadata: {
@@ -106,6 +129,14 @@ walletSchema.index({ user: 1, status: 1 });
 walletSchema.index({ balance: -1 });
 walletSchema.index({ "withdrawalStats.dailyWithdrawn.date": 1 });
 walletSchema.index({ "withdrawalStats.monthlyWithdrawn.month": 1 });
+
+// Virtual: returns the default bank account (or first if none marked default)
+walletSchema.virtual("defaultBankAccount").get(function () {
+  if (!this.bankAccounts || this.bankAccounts.length === 0) return null;
+  return (
+    this.bankAccounts.find((a) => a.isDefault) || this.bankAccounts[0]
+  );
+});
 
 // ── Schema-level validation ──────────────────────────────────────────────────
 
@@ -146,6 +177,9 @@ walletSchema.virtual("canWithdraw").get(function () {
   const currentMonth = now.toISOString().slice(0, 7);
 
   if (this.status !== "active") return false;
+
+  // Must have at least one bank account
+  if (!this.bankAccounts || this.bankAccounts.length === 0) return false;
 
   const dailyReset = this.withdrawalStats.dailyWithdrawn.date
     ? this.withdrawalStats.dailyWithdrawn.date.toISOString().slice(0, 10)

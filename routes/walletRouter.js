@@ -3,11 +3,15 @@ const router = express.Router();
 const {
   createWallet,
   getWallet,
-  updateBankAccount,
+  addBankAccount,
+  setDefaultBankAccount,
+  deleteBankAccount,
   requestWithdrawal,
   getWithdrawalHistory,
   getWalletStats,
   getEarningsOverview,
+  createWithdrawalPin,
+  changeWithdrawalPin,
 } = require("../controllers/wallet");
 const {
   getTransactionHistory,
@@ -49,19 +53,27 @@ const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
  *           type: string
  *           enum: [active, suspended, frozen, closed]
  *           description: Wallet status
- *         bankAccount:
- *           type: object
- *           properties:
- *             accountName:
- *               type: string
- *             accountNumber:
- *               type: string
- *             bankCode:
- *               type: string
- *             bankName:
- *               type: string
- *             isVerified:
- *               type: boolean
+ *         bankAccounts:
+ *           type: array
+ *           maxItems: 3
+ *           description: Up to 3 saved bank accounts; one is marked as default
+ *           items:
+ *             type: object
+ *             properties:
+ *               _id:
+ *                 type: string
+ *               accountName:
+ *                 type: string
+ *               accountNumber:
+ *                 type: string
+ *               bankName:
+ *                 type: string
+ *               phoneNumber:
+ *                 type: string
+ *               isDefault:
+ *                 type: boolean
+ *               isVerified:
+ *                 type: boolean
  *         limits:
  *           type: object
  *           properties:
@@ -188,8 +200,8 @@ const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
  *       required:
  *         - accountName
  *         - accountNumber
- *         - bankCode
  *         - bankName
+ *         - phoneNumber
  *       properties:
  *         accountName:
  *           type: string
@@ -197,12 +209,43 @@ const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
  *         accountNumber:
  *           type: string
  *           description: Bank account number
- *         bankCode:
- *           type: string
- *           description: Bank code
  *         bankName:
  *           type: string
  *           description: Bank name
+ *         phoneNumber:
+ *           type: string
+ *           description: Phone number linked to the bank account
+ *
+ *     WalletCreateRequest:
+ *       type: object
+ *       required:
+ *         - accountName
+ *         - accountNumber
+ *         - bankName
+ *         - phoneNumber
+ *       properties:
+ *         accountName:
+ *           type: string
+ *           description: Account holder name
+ *         accountNumber:
+ *           type: string
+ *           description: Bank account number
+ *         bankName:
+ *           type: string
+ *           description: Bank name
+ *         phoneNumber:
+ *           type: string
+ *           description: Phone number linked to the bank account
+ *
+ *     WithdrawalPin:
+ *       type: object
+ *       required:
+ *         - pin
+ *       properties:
+ *         pin:
+ *           type: string
+ *           pattern: '^\d{4,6}$'
+ *           description: 4 to 6 digit numeric withdrawal PIN
  *     
  *     WithdrawalRequest:
  *       type: object
@@ -294,11 +337,22 @@ const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
  * /api/wallet/create:
  *   post:
  *     tags: [Wallet]
- *     summary: Create a new wallet for the authenticated user
+ *     summary: Create a new wallet with an initial bank account (wallet section flow)
+ *     description: >
+ *       Creates a wallet for the authenticated user and stores the provided bank
+ *       account as the default. This endpoint is used when the user manually sets
+ *       up a wallet from the wallet section. During registration, wallets are
+ *       created automatically without bank details.
  *     security:
  *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/WalletCreateRequest'
  *     responses:
- *       200:
+ *       201:
  *         description: Wallet created successfully
  *         content:
  *           application/json:
@@ -312,7 +366,7 @@ const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
  *                 data:
  *                   $ref: '#/components/schemas/Wallet'
  *       400:
- *         description: User already has a wallet
+ *         description: User already has a wallet or missing fields
  *       401:
  *         description: Unauthorized
  */
@@ -348,9 +402,14 @@ router.get("/", authMiddleware, getWallet);
 /**
  * @swagger
  * /api/wallet/bank-account:
- *   put:
+ *   post:
  *     tags: [Wallet]
- *     summary: Update bank account information for withdrawals
+ *     summary: Add a bank account to the wallet (max 3)
+ *     description: >
+ *       Adds a new bank account to the user's wallet. A wallet can hold up to 3
+ *       bank accounts. The first account added is automatically set as the default.
+ *       Use PUT /api/wallet/bank-account/{accountId}/default to change which account
+ *       is the default at any time.
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -361,7 +420,7 @@ router.get("/", authMiddleware, getWallet);
  *             $ref: '#/components/schemas/BankAccount'
  *     responses:
  *       200:
- *         description: Bank account updated successfully
+ *         description: Bank account added successfully
  *         content:
  *           application/json:
  *             schema:
@@ -372,22 +431,105 @@ router.get("/", authMiddleware, getWallet);
  *                 message:
  *                   type: string
  *                 data:
- *                   $ref: '#/components/schemas/Wallet'
+ *                   type: object
+ *                   properties:
+ *                     bankAccounts:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/BankAccount'
  *       400:
- *         description: Invalid bank account data
+ *         description: Max 3 accounts reached, duplicate account number, or missing fields
  *       404:
  *         description: Wallet not found
  *       401:
  *         description: Unauthorized
  */
-router.put("/bank-account", authMiddleware, updateBankAccount);
+router.post("/bank-account", authMiddleware, addBankAccount);
 
 /**
  * @swagger
- * /api/wallet/withdraw:
+ * /api/wallet/bank-account/{accountId}/default:
+ *   put:
+ *     tags: [Wallet]
+ *     summary: Set a bank account as the default for withdrawals
+ *     description: >
+ *       Marks the specified bank account as the default. All withdrawals are
+ *       processed to the default account. Any previously set default is unset.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: accountId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The _id of the bank account subdocument
+ *     responses:
+ *       200:
+ *         description: Default bank account updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     bankAccounts:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/BankAccount'
+ *       404:
+ *         description: Wallet or bank account not found
+ *       401:
+ *         description: Unauthorized
+ */
+router.put("/bank-account/:accountId/default", authMiddleware, setDefaultBankAccount);
+
+/**
+ * @swagger
+ * /api/wallet/bank-account/{accountId}:
+ *   delete:
+ *     tags: [Wallet]
+ *     summary: Remove a bank account from the wallet
+ *     description: >
+ *       Removes a bank account. The default account cannot be deleted while other
+ *       accounts exist — set another as default first. The last remaining account
+ *       cannot be deleted.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: accountId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The _id of the bank account subdocument
+ *     responses:
+ *       200:
+ *         description: Bank account removed successfully
+ *       400:
+ *         description: Cannot remove default account or only remaining account
+ *       404:
+ *         description: Wallet or bank account not found
+ *       401:
+ *         description: Unauthorized
+ */
+router.delete("/bank-account/:accountId", authMiddleware, deleteBankAccount);
+
+/**
+ * @swagger
+ * /api/wallet/pin:
  *   post:
  *     tags: [Wallet]
- *     summary: Request withdrawal from wallet to bank account
+ *     summary: Create a withdrawal PIN
+ *     description: >
+ *       Sets a 4–6 digit numeric PIN required to authorise withdrawals.
+ *       Can only be called once — use PUT /api/wallet/pin to change an existing PIN.
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -395,7 +537,77 @@ router.put("/bank-account", authMiddleware, updateBankAccount);
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/WithdrawalRequest'
+ *             $ref: '#/components/schemas/WithdrawalPin'
+ *     responses:
+ *       201:
+ *         description: Withdrawal PIN created successfully
+ *       400:
+ *         description: PIN already exists or invalid format
+ *       401:
+ *         description: Unauthorized
+ *   put:
+ *     tags: [Wallet]
+ *     summary: Change withdrawal PIN
+ *     description: Changes an existing withdrawal PIN. Requires the current PIN for verification.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - currentPin
+ *               - newPin
+ *             properties:
+ *               currentPin:
+ *                 type: string
+ *                 description: Current 4–6 digit PIN
+ *               newPin:
+ *                 type: string
+ *                 description: New 4–6 digit PIN
+ *     responses:
+ *       200:
+ *         description: PIN changed successfully
+ *       400:
+ *         description: No PIN set, invalid format, or new PIN same as current
+ *       401:
+ *         description: Incorrect current PIN or unauthorized
+ *       429:
+ *         description: Too many failed attempts — account locked temporarily
+ */
+router.post("/pin", authMiddleware, createWithdrawalPin);
+router.put("/pin", authMiddleware, changeWithdrawalPin);
+
+/**
+ * @swagger
+ * /api/wallet/withdraw:
+ *   post:
+ *     tags: [Wallet]
+ *     summary: Request withdrawal from wallet to default bank account
+ *     description: >
+ *       Initiates a withdrawal to the default bank account. Requires a valid
+ *       withdrawal PIN. A 1% fee (min ₦100) is applied.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - amount
+ *               - pin
+ *             properties:
+ *               amount:
+ *                 type: number
+ *                 minimum: 1
+ *                 description: Withdrawal amount in NGN
+ *               pin:
+ *                 type: string
+ *                 description: 4–6 digit withdrawal PIN
  *     responses:
  *       200:
  *         description: Withdrawal request submitted successfully
@@ -1046,7 +1258,7 @@ router.get("/withdrawal-receipt/:transactionId", authMiddleware, async (req, res
         amount: transaction.totalAmount,
         fee: transaction.entries.find(e => e.account === 'bank_transfer_fees')?.debit || 0,
         totalDeduction: transaction.totalAmount + (transaction.entries.find(e => e.account === 'bank_transfer_fees')?.debit || 0),
-        bankAccount: wallet.bankAccount,
+        bankAccount: wallet.defaultBankAccount,
         status: transaction.status,
         processedAt: transaction.audit.approvedAt || transaction.createdAt
       },

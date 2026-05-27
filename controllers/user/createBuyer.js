@@ -108,14 +108,20 @@ const createBuyer = asyncHandler(async (req, res) => {
         metadata: { role: newUser.role },
       });
 
-      res.json({
-        message:
-          "User created successfully. Please check your email for verification code.",
+      res.status(201).json({
         success: true,
-        user: {
-          email: newUser.email,
-          mobile: newUser.mobile,
-          role: newUser.role,
+        message:
+          "Account created successfully. Please check your email for your verification code.",
+        data: {
+          user: {
+            _id: createUser._id,
+            email: createUser.email,
+            mobile: createUser.mobile,
+            fullName: createUser.fullName,
+            role: createUser.role,
+            activeRole: createUser.activeRole,
+            status: createUser.status,
+          },
         },
       });
     } catch (error) {

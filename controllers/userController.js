@@ -501,8 +501,8 @@ const loginUser = asyncHandler(async (req, res) => {
       resource: { type: "user", id: findUser._id },
     });
 
-    const wallet = await Wallet.findOne({ user: findUser._id }).select("bankAccount");
-    const hasPaymentSetup = !!(wallet && wallet.bankAccount && wallet.bankAccount.accountNumber);
+    const wallet = await Wallet.findOne({ user: findUser._id }).select("bankAccounts");
+    const hasPaymentSetup = !!(wallet && wallet.bankAccounts && wallet.bankAccounts.length > 0);
 
     res.json({
       _id: findUser?._id,
@@ -1419,8 +1419,8 @@ const getCurrentUser = asyncHandler(async (req, res) => {
     // Populate related data based on user roles
     let populatedUser = { ...user.toObject() };
 
-    const wallet = await Wallet.findOne({ user: user._id }).select("bankAccount");
-    populatedUser.hasPaymentSetup = !!(wallet && wallet.bankAccount && wallet.bankAccount.accountNumber);
+    const wallet = await Wallet.findOne({ user: user._id }).select("bankAccounts");
+    populatedUser.hasPaymentSetup = !!(wallet && wallet.bankAccounts && wallet.bankAccounts.length > 0);
 
     // If user is a seller, populate store information
     if (user.role.includes("seller")) {

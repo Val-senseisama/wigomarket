@@ -55,9 +55,16 @@ const processWithdrawal = asyncHandler(async (req, res) => {
   let transferResponse;
   if (action === "approve") {
     const flw = getFlutterwaveInstance();
+    const defaultBank = wallet.defaultBankAccount;
+    if (!defaultBank) {
+      return res.status(400).json({
+        success: false,
+        message: "User wallet has no configured bank account",
+      });
+    }
     transferResponse = await flw.Transfer.initiate({
-      account_bank: wallet.bankAccount.bankCode,
-      account_number: wallet.bankAccount.accountNumber,
+      account_bank: defaultBank.bankCode,
+      account_number: defaultBank.accountNumber,
       amount: transaction.totalAmount,
       narration: `Withdrawal from WigoMarket wallet - ${transactionId}`,
       currency: "NGN",
