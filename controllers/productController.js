@@ -1,6 +1,8 @@
 const Product = require("../models/productModel");
+const ProductReview = require("../models/productReviewModel");
 const asyncHandler = require("express-async-handler");
 const slugify = require("slugify");
+const mongoose = require("mongoose");
 const Category = require("../models/categoryModel");
 const Order = require("../models/orderModel");
 const Cart = require("../models/cartModel");
@@ -160,52 +162,105 @@ const getProductCategories = asyncHandler(async (req, res) => {
  * @throws {Error} - Throws error if validation fails or creation fails
  */
 const createProduct = asyncHandler(async (req, res) => {
-  const { title, price, quantity, category, brand, description } = req.body;
+  const {
+    title, price, quantity, category, brand, description,
+    images, specifications, sizes, colors,
+  } = req.body;
+
   validateMongodbId(category);
-  // Validate input data
-  if (!Validate.string(title)) {
-    ThrowError("Invalid Title");
-  }
-  if (!Validate.integer(price) || price <= 0) {
-    ThrowError("Invalid Price");
-  }
-  if (!Validate.integer(quantity) || quantity < 0) {
-    ThrowError("Invalid Quantity");
+
+  if (!Validate.string(title))                     ThrowError("Invalid Title");
+  if (!Validate.integer(price) || price <= 0)      ThrowError("Invalid Price");
+  if (!Validate.integer(quantity) || quantity < 0) ThrowError("Invalid Quantity");
+  if (!Validate.string(brand))                     ThrowError("Invalid Brand");
+  if (!Validate.string(description))               ThrowError("Invalid Description");
+
+  // ── Images ──────────────────────────────────────────────────────────────
+  let validatedImages = [];
+  if (images !== undefined) {
+    if (!Array.isArray(images)) {
+      return res.status(400).json({ success: false, message: "images must be an array of Cloudinary URLs" });
+    }
+    if (images.length > 5) {
+      return res.status(400).json({ success: false, message: "A maximum of 5 product images are allowed" });
+    }
+    const bad = images.filter((u) => !Validate.cloudinaryUrl(u));
+    if (bad.length > 0) {
+      return res.status(400).json({ success: false, message: "All images must be valid Cloudinary URLs. Upload via POST /api/upload/signature (folder: products).", invalidUrls: bad });
+    }
+    validatedImages = images;
   }
 
-  if (!Validate.string(brand)) {
-    ThrowError("Invalid Brand");
+  // ── Specifications ───────────────────────────────────────────────────────
+  let validatedSpecs = [];
+  if (specifications !== undefined) {
+    if (!Array.isArray(specifications)) {
+      return res.status(400).json({ success: false, message: "specifications must be an array of { key, value } objects" });
+    }
+    for (const s of specifications) {
+      if (!s?.key || !s?.value || typeof s.key !== "string" || typeof s.value !== "string") {
+        return res.status(400).json({ success: false, message: "Each specification must have a string key and a string value" });
+      }
+    }
+    validatedSpecs = specifications;
   }
-  if (!Validate.string(description)) {
-    ThrowError("Invalid Description");
+
+  // ── Sizes ────────────────────────────────────────────────────────────────
+  let validatedSizes = [];
+  if (sizes !== undefined) {
+    if (!Array.isArray(sizes) || !sizes.every((s) => typeof s === "string")) {
+      return res.status(400).json({ success: false, message: "sizes must be an array of strings" });
+    }
+    validatedSizes = sizes;
+  }
+
+  // ── Colors ───────────────────────────────────────────────────────────────
+  let validatedColors = [];
+  if (colors !== undefined) {
+    if (!Array.isArray(colors)) {
+      return res.status(400).json({ success: false, message: "colors must be an array of { name, hex? } objects" });
+    }
+    for (const c of colors) {
+      if (!c?.name || typeof c.name !== "string") {
+        return res.status(400).json({ success: false, message: "Each color must have a string name field" });
+      }
+    }
+    validatedColors = colors;
   }
 
   const sellersPrice = price;
-  const commission = (sellersPrice * 2) / 100;
-  const listedPrice = sellersPrice + commission;
+  const commission   = (sellersPrice * 2) / 100;
+  const listedPrice  = sellersPrice + commission;
 
   try {
     let newProduct = await Product.create({
-      title: title,
-      slug: slugify(title),
-      price: sellersPrice,
-      listedPrice: listedPrice,
-      quantity: quantity,
-      category: category,
-      brand: brand,
-      description: description,
-      store: req.store,
+      title,
+      slug:           slugify(title),
+      price:          sellersPrice,
+      listedPrice,
+      quantity,
+      category,
+      brand,
+      description,
+      images:         validatedImages,
+      specifications: validatedSpecs,
+      sizes:          validatedSizes,
+      colors:         validatedColors,
+      store:          req.store,
     });
-    newProduct = await newProduct.populate("store", "name image");
+    newProduct = await newProduct.populate([
+      { path: "store",    select: "name image" },
+      { path: "category", select: "name" },
+    ]);
 
     audit.log({
       action: "product.created",
       actor: audit.actor(req),
       resource: { type: "product", id: newProduct._id, displayName: title },
-      changes: { after: { title, price, quantity, category, brand } },
+      changes: { after: { title, price: sellersPrice, listedPrice, quantity, category, brand, imageCount: validatedImages.length } },
     });
 
-    res.json(newProduct);
+    res.status(201).json({ success: true, data: newProduct });
   } catch (error) {
     throw new Error(error);
   }
@@ -229,56 +284,56 @@ const createProduct = asyncHandler(async (req, res) => {
  */
 const updateProduct = asyncHandler(async (req, res) => {
   const { id } = req.params;
+  validateMongodbId(id);
 
-  // Validate input data
-  if (req.body.title && !Validate.string(req.body.title)) {
-    ThrowError("Invalid Title");
-  }
-  if (
-    req.body.price &&
-    (!Validate.float(req.body.price) || req.body.price <= 0)
-  ) {
-    ThrowError("Invalid Price");
-  }
-  if (
-    req.body.quantity &&
-    (!Validate.integer(req.body.quantity) || req.body.quantity < 0)
-  ) {
-    ThrowError("Invalid Quantity");
-  }
-  if (req.body.category && !Validate.string(req.body.category)) {
-    ThrowError("Invalid Category");
-  }
-  if (req.body.brand && !Validate.string(req.body.brand)) {
-    ThrowError("Invalid Brand");
-  }
-  if (req.body.description && !Validate.string(req.body.description)) {
-    ThrowError("Invalid Description");
+  if (req.body.title      && !Validate.string(req.body.title))       ThrowError("Invalid Title");
+  if (req.body.brand      && !Validate.string(req.body.brand))       ThrowError("Invalid Brand");
+  if (req.body.description && !Validate.string(req.body.description)) ThrowError("Invalid Description");
+  if (req.body.price    !== undefined && (!Validate.float(req.body.price)    || req.body.price    <= 0)) ThrowError("Invalid Price");
+  if (req.body.quantity !== undefined && (!Validate.integer(req.body.quantity) || req.body.quantity < 0)) ThrowError("Invalid Quantity");
+
+  // Whitelist — callers cannot overwrite internal fields (sold, views, store, rating, etc.)
+  const ALLOWED = [
+    "title", "price", "quantity", "category", "brand", "description",
+    "images", "tags", "isFeatured",
+    "specifications", "sizes", "colors",
+  ];
+  const updateData = {};
+  for (const field of ALLOWED) {
+    if (req.body[field] !== undefined) updateData[field] = req.body[field];
   }
 
-  // Update slug if title is provided
-  if (req.body.title) {
-    req.body.slug = slugify(req.body.title);
+  if (Object.keys(updateData).length === 0) {
+    return res.status(400).json({ success: false, message: "No valid fields to update" });
+  }
+
+  // Recompute listedPrice when price changes
+  if (updateData.price !== undefined) {
+    updateData.listedPrice = updateData.price + (updateData.price * 2) / 100;
+  }
+
+  if (updateData.title) {
+    updateData.slug = slugify(updateData.title);
   }
 
   try {
-    const updatedProduct = await Product.findByIdAndUpdate(id, req.body, {
+    const updatedProduct = await Product.findByIdAndUpdate(id, updateData, {
       new: true,
-      runValidators: true, // Ensure that the update runs validation
+      runValidators: true,
     });
 
     if (!updatedProduct) {
-      return res.status(404).json({ message: "Product not found" });
+      return res.status(404).json({ success: false, message: "Product not found" });
     }
 
     audit.log({
       action: "product.updated",
       actor: audit.actor(req),
-      resource: { type: "product", id: id, displayName: updatedProduct.title },
-      changes: { before: {}, after: req.body }, // Simplified
+      resource: { type: "product", id, displayName: updatedProduct.title },
+      changes: { before: { fieldsChanged: Object.keys(updateData) }, after: updateData },
     });
 
-    res.json(updatedProduct);
+    res.json({ success: true, data: updatedProduct });
   } catch (error) {
     throw new Error(error);
   }
@@ -320,16 +375,23 @@ const deleteProduct = asyncHandler(async (req, res) => {
  * @throws {Error} - Throws error if product not found or retrieval fails
  */
 const getAProduct = asyncHandler(async (req, res) => {
-  const { id } = req.body;
-  try {
-    const findProduct = await Product.findById(id).populate(
-      "store",
-      "name image mobile address",
-    );
-    res.json(findProduct);
-  } catch (error) {
-    throw new Error(error);
+  const { id } = req.params;
+  validateMongodbId(id);
+
+  const product = await Product.findById(id)
+    .populate("store",    "name image mobile address")
+    .populate("category", "name")
+    .select("-__v")
+    .lean();
+
+  if (!product) {
+    return res.status(404).json({ success: false, message: "Product not found" });
   }
+
+  // Increment view count (fire-and-forget, non-blocking)
+  Product.findByIdAndUpdate(id, { $inc: { views: 1 } }).catch(() => {});
+
+  res.json({ success: true, data: product });
 });
 /**
  * @function getAllProducts
@@ -840,6 +902,148 @@ const trackProductView = asyncHandler(async (req, res) => {
   }
 });
 
+// ── Product Reviews ────────────────────────────────────────────────────────
+
+const REVIEW_TTL = 120; // 2 minutes — short so new reviews surface quickly
+
+const SORT_OPTIONS = {
+  recent:   { createdAt: -1 },
+  helpful:  { helpful: -1, createdAt: -1 },
+  highest:  { rating: -1,  createdAt: -1 },
+  lowest:   { rating: 1,   createdAt: -1 },
+};
+
+/**
+ * @function getProductReviews
+ * @description Paginated reviews for a product with per-star breakdown.
+ * @route GET /api/product/:id/reviews
+ * @query {number} [page=1]
+ * @query {number} [limit=10]  max 20
+ * @query {string} [sort=recent]  recent | helpful | highest | lowest
+ */
+const getProductReviews = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  validateMongodbId(id);
+
+  const page     = Math.max(1, parseInt(req.query.page)  || 1);
+  const limit    = Math.min(20, parseInt(req.query.limit) || 10);
+  const sortKey  = SORT_OPTIONS[req.query.sort] ? req.query.sort : "recent";
+  const sortOpt  = SORT_OPTIONS[sortKey];
+  const skip     = (page - 1) * limit;
+
+  const cacheKey = `product:reviews:${id}:${page}:${limit}:${sortKey}`;
+
+  try {
+    const cached = await redisClient.get(cacheKey);
+    if (cached) return res.json(JSON.parse(cached));
+  } catch (_) {}
+
+  const productObjId = new mongoose.Types.ObjectId(id);
+
+  const [reviews, total, breakdownRaw] = await Promise.all([
+    ProductReview.find({ product: id, status: "active" })
+      .sort(sortOpt)
+      .skip(skip)
+      .limit(limit)
+      .populate("user", "firstname lastname image")
+      .select("-__v -order")
+      .lean(),
+
+    ProductReview.countDocuments({ product: id, status: "active" }),
+
+    // Star distribution: count of 1★ … 5★
+    ProductReview.aggregate([
+      { $match: { product: productObjId, status: "active" } },
+      { $group: { _id: "$rating", count: { $sum: 1 } } },
+    ]),
+  ]);
+
+  const breakdown = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  for (const b of breakdownRaw) breakdown[b._id] = b.count;
+
+  const totalPages = Math.ceil(total / limit);
+  const payload = {
+    success: true,
+    data: {
+      reviews,
+      breakdown,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalResults: total,
+        hasNext:  page < totalPages,
+        hasPrev:  page > 1,
+      },
+    },
+  };
+
+  try {
+    await redisClient.setex(cacheKey, REVIEW_TTL, JSON.stringify(payload));
+  } catch (_) {}
+
+  res.json(payload);
+});
+
+/**
+ * @function createProductReview
+ * @description Create or update the authenticated user's review for a product.
+ *              Requires a verified purchase (a Delivered order containing this product).
+ * @route POST /api/product/:id/reviews
+ * @body  {number} rating   1–5 (required)
+ * @body  {string} [comment]  max 1000 chars
+ */
+const createProductReview = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  validateMongodbId(id);
+
+  const { rating, comment } = req.body;
+  const userId = req.user._id;
+
+  if (!rating || !Number.isInteger(Number(rating)) || rating < 1 || rating > 5) {
+    return res.status(400).json({ success: false, message: "rating must be an integer between 1 and 5" });
+  }
+  if (comment !== undefined && typeof comment !== "string") {
+    return res.status(400).json({ success: false, message: "comment must be a string" });
+  }
+
+  // ── Purchase verification: must have a Delivered order with this product ──
+  const verifyingOrder = await Order.findOne({
+    orderedBy:   userId,
+    orderStatus: "Delivered",
+    "products.product": new mongoose.Types.ObjectId(id),
+  }).select("_id").lean();
+
+  if (!verifyingOrder) {
+    return res.status(403).json({
+      success: false,
+      message: "You can only review products you have purchased and received",
+    });
+  }
+
+  // ── Upsert: one review per user per product ────────────────────────────
+  const review = await ProductReview.findOneAndUpdate(
+    { product: id, user: userId },
+    {
+      order:               verifyingOrder._id,
+      rating:              Number(rating),
+      comment:             comment?.trim() || "",
+      isVerifiedPurchase:  true,
+      status:              "active",
+    },
+    { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true },
+  );
+
+  // Invalidate page-1 cache for all sort orders (most common landing)
+  const sorts = Object.keys(SORT_OPTIONS);
+  try {
+    await Promise.all(
+      sorts.map((s) => redisClient.del(`product:reviews:${id}:1:10:${s}`)),
+    );
+  } catch (_) {}
+
+  res.status(201).json({ success: true, data: review });
+});
+
 module.exports = {
   createProduct,
   getAProduct,
@@ -856,4 +1060,6 @@ module.exports = {
   getTrendingProducts,
   getCategorySuggestions,
   trackProductView,
+  getProductReviews,
+  createProductReview,
 };

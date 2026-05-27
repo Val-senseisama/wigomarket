@@ -1,6 +1,5 @@
 const express = require("express");
 const {
-  search,
   getAStore,
   getAllStores,
   createStore,
@@ -375,76 +374,5 @@ router.get("/all", getAllStores);
  *         description: Store not found or retrieval fails
  */
 router.get("/:id", getAStore);
-/**
- * @swagger
- * /:
- *   get:
- *     summary: Search for products and stores
- *     description: Search for products and stores
- *     tags:
- *       - Stores
- *     parameters:
- *       - in: query
- *         name: search
- *         schema:
- *           type: string
- *         description: Search keyword
- *     responses:
- *       200:
- *         description: Search results containing products and stores
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 products:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       title:
- *                         type: string
- *                       quantity:
- *                         type: number
- *                       listedPrice:
- *                         type: number
- *                       image:
- *                         type: string
- *                       description:
- *                         type: string
- *                       brand:
- *                         type: string
- *                       storeDetails:
- *                         type: object
- *                         properties:
- *                           name:
- *                             type: string
- *                           address:
- *                             type: string
- *                           mobile:
- *                             type: string
- *                           image:
- *                             type: string
- *                 stores:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       _id:
- *                         type: string
- *                       name:
- *                         type: string
- *                       image:
- *                         type: string
- *                       email:
- *                         type: string
- *                       mobile:
- *                         type: string
- *                       address:
- *                         type: string
- *       400:
- *         description: Search fails
- */
-router.get("/", search);
 
 module.exports = router;

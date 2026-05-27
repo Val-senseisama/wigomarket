@@ -15,6 +15,8 @@ const {
   getTrendingProducts,
   getCategorySuggestions,
   trackProductView,
+  getProductReviews,
+  createProductReview,
 } = require("../controllers/productController");
 const { authMiddleware, isSeller, isAdmin } = require("../middleware/authMiddleware");
 const router = express.Router();
@@ -165,6 +167,30 @@ router.put("/update-category", authMiddleware, isAdmin, updateProductCategory)
  *                   type: string
  *                   format: uri
  *                   example: "https://res.cloudinary.com/my-cloud/image/upload/v1234/products/speaker.jpg"
+ *               specifications:
+ *                 type: array
+ *                 description: Structured product attributes shown on the detail page.
+ *                 items:
+ *                   type: object
+ *                   required: [key, value]
+ *                   properties:
+ *                     key:   { type: string, example: "RAM" }
+ *                     value: { type: string, example: "8 GB" }
+ *               sizes:
+ *                 type: array
+ *                 description: Available size options (clothing, shoes, etc.)
+ *                 items:
+ *                   type: string
+ *                   example: "M"
+ *               colors:
+ *                 type: array
+ *                 description: Available colour variants.
+ *                 items:
+ *                   type: object
+ *                   required: [name]
+ *                   properties:
+ *                     name: { type: string, example: "Midnight Black" }
+ *                     hex:  { type: string, example: "#1a1a1a" }
  *     responses:
  *       201:
  *         description: Product created successfully
@@ -173,96 +199,33 @@ router.put("/update-category", authMiddleware, isAdmin, updateProductCategory)
  *             schema:
  *               type: object
  *               properties:
- *                 _id:
- *                   type: string
- *                 title:
- *                   type: string
- *                 price:
- *                   type: number
- *                   description: Seller's price
- *                 listedPrice:
- *                   type: number
- *                   description: Price shown to buyers (price + 2% commission)
- *                 quantity:
- *                   type: number
- *                 category:
- *                   type: string
- *                 brand:
- *                   type: string
- *                 description:
- *                   type: string
- *                 images:
- *                   type: array
- *                   items:
- *                     type: string
- *                 store:
+ *                 success: { type: boolean, example: true }
+ *                 data:
  *                   type: object
  *                   properties:
- *                     name:
- *                       type: string
- *                     image:
- *                       type: string
+ *                     _id: { type: string }
+ *                     title: { type: string }
+ *                     price: { type: number, description: "Seller's price" }
+ *                     listedPrice: { type: number, description: "Price + 2% commission" }
+ *                     quantity: { type: number }
+ *                     brand: { type: string }
+ *                     description: { type: string }
+ *                     images: { type: array, items: { type: string } }
+ *                     specifications: { type: array }
+ *                     sizes: { type: array, items: { type: string } }
+ *                     colors: { type: array }
+ *                     rating: { type: object, properties: { average: { type: number }, count: { type: integer } } }
+ *                     store: { type: object, properties: { name: { type: string }, image: { type: string } } }
+ *                     category: { type: object, properties: { name: { type: string } } }
  *       400:
  *         description: Validation error or creation failed
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/Error' }
  *       401:
  *         description: Unauthorised
  */
 router.post("/create-product", authMiddleware, isSeller, createProduct);
-/**
- * @swagger
- * /api/product/get-product:
- *   get:
- *     summary: Get a single product by ID
- *     description: Get a single product by ID
- *     tags:
- *       - Products
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
-*           schema:
-*             type: object
-*             required:
-*               - id
-*             properties:
-*               id:
-*                 type: string
-*                 description: Product ID
-*     responses:
-*       200:
-*         description: Product information with store details
-*         content:
-*           application/json:
-*             schema:
-*               type: object
-*               properties:
-*                 _id:
-*                   type: string
-*                 title:
-*                   type: string
-*                 price:
-*                   type: number
-*                 listedPrice:
-*                   type: number
-*                 quantity:
-*                   type: number
-*                 category:
-*                   type: string
-*                 brand:
-*                   type: string
-*                 description:
-*                   type: string
-*                 store:
-*                   type: object
-*                   properties:
-*                     name:
-*                       type: string
-*                     image:
-*                       type: string
-*       400:
-*         description: Validation fails or product not found
-*/
-router.get("/get-product", getAProduct);
 /**
  * @swagger
  * /api/product/update/:id:
@@ -817,5 +780,254 @@ router.get("/products/suggestions/category/:categoryId", getCategorySuggestions)
  *                   type: string
  */
 router.post("/products/track-view/:id", trackProductView);
+
+// ── Per-product routes — MUST be after all named routes to avoid :id ──────
+// capturing named paths like /get-products, /categories, etc.
+
+/**
+ * @swagger
+ * /api/product/{id}/reviews:
+ *   get:
+ *     summary: Get paginated reviews for a product
+ *     description: |
+ *       Returns reviews sorted by the chosen strategy, a per-star breakdown
+ *       (count of 1★ – 5★), and pagination metadata.
+ *       Results are cached for 2 minutes so fresh reviews appear quickly.
+ *     tags: [Products]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: Product ID
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 10, maximum: 20 }
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *           enum: [recent, helpful, highest, lowest]
+ *           default: recent
+ *         description: |
+ *           `recent` — newest first
+ *           `helpful` — most upvoted first
+ *           `highest` — 5★ first
+ *           `lowest`  — 1★ first
+ *     responses:
+ *       200:
+ *         description: Reviews with breakdown and pagination
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     reviews:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           _id: { type: string }
+ *                           rating: { type: integer, minimum: 1, maximum: 5 }
+ *                           comment: { type: string }
+ *                           isVerifiedPurchase: { type: boolean }
+ *                           helpful: { type: integer }
+ *                           createdAt: { type: string, format: date-time }
+ *                           user:
+ *                             type: object
+ *                             properties:
+ *                               _id: { type: string }
+ *                               firstname: { type: string }
+ *                               lastname: { type: string }
+ *                               image: { type: string }
+ *                     breakdown:
+ *                       type: object
+ *                       description: Count of reviews per star rating
+ *                       properties:
+ *                         "1": { type: integer }
+ *                         "2": { type: integer }
+ *                         "3": { type: integer }
+ *                         "4": { type: integer }
+ *                         "5": { type: integer }
+ *                     pagination:
+ *                       type: object
+ *                       properties:
+ *                         currentPage: { type: integer }
+ *                         totalPages: { type: integer }
+ *                         totalResults: { type: integer }
+ *                         hasNext: { type: boolean }
+ *                         hasPrev: { type: boolean }
+ *       404:
+ *         description: Product not found
+ */
+router.get("/:id/reviews", getProductReviews);
+
+/**
+ * @swagger
+ * /api/product/{id}/reviews:
+ *   post:
+ *     summary: Create or update your review for a product
+ *     description: |
+ *       Requires authentication. The user must have a **Delivered** order
+ *       containing this product — unverified reviews are rejected with `403`.
+ *
+ *       One review per user per product. Calling this again updates the
+ *       existing review (rating + comment are replaced).
+ *     tags: [Products]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: Product ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [rating]
+ *             properties:
+ *               rating:
+ *                 type: integer
+ *                 minimum: 1
+ *                 maximum: 5
+ *                 example: 4
+ *               comment:
+ *                 type: string
+ *                 maxLength: 1000
+ *                 example: "Great quality, fast delivery!"
+ *     responses:
+ *       201:
+ *         description: Review created or updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     _id: { type: string }
+ *                     rating: { type: integer }
+ *                     comment: { type: string }
+ *                     isVerifiedPurchase: { type: boolean, example: true }
+ *                     helpful: { type: integer }
+ *                     createdAt: { type: string, format: date-time }
+ *       400:
+ *         description: Invalid rating value
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/Error' }
+ *       403:
+ *         description: No verified purchase found for this product
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/Error' }
+ */
+router.post("/:id/reviews", authMiddleware, createProductReview);
+
+/**
+ * @swagger
+ * /api/product/{id}:
+ *   get:
+ *     summary: Get full product detail
+ *     description: |
+ *       Returns the complete product record including:
+ *       - Core fields: title, price, listedPrice, brand, description, quantity, images
+ *       - Structured data: specifications (key/value pairs), available sizes, available colours
+ *       - Ratings summary: average and review count (see `GET /{id}/reviews` for the full list)
+ *       - Store details: name, image, address
+ *       - Category name
+ *       - Social proof: sold count, view count
+ *
+ *       Also increments the product's view counter (fire-and-forget).
+ *     tags: [Products]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: Product MongoDB ObjectId
+ *         example: "664abc123def456789012345"
+ *     responses:
+ *       200:
+ *         description: Full product detail
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     _id: { type: string }
+ *                     title: { type: string }
+ *                     slug: { type: string }
+ *                     description: { type: string }
+ *                     price: { type: number, description: "Seller's base price in NGN" }
+ *                     listedPrice: { type: number, description: "Price shown to buyers (price + 2% commission)" }
+ *                     brand: { type: string }
+ *                     quantity: { type: integer }
+ *                     sold: { type: integer }
+ *                     views: { type: integer }
+ *                     images: { type: array, items: { type: string } }
+ *                     tags: { type: array, items: { type: string } }
+ *                     isFeatured: { type: boolean }
+ *                     rating:
+ *                       type: object
+ *                       properties:
+ *                         average: { type: number, example: 4.3 }
+ *                         count: { type: integer, example: 12 }
+ *                     specifications:
+ *                       type: array
+ *                       description: Key/value product attributes
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           key:   { type: string, example: "Storage" }
+ *                           value: { type: string, example: "256 GB" }
+ *                     sizes:
+ *                       type: array
+ *                       description: Available size options
+ *                       items: { type: string, example: "XL" }
+ *                     colors:
+ *                       type: array
+ *                       description: Available colour variants
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           name: { type: string, example: "Midnight Black" }
+ *                           hex:  { type: string, example: "#1a1a1a" }
+ *                     store:
+ *                       type: object
+ *                       properties:
+ *                         _id: { type: string }
+ *                         name: { type: string }
+ *                         image: { type: string }
+ *                         mobile: { type: string }
+ *                         address: { type: string }
+ *                     category:
+ *                       type: object
+ *                       properties:
+ *                         _id: { type: string }
+ *                         name: { type: string }
+ *       404:
+ *         description: Product not found
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/Error' }
+ */
+router.get("/:id", getAProduct);
 
 module.exports = router;

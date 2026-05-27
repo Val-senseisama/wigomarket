@@ -70,6 +70,28 @@ var productSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+
+    // Structured key/value attributes — e.g. { key: "RAM", value: "8 GB" }
+    specifications: [
+      {
+        key:   { type: String, trim: true },
+        value: { type: String, trim: true },
+      },
+    ],
+
+    // Available size options — e.g. ["S","M","L"] or ["40","41","42"]
+    sizes: {
+      type: [String],
+      default: [],
+    },
+
+    // Available colour options — name is required, hex is optional
+    colors: [
+      {
+        name: { type: String, trim: true, required: true },
+        hex:  { type: String, trim: true, default: null },
+      },
+    ],
   },
   {
     timestamps: true,

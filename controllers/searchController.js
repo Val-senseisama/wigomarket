@@ -1,13 +1,16 @@
 /**
  * @file searchController.js
  * @description Production-grade global search with fuzzy matching,
- *              relevance scores, recent searches, and autocomplete.
+ *              relevance scores, filters, recent searches, and autocomplete.
  *
  * SEARCH STRATEGY (tiered):
  *   Tier 1 — MongoDB Atlas Search ($search) with fuzzy operator
  *            Provides typo tolerance, relevance scoring, case-insensitive.
+ *            Filters (category, price) run inside the Atlas compound.filter
+ *            clause so the index pre-filters before scoring.
  *   Tier 2 — Regex fallback when Atlas Search indexes are not configured.
- *            Uses case-insensitive regex on key fields.
+ *            Uses case-insensitive regex on key fields; filters applied as
+ *            additional $match conditions.
  *
  * All search endpoints are public (no auth) except recent-search
  * management which requires authentication.
@@ -21,13 +24,16 @@ const Category = require("../models/categoryModel");
 const SearchHistory = require("../models/searchHistoryModel");
 const redisClient = require("../config/redisClient");
 
+const ANALYTICS_KEY = "search_analytics";
+const ANALYTICS_CAP = 1000; // keep the most recent N entries; older ones are trimmed
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /**
- * Build n-gram regex tokens from a raw query for fuzzy-ish matching.
- * Splits on whitespace; each token becomes a case-insensitive regex.
+ * Sanitise and compile a contains-mode case-insensitive regex.
+ * Matches anywhere in the string (not just prefix).
  */
-function buildFuzzyRegex(query) {
+function buildContainsRegex(query) {
   const sanitized = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(sanitized, "i");
 }
@@ -45,12 +51,10 @@ function computeRelevance(doc, query) {
   const brand = (doc.brand || "").toLowerCase();
   const tags = (doc.tags || []).map((t) => t.toLowerCase());
 
-  // Exact match in title — highest weight
   if (title === q) score += 100;
   else if (title.startsWith(q)) score += 60;
   else if (title.includes(q)) score += 30;
 
-  // Word-level matching (handles multi-word queries)
   const queryWords = q.split(/\s+/).filter(Boolean);
   const titleWords = title.split(/\s+/);
   for (const qw of queryWords) {
@@ -60,7 +64,6 @@ function computeRelevance(doc, query) {
     if (tags.some((t) => t.includes(qw))) score += 8;
   }
 
-  // Popularity boost
   score += Math.min((doc.sold || 0) * 0.1, 10);
   score += Math.min(
     (doc.rating?.average || 0) * (doc.rating?.count || 0) * 0.05,
@@ -72,7 +75,35 @@ function computeRelevance(doc, query) {
 
 // ── Atlas Search helpers ───────────────────────────────────────────────────
 
-function buildAtlasProductPipeline(query, skip, limit) {
+/**
+ * Build the Atlas filter clauses from parsed filter values.
+ * category and price use Atlas compound.filter (index-accelerated).
+ * brand uses a post-$search $match (text filter, not a range/equality op).
+ */
+function buildAtlasFilters(filters) {
+  const { categoryId, minPrice, maxPrice } = filters;
+  const atlasFilters = [];
+
+  if (categoryId) {
+    atlasFilters.push({ equals: { path: "category", value: categoryId } });
+  }
+
+  if (minPrice !== undefined || maxPrice !== undefined) {
+    const range = { path: "listedPrice" };
+    if (minPrice !== undefined) range.gte = minPrice;
+    if (maxPrice !== undefined) range.lte = maxPrice;
+    atlasFilters.push({ range });
+  }
+
+  return atlasFilters;
+}
+
+function buildAtlasProductPipeline(query, skip, limit, filters) {
+  const atlasFilters = buildAtlasFilters(filters);
+  const brandRegex = filters.brand
+    ? new RegExp(filters.brand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
+    : null;
+
   return [
     {
       $search: {
@@ -112,15 +143,25 @@ function buildAtlasProductPipeline(query, skip, limit) {
               },
             },
           ],
+          ...(atlasFilters.length > 0 && { filter: atlasFilters }),
           minimumShouldMatch: 1,
         },
       },
     },
-    { $match: { quantity: { $gt: 0 } } },
+
+    // Post-search match: in-stock + optional brand string filter
+    {
+      $match: {
+        quantity: { $gt: 0 },
+        ...(brandRegex && { brand: brandRegex }),
+      },
+    },
+
     { $addFields: { searchScore: { $meta: "searchScore" } } },
     { $sort: { searchScore: -1 } },
     { $skip: skip },
     { $limit: limit },
+
     {
       $lookup: {
         from: "stores",
@@ -130,6 +171,7 @@ function buildAtlasProductPipeline(query, skip, limit) {
       },
     },
     { $unwind: { path: "$storeDetails", preserveNullAndEmptyArrays: true } },
+
     {
       $lookup: {
         from: "categories",
@@ -139,6 +181,7 @@ function buildAtlasProductPipeline(query, skip, limit) {
       },
     },
     { $unwind: { path: "$categoryDetails", preserveNullAndEmptyArrays: true } },
+
     {
       $project: {
         title: 1,
@@ -164,6 +207,37 @@ function buildAtlasProductPipeline(query, skip, limit) {
         createdAt: 1,
       },
     },
+  ];
+}
+
+function buildAtlasCountPipeline(query, filters) {
+  const atlasFilters = buildAtlasFilters(filters);
+  const brandRegex = filters.brand
+    ? new RegExp(filters.brand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
+    : null;
+
+  return [
+    {
+      $search: {
+        index: "product_search",
+        compound: {
+          should: [
+            { text: { query, path: "title", fuzzy: { maxEdits: 2, prefixLength: 1 } } },
+            { text: { query, path: "brand", fuzzy: { maxEdits: 1 } } },
+            { text: { query, path: "description", fuzzy: { maxEdits: 2, prefixLength: 2 } } },
+          ],
+          ...(atlasFilters.length > 0 && { filter: atlasFilters }),
+          minimumShouldMatch: 1,
+        },
+      },
+    },
+    {
+      $match: {
+        quantity: { $gt: 0 },
+        ...(brandRegex && { brand: brandRegex }),
+      },
+    },
+    { $count: "total" },
   ];
 }
 
@@ -197,11 +271,19 @@ function buildAtlasStorePipeline(query, limit) {
 // ── Route Handlers ─────────────────────────────────────────────────────────
 
 /**
- * GET /api/search?q=iphone&page=1&limit=20
- * Global search across products and stores with fuzzy matching.
+ * GET /api/search?q=iphone&page=1&limit=20&category=<id>&brand=Apple&minPrice=5000&maxPrice=200000
+ * Global search across products and stores with fuzzy matching and optional filters.
  */
 const globalSearch = asyncHandler(async (req, res) => {
-  const { q, page = 1, limit = 20 } = req.query;
+  const {
+    q,
+    page = 1,
+    limit = 20,
+    category,
+    brand,
+    minPrice,
+    maxPrice,
+  } = req.query;
 
   if (!q || q.trim().length < 2) {
     return res.status(400).json({
@@ -210,72 +292,79 @@ const globalSearch = asyncHandler(async (req, res) => {
     });
   }
 
-  const query = q.trim();
+  const query   = q.trim();
   const pageNum = Math.max(1, parseInt(page));
   const limitNum = Math.min(50, Math.max(1, parseInt(limit)));
-  const skip = (pageNum - 1) * limitNum;
+  const skip    = (pageNum - 1) * limitNum;
 
-  // Cache key
-  const cacheKey = `search:${query.toLowerCase()}:${pageNum}:${limitNum}`;
+  // ── Parse filters ──────────────────────────────────────────────────────
+  const categoryId =
+    category && mongoose.isValidObjectId(category)
+      ? new mongoose.Types.ObjectId(category)
+      : null;
+  const minPriceNum = minPrice !== undefined ? parseFloat(minPrice) : undefined;
+  const maxPriceNum = maxPrice !== undefined ? parseFloat(maxPrice) : undefined;
 
+  const filters = {
+    categoryId,
+    brand: brand?.trim() || null,
+    minPrice: minPriceNum,
+    maxPrice: maxPriceNum,
+  };
+
+  // Cache key includes all filter dimensions
+  const cacheKey = [
+    "search",
+    query.toLowerCase(),
+    pageNum,
+    limitNum,
+    category || "",
+    (brand || "").toLowerCase(),
+    minPrice || "",
+    maxPrice || "",
+  ].join(":");
+
+  // ── Cache read ─────────────────────────────────────────────────────────
   try {
-    // Try cache
     const cached = await redisClient.get(cacheKey);
     if (cached) return res.json(JSON.parse(cached));
   } catch (_) {
-    // Redis unavailable — continue without cache
+    // Redis unavailable — continue to DB
   }
 
+  // ── DB query ───────────────────────────────────────────────────────────
+  const t0 = Date.now();
   let products = [];
   let stores = [];
   let totalProducts = 0;
   let searchMode = "atlas";
 
   try {
-    // ── Tier 1: Atlas Search ─────────────────────────────────────────
-    const [atlasProducts, atlasStores] = await Promise.all([
-      Product.aggregate(buildAtlasProductPipeline(query, skip, limitNum)),
+    // ── Tier 1: Atlas Search ─────────────────────────────────────────────
+    const [atlasProducts, atlasStores, countResult] = await Promise.all([
+      Product.aggregate(buildAtlasProductPipeline(query, skip, limitNum, filters)),
       Store.aggregate(buildAtlasStorePipeline(query, 5)),
+      Product.aggregate(buildAtlasCountPipeline(query, filters)),
     ]);
+
     products = atlasProducts;
     stores = atlasStores;
-
-    // Get total count for pagination (separate pipeline without skip/limit)
-    const countPipeline = [
-      {
-        $search: {
-          index: "product_search",
-          compound: {
-            should: [
-              {
-                text: {
-                  query,
-                  path: "title",
-                  fuzzy: { maxEdits: 2, prefixLength: 1 },
-                },
-              },
-              { text: { query, path: "brand", fuzzy: { maxEdits: 1 } } },
-              {
-                text: {
-                  query,
-                  path: "description",
-                  fuzzy: { maxEdits: 2, prefixLength: 2 },
-                },
-              },
-            ],
-            minimumShouldMatch: 1,
-          },
-        },
-      },
-      { $match: { quantity: { $gt: 0 } } },
-      { $count: "total" },
-    ];
-    const countResult = await Product.aggregate(countPipeline);
     totalProducts = countResult[0]?.total || 0;
-  } catch (atlasErr) {
-    // ── Tier 2: Regex Fallback ─────────────────────────────────────
+  } catch (_atlasErr) {
+    // ── Tier 2: Regex Fallback ───────────────────────────────────────────
     searchMode = "regex";
-    const regex = buildFuzzyRegex(query);
+    const regex = buildContainsRegex(query);
+    const brandFilterRegex = filters.brand
+      ? new RegExp(filters.brand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
+      : null;
+
+    const priceFilter =
+      minPriceNum !== undefined || maxPriceNum !== undefined
+        ? {
+            ...(minPriceNum !== undefined && { $gte: minPriceNum }),
+            ...(maxPriceNum !== undefined && { $lte: maxPriceNum }),
+          }
+        : null;
 
     const productFilter = {
       quantity: { $gt: 0 },
@@ -285,6 +374,9 @@ const globalSearch = asyncHandler(async (req, res) => {
         { brand: regex },
         { tags: regex },
       ],
+      ...(categoryId && { category: categoryId }),
+      ...(brandFilterRegex && { brand: brandFilterRegex }),
+      ...(priceFilter && { listedPrice: priceFilter }),
     };
 
     const [rawProducts, productCount, rawStores] = await Promise.all([
@@ -295,15 +387,12 @@ const globalSearch = asyncHandler(async (req, res) => {
         .limit(limitNum)
         .lean(),
       Product.countDocuments(productFilter),
-      Store.find({
-        $or: [{ name: regex }, { address: regex }],
-      })
+      Store.find({ $or: [{ name: regex }, { address: regex }] })
         .select("name image address location.formattedAddress")
         .limit(5)
         .lean(),
     ]);
 
-    // Compute relevance scores for regex results
     products = rawProducts
       .map((p) => ({
         ...p,
@@ -321,6 +410,8 @@ const globalSearch = asyncHandler(async (req, res) => {
     totalProducts = productCount;
   }
 
+  const totalPages = Math.ceil(totalProducts / limitNum);
+
   const response = {
     success: true,
     data: {
@@ -328,20 +419,26 @@ const globalSearch = asyncHandler(async (req, res) => {
       stores,
       pagination: {
         currentPage: pageNum,
-        totalPages: Math.ceil(totalProducts / limitNum),
+        totalPages,
         totalResults: totalProducts,
-        hasNext: pageNum < Math.ceil(totalProducts / limitNum),
+        hasNext: pageNum < totalPages,
         hasPrev: pageNum > 1,
       },
       meta: {
         query,
         searchMode,
-        took: 0, // Placeholder — can be instrumented with perf hooks
+        took: Date.now() - t0,   // ms elapsed for the DB queries
+        filters: {
+          category: category || null,
+          brand: filters.brand || null,
+          minPrice: minPriceNum ?? null,
+          maxPrice: maxPriceNum ?? null,
+        },
       },
     },
   };
 
-  // Cache for 10 minutes
+  // ── Cache write ────────────────────────────────────────────────────────
   try {
     await redisClient.setex(cacheKey, 600, JSON.stringify(response));
   } catch (_) {}
@@ -352,13 +449,13 @@ const globalSearch = asyncHandler(async (req, res) => {
       { user: req.user._id, query: query.toLowerCase() },
       { $set: { query: query.toLowerCase() } },
       { upsert: true, new: true },
-    ).catch(() => {}); // fire-and-forget
+    ).catch(() => {});
   }
 
-  // Track analytics
+  // Track analytics — cap list to ANALYTICS_CAP entries
   try {
     await redisClient.lPush(
-      "search_analytics",
+      ANALYTICS_KEY,
       JSON.stringify({
         query,
         timestamp: new Date().toISOString(),
@@ -366,6 +463,7 @@ const globalSearch = asyncHandler(async (req, res) => {
         searchMode,
       }),
     );
+    await redisClient.lTrim(ANALYTICS_KEY, 0, ANALYTICS_CAP - 1);
   } catch (_) {}
 
   res.json(response);
@@ -373,7 +471,10 @@ const globalSearch = asyncHandler(async (req, res) => {
 
 /**
  * GET /api/search/suggestions?q=iph
- * Autocomplete suggestions based on product titles and store names.
+ * Autocomplete suggestions.
+ *   Tier 1 — Atlas autocomplete operator (edge-gram / any-position fuzzy)
+ *   Tier 2 — Contains-mode regex fallback (matches anywhere in the string,
+ *             not just the prefix, so "pho" matches "smartphone")
  */
 const getSuggestions = asyncHandler(async (req, res) => {
   const { q } = req.query;
@@ -383,38 +484,77 @@ const getSuggestions = asyncHandler(async (req, res) => {
   }
 
   const query = q.trim();
-  const regex = new RegExp(
-    `^${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
-    "i",
-  );
-
   const cacheKey = `suggestions:${query.toLowerCase()}`;
+
   try {
     const cached = await redisClient.get(cacheKey);
     if (cached) return res.json(JSON.parse(cached));
   } catch (_) {}
 
-  const [productTitles, storeNames, categoryNames] = await Promise.all([
-    Product.find({ title: regex, quantity: { $gt: 0 } })
-      .select("title")
-      .limit(5)
-      .lean(),
-    Store.find({ name: regex }).select("name").limit(3).lean(),
-    Category.find({ name: regex }).select("name").limit(3).lean(),
-  ]);
+  let productTitles = [];
+  let storeNames = [];
+
+  try {
+    // ── Tier 1: Atlas autocomplete ───────────────────────────────────────
+    // Requires the 'title' field to be indexed as type "autocomplete" in the
+    // product_search index, and 'name' in store_search.
+    [productTitles, storeNames] = await Promise.all([
+      Product.aggregate([
+        {
+          $search: {
+            index: "product_search",
+            autocomplete: {
+              query,
+              path: "title",
+              fuzzy: { maxEdits: 1 },
+              tokenOrder: "any",
+            },
+          },
+        },
+        { $match: { quantity: { $gt: 0 } } },
+        { $limit: 5 },
+        { $project: { title: 1 } },
+      ]),
+      Store.aggregate([
+        {
+          $search: {
+            index: "store_search",
+            autocomplete: {
+              query,
+              path: "name",
+              fuzzy: { maxEdits: 1 },
+            },
+          },
+        },
+        { $limit: 3 },
+        { $project: { name: 1 } },
+      ]),
+    ]);
+  } catch (_) {
+    // ── Tier 2: contains-regex fallback ─────────────────────────────────
+    // Uses a contains match (not just ^prefix) so mid-word tokens work:
+    // "pho" → "smartphone", "samsung phone", etc.
+    const regex = buildContainsRegex(query);
+    [productTitles, storeNames] = await Promise.all([
+      Product.find({ title: regex, quantity: { $gt: 0 } })
+        .select("title")
+        .limit(5)
+        .lean(),
+      Store.find({ name: regex }).select("name").limit(3).lean(),
+    ]);
+  }
+
+  // Categories always use contains regex — collection is small, Atlas not needed
+  const catRegex = buildContainsRegex(query);
+  const categoryNames = await Category.find({ name: catRegex })
+    .select("name")
+    .limit(3)
+    .lean();
 
   const suggestions = [
-    ...productTitles.map((p) => ({
-      type: "product",
-      text: p.title,
-      id: p._id,
-    })),
+    ...productTitles.map((p) => ({ type: "product", text: p.title, id: p._id })),
     ...storeNames.map((s) => ({ type: "store", text: s.name, id: s._id })),
-    ...categoryNames.map((c) => ({
-      type: "category",
-      text: c.name,
-      id: c._id,
-    })),
+    ...categoryNames.map((c) => ({ type: "category", text: c.name, id: c._id })),
   ];
 
   const response = { success: true, data: suggestions };
@@ -465,7 +605,7 @@ const deleteSearchQuery = asyncHandler(async (req, res) => {
 
 /**
  * GET /api/search/trending
- * Top 10 most searched queries (from Redis analytics).
+ * Top 10 most searched queries (derived from the Redis analytics list).
  */
 const getTrendingSearches = asyncHandler(async (req, res) => {
   const cacheKey = "trending_searches";
@@ -475,10 +615,9 @@ const getTrendingSearches = asyncHandler(async (req, res) => {
     if (cached) return res.json(JSON.parse(cached));
   } catch (_) {}
 
-  // Aggregate from search_analytics list (last 1000 entries)
   let raw = [];
   try {
-    raw = await redisClient.lRange("search_analytics", 0, 999);
+    raw = await redisClient.lRange(ANALYTICS_KEY, 0, ANALYTICS_CAP - 1);
   } catch (_) {
     return res.json({ success: true, data: [] });
   }
