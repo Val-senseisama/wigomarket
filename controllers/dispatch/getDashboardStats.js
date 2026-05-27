@@ -2,7 +2,7 @@ const asyncHandler = require("express-async-handler");
 const Order = require("../../models/orderModel");
 const DispatchProfile = require("../../models/dispatchProfileModel");
 const User = require("../../models/userModel");
-const { validateMongodbId } = require("../../utils/validateMongodbId");
+const validateMongodbId = require("../../utils/validateMongodbId");
 const { Validate } = require("../../Helpers/Validate");
 const { ThrowError } = require("../../Helpers/Helpers");
 

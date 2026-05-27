@@ -63,7 +63,7 @@ const getAvailableOrders = asyncHandler(async (req, res) => {
     const orders = await Order.find(filters)
       .populate("products.product", "title listedPrice images brand")
       .populate("products.store", "name address mobile")
-      .populate("orderedBy", "fullName email mobile")
+      .populate("orderedBy", "firstname lastname email mobile")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -193,7 +193,7 @@ const selectOrder = asyncHandler(async (req, res) => {
     )
       .populate("products.product", "title listedPrice images brand")
       .populate("products.store", "name address mobile")
-      .populate("orderedBy", "fullName email mobile");
+      .populate("orderedBy", "firstname lastname email mobile");
 
     if (!updatedOrder) {
       return res.status(400).json({
@@ -202,15 +202,10 @@ const selectOrder = asyncHandler(async (req, res) => {
       });
     }
 
-    // Update delivery agent's status to busy
+    // Update delivery agent's status to busy (dot notation preserves workingDays etc.)
     await DispatchProfile.findOneAndUpdate(
       { user: _id },
-      {
-        availability: {
-          ...dispatchProfile.availability,
-          status: "busy",
-        },
-      },
+      { "availability.status": "busy", lastActiveAt: new Date() },
     );
 
     res.json({
@@ -294,7 +289,7 @@ const updateDeliveryStatus = asyncHandler(async (req, res) => {
     })
       .populate("products.product", "title listedPrice images brand")
       .populate("products.store", "name address mobile")
-      .populate("orderedBy", "fullName email mobile");
+      .populate("orderedBy", "firstname lastname email mobile");
 
     // Update agent availability
     const dispatchProfile = await DispatchProfile.findOne({ user: _id });
@@ -378,7 +373,7 @@ const getMyDeliveries = asyncHandler(async (req, res) => {
     const orders = await Order.find(filters)
       .populate("products.product", "title listedPrice images brand")
       .populate("products.store", "name address mobile")
-      .populate("orderedBy", "fullName email mobile")
+      .populate("orderedBy", "firstname lastname email mobile")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -437,10 +432,7 @@ const updateAvailability = asyncHandler(async (req, res) => {
     const dispatchProfile = await DispatchProfile.findOneAndUpdate(
       { user: _id },
       {
-        availability: {
-          ...(req.body.availability || {}),
-          status: status,
-        },
+        "availability.status": status,
         lastActiveAt: new Date(),
       },
       { new: true },

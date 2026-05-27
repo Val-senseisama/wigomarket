@@ -44,7 +44,7 @@ const getEarningsHistory = asyncHandler(async (req, res) => {
   try {
     const [orders, total] = await Promise.all([
       Order.find(query)
-        .populate("orderedBy", "fullName email mobile")
+        .populate("orderedBy", "firstname lastname email mobile")
         .populate("products.product", "title images listedPrice")
         .populate("products.store", "name address mobile")
         .sort({ actualDeliveryTime: -1 })
