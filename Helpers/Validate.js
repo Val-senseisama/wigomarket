@@ -1,6 +1,29 @@
  const Validate = {
     email: (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email),
     URL: (url) => /^(ftp|http|https):\/\/[^ "]+$/.test(url),
+    /**
+     * Checks that a URL is a valid Cloudinary delivery URL from our account.
+     * Cloudinary URLs look like:
+     *   https://res.cloudinary.com/{cloud_name}/image/upload/v{version}/{path}
+     * Rejects any string that is not a proper https://res.cloudinary.com/... URL.
+     */
+    cloudinaryUrl: (url) => {
+      if (typeof url !== 'string' || !url.trim()) return false;
+      try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== 'https:') return false;
+        if (parsed.hostname !== 'res.cloudinary.com') return false;
+        // If the cloud name env var is set, enforce it so foreign Cloudinary
+        // accounts cannot be injected.
+        const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+        if (cloudName && !parsed.pathname.startsWith(`/${cloudName}/`)) {
+          return false;
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    },
     phone: (phone) => /^[0-9]+$/.test(phone),
     integer: (value) => Number.isInteger(value),
     positiveInteger: (value) => Number.isInteger(value) && value >= 0,
@@ -28,4 +51,8 @@
     },
  };
 
- module.exports= Validate
+ // Support both styles:
+ //   const Validate = require('./Validate')          → the object
+ //   const { Validate } = require('./Validate')      → the same object
+ module.exports = Validate;
+ module.exports.Validate = Validate;

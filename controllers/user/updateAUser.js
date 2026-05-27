@@ -67,8 +67,12 @@ const updateAUser = asyncHandler(async (req, res) => {
     ThrowError("Invalid Nickname");
   }
 
-  if (!Validate.string(image)) {
-    ThrowError("Invalid Image");
+  if (image !== undefined && !Validate.cloudinaryUrl(image)) {
+    return res.status(400).json({
+      success: false,
+      message:
+        "image must be a valid Cloudinary URL. Upload via POST /api/upload/signature (folder: profiles).",
+    });
   }
 
   try {
@@ -82,13 +86,13 @@ const updateAUser = asyncHandler(async (req, res) => {
     const updatedUser = await User.findByIdAndUpdate(
       id,
       {
-        firstname: req?.body?.firstname,
-        lastname: req?.body?.lastname,
-        email: req?.body?.email,
-        mobile: req?.body?.mobile,
-        address: req?.body?.address,
-        image: req?.body?.image,
-        nickname: req?.body?.nickname,
+        firstname,
+        lastname,
+        email,
+        mobile,
+        address,
+        nickname,
+        ...(image !== undefined && { image }),
       },
       { new: true },
     );

@@ -120,9 +120,15 @@ const options = {
         description:
           "Global fuzzy search, autocomplete, recent & trending queries",
       },
+      {
+        name: "Upload",
+        description:
+          "Cloudinary signed-upload signatures — get a signature here, upload directly to Cloudinary, then pass the resulting URL to the relevant endpoint",
+      },
     ],
   },
   apis: [
+    "./routes/uploadRouter.js",
     "./routes/authRouter.js",
     "./routes/productRouter.js",
     "./routes/storeRouter.js",

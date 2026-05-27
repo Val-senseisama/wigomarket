@@ -103,7 +103,16 @@ router.put("/update-category", authMiddleware, isAdmin, updateProductCategory)
  * /api/product/create-product:
  *   post:
  *     summary: Create a new product
- *     description: Create a new product
+ *     description: |
+ *       Creates a new product in the authenticated seller's store.
+ *
+ *       **Product images must be Cloudinary URLs** — upload them first via
+ *       `POST /api/upload/signature` (folder: `products`), then include the
+ *       returned `secure_url` values in the `images` array. A maximum of **5**
+ *       images are allowed; omit the field entirely if no images are available yet.
+ *
+ *       The `listedPrice` is calculated automatically:
+ *       `listedPrice = price + (price × 2%)` (2 % platform commission).
  *     tags:
  *       - Products
  *     security:
@@ -113,67 +122,91 @@ router.put("/update-category", authMiddleware, isAdmin, updateProductCategory)
  *       content:
  *         application/json:
  *           schema:
-*             type: object
-*             required:
-*               - title
-*               - price
-*               - quantity
-*               - category
-*               - brand
-*               - description
-*             properties:
-*               title:
-*                 type: string
-*                 description: Product title
-*               price:
-*                 type: number
-*                 description: Product price
-*               quantity:
-*                 type: number
-*                 description: Product quantity
-*               category:
-*                 type: string
-*                 description: Category ID
-*               brand:
-*                 type: string
-*                 description: Product brand
-*               description:
-*                 type: string
-*                 description: Product description
-*     responses:
-*       200:
-*         description: Created product information with store details
-*         content:
-*           application/json:
-*             schema:
-*               type: object
-*               properties:
-*                 _id:
-*                   type: string
-*                 title:
-*                   type: string
-*                 price:
-*                   type: number
-*                 listedPrice:
-*                   type: number
-*                 quantity:
-*                   type: number
-*                 category:
-*                   type: string
-*                 brand:
-*                   type: string
-*                 description:
-*                   type: string
-*                 store:
-*                   type: object
-*                   properties:
-*                     name:
-*                       type: string
-*                     image:
-*                       type: string
-*       400:
-*         description: Validation fails or creation fails
-*/
+ *             type: object
+ *             required:
+ *               - title
+ *               - price
+ *               - quantity
+ *               - category
+ *               - brand
+ *               - description
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 description: Product title
+ *                 example: "Bluetooth Speaker"
+ *               price:
+ *                 type: integer
+ *                 description: Seller's price in NGN (integer, > 0)
+ *                 example: 15000
+ *               quantity:
+ *                 type: integer
+ *                 description: Stock quantity (integer, ≥ 0)
+ *                 example: 50
+ *               category:
+ *                 type: string
+ *                 description: MongoDB ObjectId of the product category
+ *                 example: "663f1a2b4e6d1c0012345678"
+ *               brand:
+ *                 type: string
+ *                 description: Brand name
+ *                 example: "JBL"
+ *               description:
+ *                 type: string
+ *                 description: Full product description
+ *                 example: "Portable wireless speaker with 12-hour battery life."
+ *               images:
+ *                 type: array
+ *                 description: >
+ *                   Array of Cloudinary URLs (max 5). Upload each image via
+ *                   POST /api/upload/signature (folder: products) first.
+ *                 maxItems: 5
+ *                 items:
+ *                   type: string
+ *                   format: uri
+ *                   example: "https://res.cloudinary.com/my-cloud/image/upload/v1234/products/speaker.jpg"
+ *     responses:
+ *       201:
+ *         description: Product created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 _id:
+ *                   type: string
+ *                 title:
+ *                   type: string
+ *                 price:
+ *                   type: number
+ *                   description: Seller's price
+ *                 listedPrice:
+ *                   type: number
+ *                   description: Price shown to buyers (price + 2% commission)
+ *                 quantity:
+ *                   type: number
+ *                 category:
+ *                   type: string
+ *                 brand:
+ *                   type: string
+ *                 description:
+ *                   type: string
+ *                 images:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                 store:
+ *                   type: object
+ *                   properties:
+ *                     name:
+ *                       type: string
+ *                     image:
+ *                       type: string
+ *       400:
+ *         description: Validation error or creation failed
+ *       401:
+ *         description: Unauthorised
+ */
 router.post("/create-product", authMiddleware, isSeller, createProduct);
 /**
  * @swagger

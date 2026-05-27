@@ -465,7 +465,21 @@ router.post(
  * /api/delivery-agent/delivery-agent/profile:
  *   post:
  *     summary: Create dispatch profile
- *     description: Create a dispatch profile for delivery agent
+ *     description: |
+ *       Creates the dispatch (delivery agent) profile for a verified rider account.
+ *
+ *       **All three document images must be Cloudinary URLs** — upload each document
+ *       photo first via `POST /api/upload/signature` (folder: `dispatch-documents`),
+ *       then pass the returned `secure_url` in the corresponding `image` field below.
+ *
+ *       | Document | Field |
+ *       |----------|-------|
+ *       | Driver's licence scan | `documents.driverLicense.image` |
+ *       | Vehicle registration scan | `documents.vehicleRegistration.image` |
+ *       | NIN document scan | `documents.nin.image` |
+ *
+ *       The profile is created with `status: "pending"` and must be approved by an
+ *       admin before the agent can accept orders.
  *     tags: [Delivery Agent]
  *     security:
  *       - bearerAuth: []
@@ -481,62 +495,97 @@ router.post(
  *             properties:
  *               vehicleInfo:
  *                 type: object
+ *                 required: [type, make, model, year, plateNumber, color]
  *                 properties:
  *                   type:
  *                     type: string
- *                     enum: [bike, motorcycle, car, van, truck]
+ *                     enum: [bike, motorcycle, car, van, truck, bicycle, feet, bus]
+ *                     example: "motorcycle"
  *                   make:
  *                     type: string
+ *                     example: "Honda"
  *                   model:
  *                     type: string
+ *                     example: "CB125"
  *                   year:
- *                     type: number
+ *                     type: integer
+ *                     example: 2021
  *                   plateNumber:
  *                     type: string
+ *                     example: "ABC-123-XY"
  *                   color:
  *                     type: string
+ *                     example: "Red"
  *               coverageAreas:
  *                 type: array
+ *                 description: Areas the agent is willing to deliver to (optional)
  *                 items:
  *                   type: string
+ *                 example: ["Yaba", "Surulere"]
  *               documents:
  *                 type: object
+ *                 required: [driverLicense, vehicleRegistration, nin]
  *                 properties:
  *                   driverLicense:
  *                     type: object
+ *                     required: [number, expiryDate, image]
  *                     properties:
  *                       number:
  *                         type: string
+ *                         example: "DL-1234567"
  *                       expiryDate:
  *                         type: string
  *                         format: date
+ *                         example: "2027-06-30"
  *                       image:
  *                         type: string
+ *                         format: uri
+ *                         description: >
+ *                           Cloudinary URL of the licence scan. Upload via
+ *                           POST /api/upload/signature (folder: dispatch-documents) first.
+ *                         example: "https://res.cloudinary.com/my-cloud/image/upload/v1234/dispatch-documents/licence.jpg"
  *                   vehicleRegistration:
  *                     type: object
+ *                     required: [number, expiryDate, image]
  *                     properties:
  *                       number:
  *                         type: string
+ *                         example: "VR-9876543"
  *                       expiryDate:
  *                         type: string
  *                         format: date
+ *                         example: "2026-12-31"
  *                       image:
  *                         type: string
+ *                         format: uri
+ *                         description: >
+ *                           Cloudinary URL of the vehicle registration scan. Upload via
+ *                           POST /api/upload/signature (folder: dispatch-documents) first.
+ *                         example: "https://res.cloudinary.com/my-cloud/image/upload/v1234/dispatch-documents/reg.jpg"
  *                   nin:
  *                     type: object
+ *                     required: [number, image]
  *                     properties:
  *                       number:
  *                         type: string
+ *                         example: "12345678901"
  *                       image:
  *                         type: string
+ *                         format: uri
+ *                         description: >
+ *                           Cloudinary URL of the NIN document scan. Upload via
+ *                           POST /api/upload/signature (folder: dispatch-documents) first.
+ *                         example: "https://res.cloudinary.com/my-cloud/image/upload/v1234/dispatch-documents/nin.jpg"
  *               workingDays:
  *                 type: array
+ *                 description: Days the agent is available (defaults to Mon–Fri)
  *                 items:
  *                   type: string
  *                   enum: [monday, tuesday, wednesday, thursday, friday, saturday, sunday]
+ *                 example: [monday, tuesday, wednesday, thursday, friday, saturday]
  *     responses:
- *       200:
- *         description: Dispatch profile created successfully
+ *       201:
+ *         description: Dispatch profile created — documents are under review
  *         content:
  *           application/json:
  *             schema:
@@ -544,14 +593,18 @@ router.post(
  *               properties:
  *                 success:
  *                   type: boolean
+ *                   example: true
  *                 message:
  *                   type: string
+ *                   example: "Dispatch profile created successfully. Documents are under review."
  *                 data:
  *                   $ref: '#/components/schemas/DispatchProfile'
  *       400:
- *         description: Invalid request or profile already exists
+ *         description: Validation error or profile already exists
+ *       401:
+ *         description: Unauthorised
  *       403:
- *         description: Access denied - delivery agent only
+ *         description: Access denied — delivery agent role required
  */
 router.post("/profile", authMiddleware, isDispatch, createDispatchProfile);
 

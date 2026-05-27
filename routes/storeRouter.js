@@ -17,8 +17,18 @@ const router = express.Router();
  * @swagger
  * /api/store/create:
  *   post:
- *     summary: Create a new store for a user
- *     description: Create a new store for a user. A confirmation email is sent via background queue.
+ *     summary: Create a new store
+ *     description: |
+ *       Creates a new store for the authenticated seller.
+ *       A confirmation email is sent via background queue on success.
+ *
+ *       **Image fields must be Cloudinary URLs** — upload them first via
+ *       `POST /api/upload/signature`, then pass the returned `secure_url` here.
+ *
+ *       | Field | Cloudinary folder |
+ *       |-------|-------------------|
+ *       | `storeImage` | `stores` |
+ *       | `ownerNIN` | `store-nin` |
  *     tags:
  *       - Stores
  *     security:
@@ -35,23 +45,45 @@ const router = express.Router();
  *               - storeMobile
  *               - storeEmail
  *               - storeImage
+ *               - ownerNIN
  *               - businessType
  *               - city
  *               - state
- *               - ownerNIN
  *             properties:
  *               name:
  *                 type: string
+ *                 description: Unique store name
+ *                 example: "Adaeze Electronics"
  *               address:
  *                 type: string
+ *                 description: Full street address of the store
+ *                 example: "12 Broad Street, Lagos Island"
  *               storeMobile:
  *                 type: string
+ *                 description: Store contact phone number
+ *                 example: "08012345678"
  *               storeEmail:
  *                 type: string
+ *                 format: email
+ *                 description: Store contact email address
+ *                 example: "shop@adaeze.com"
  *               storeImage:
  *                 type: string
+ *                 format: uri
+ *                 description: >
+ *                   Cloudinary URL of the store photo. Upload the image via
+ *                   POST /api/upload/signature (folder: stores) first.
+ *                 example: "https://res.cloudinary.com/my-cloud/image/upload/v1234/stores/banner.jpg"
+ *               ownerNIN:
+ *                 type: string
+ *                 format: uri
+ *                 description: >
+ *                   Cloudinary URL of the owner's NIN document image. Upload via
+ *                   POST /api/upload/signature (folder: store-nin) first.
+ *                 example: "https://res.cloudinary.com/my-cloud/image/upload/v1234/store-nin/nin.jpg"
  *               businessType:
  *                 type: string
+ *                 description: Type of business (e.g. Retail, Wholesale, Services)
  *                 example: "Retail"
  *               city:
  *                 type: string
@@ -59,33 +91,50 @@ const router = express.Router();
  *               state:
  *                 type: string
  *                 example: "Lagos State"
- *               ownerNIN:
- *                 type: string
- *                 description: "URL or image string for verify"
  *               description:
  *                 type: string
+ *                 description: Short store description (optional)
+ *                 example: "We sell quality electronics at affordable prices."
  *     responses:
- *       200:
- *         description: Created store information
+ *       201:
+ *         description: Store created successfully
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 _id:
- *                   type: string
- *                 name:
- *                   type: string
- *                 mobile:
- *                   type: string
- *                 email:
- *                   type: string
- *                 owner:
- *                   type: string
- *                 address:
- *                   type: string
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     _id:
+ *                       type: string
+ *                     name:
+ *                       type: string
+ *                     mobile:
+ *                       type: string
+ *                     email:
+ *                       type: string
+ *                     image:
+ *                       type: string
+ *                     ownerNIN:
+ *                       type: string
+ *                     businessType:
+ *                       type: string
+ *                     city:
+ *                       type: string
+ *                     state:
+ *                       type: string
+ *                     owner:
+ *                       type: string
+ *                     address:
+ *                       type: string
  *       400:
- *         description: Validation fails, store already exists, or creation fails
+ *         description: Validation error, store name taken, or user already has a store
+ *       401:
+ *         description: Unauthorised
  */
 router.post("/create", authMiddleware, createStore);
 /**
