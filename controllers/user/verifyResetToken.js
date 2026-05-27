@@ -1,60 +1,77 @@
-const User = require("../../models/userModel");
 const Token = require("../../models/tokensModel");
 const asyncHandler = require("express-async-handler");
 const crypto = require("crypto");
 const Validate = require("../../Helpers/Validate");
-const { ThrowError } = require("../../Helpers/Helpers");
+
+const FIFTEEN_MINUTES = 15 * 60 * 1000;
 
 /**
  * @function verifyResetToken
- * @description Verifies if a password reset token is valid and not expired
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- * @param {string} req.body.token - 6-digit reset token (required)
- * @param {string} req.body.email - User's email address (required)
- * @returns {Object} - Success message if valid
+ * @description Step 2 of 3 — verifies the 6-digit OTP from the user's email.
+ *
+ *   Security properties:
+ *   - The hashed OTP is cleared immediately after first use (no replay).
+ *   - A one-time `resetSession` nonce is generated with crypto.randomBytes (CSPRNG),
+ *     only its SHA-256 hash is stored. The plaintext nonce is returned to the caller.
+ *   - Step 3 (resetPassword) requires this nonce in the request body, binding the
+ *     password update to the exact client that completed step 2.
+ *
+ * @param {string} req.body.email - The email the OTP was sent to
+ * @param {string} req.body.code  - The 6-digit OTP from the email
+ * @returns {{ resetSession: string }} - One-time session token for step 3
  */
 const verifyResetToken = asyncHandler(async (req, res) => {
-  const { token, email } = req.body;
-
-  if (!Validate.string(token) || token.length !== 6) {
-    ThrowError("Invalid Token - Must be 6 digits");
-  }
+  const { email, code } = req.body;
 
   if (!Validate.email(email)) {
-    ThrowError("Invalid Email");
+    return res.status(400).json({ success: false, message: "Invalid email" });
   }
 
-  const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+  if (!code || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({
+      success: false,
+      message: "code must be a 6-digit number",
+    });
+  }
 
-  // Find token record
-  const tokenRecord = await Token.findOne({
-    email,
-    code: hashedToken,
-  });
+  const hashedCode = crypto.createHash("sha256").update(code).digest("hex");
+
+  const tokenRecord = await Token.findOne({ email, code: hashedCode });
 
   if (!tokenRecord) {
     return res.status(400).json({
       success: false,
-      message: "Invalid or expired token",
+      message: "Invalid or expired code. Please request a new one.",
     });
   }
 
-  // Check if token is expired (15 minutes)
-  const tokenAge = Date.now() - tokenRecord.createdAt;
-  const fifteenMinutes = 15 * 60 * 1000;
-
-  if (tokenAge > fifteenMinutes) {
+  // Belt-and-suspenders expiry check (MongoDB TTL also removes it)
+  if (Date.now() - new Date(tokenRecord.createdAt).getTime() > FIFTEEN_MINUTES) {
     await Token.deleteOne({ email });
     return res.status(400).json({
       success: false,
-      message: "Token has expired. Please request a new one.",
+      message: "Code has expired. Please request a new one.",
     });
   }
 
-  res.json({
+  // Generate a proof-of-possession nonce — binds step 3 to this exact client.
+  // Store only the hash; return the plaintext so only this client can use it.
+  const resetSession = crypto.randomBytes(32).toString("hex");
+  const sessionHash  = crypto.createHash("sha256").update(resetSession).digest("hex");
+
+  await Token.findOneAndUpdate(
+    { email },
+    {
+      verified: true,
+      code: "",             // prevent OTP replay
+      sessionHash,          // stored hash of the proof-of-possession nonce
+    },
+  );
+
+  res.status(200).json({
     success: true,
-    message: "Token is valid. You can proceed to reset your password.",
+    message: "Code verified. You may now reset your password.",
+    resetSession,           // caller must send this back in step 3
   });
 });
 

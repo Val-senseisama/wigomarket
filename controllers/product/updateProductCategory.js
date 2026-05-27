@@ -20,31 +20,43 @@ const audit = require("../../services/auditService");
  * @throws {Error} - Throws error if category ID is invalid
  */
 const updateProductCategory = asyncHandler(async (req, res) => {
-  const { id, name } = req.body;
+  const { id, name, image } = req.body;
   validateMongodbId(id);
+
   if (!Validate.string(name)) {
     ThrowError("Invalid Name");
   }
+
+  if (image !== undefined && !Validate.cloudinaryUrl(image)) {
+    return res.status(400).json({
+      success: false,
+      message:
+        "image must be a valid Cloudinary URL. Upload via POST /api/upload/signature (folder: categories).",
+    });
+  }
+
   try {
-    if (name) {
-      req.body.slug = slugify(name);
-    }
+    const updateFields = {
+      name,
+      slug: slugify(name),
+      ...(image !== undefined && { image }),
+    };
+
     const updatedCategory = await Category.findByIdAndUpdate(
       id,
-      { name, slug: req.body.slug },
+      updateFields,
       { new: true },
     );
     audit.log({
       action: "category.updated",
       actor: audit.actor(req),
       resource: { type: "category", id, displayName: name },
-      changes: { after: { name } },
+      changes: { after: { name, ...(image && { image }) } },
     });
     res.json(updatedCategory);
   } catch (error) {
     throw new Error(error);
   }
-
 });
 
 module.exports = updateProductCategory;

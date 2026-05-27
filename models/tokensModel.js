@@ -12,10 +12,18 @@ var tokenSchema = new mongoose.Schema({
         type:String,
         required:true,
     },
+    verified: {
+        type: Boolean,
+        default: false,   // set to true after step 2 (verifyResetToken)
+    },
+    sessionHash: {
+        type: String,     // SHA-256 of the resetSession nonce issued in step 2
+        default: null,
+    },
     createdAt: {
         type: Date,
         default: Date.now,
-        expires: 900, // 15 minutes
+        expires: 900, // 15 minutes TTL (MongoDB auto-deletes)
     },
 },
 {

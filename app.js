@@ -25,6 +25,7 @@ const billPaymentRouter = require("./routes/billPaymentRouter");
 const adminRouter = require("./routes/adminRouter");
 const searchRouter = require("./routes/searchRouter");
 const uploadRouter = require("./routes/uploadRouter");
+const homeRouter = require("./routes/homeRouter");
 const { notFound, errorHandler } = require("./middleware/errorHandler");
 const { swaggerUi, specs } = require("./swagger");
 const LocationWebSocketServer = require("./websocket/locationWebSocket");
@@ -90,6 +91,7 @@ app.use("/api/bills", billPaymentRouter);
 app.use("/api/admin", adminRouter);
 app.use("/api/search", searchRouter);
 app.use("/api/upload", uploadRouter);
+app.use("/api/home", homeRouter);
 
 app.use(notFound);
 app.use(errorHandler);

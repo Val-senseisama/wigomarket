@@ -1,113 +1,91 @@
 const User = require("../../models/userModel");
 const Token = require("../../models/tokensModel");
 const asyncHandler = require("express-async-handler");
-const { generateToken } = require("../../config/jwt");
-const validateMongodbId = require("../../utils/validateMongodbId");
-const { generateRefreshToken } = require("../../config/refreshToken");
-const jwt = require("jsonwebtoken");
-const sendEmail = require("../../controllers/emailController");
 const crypto = require("crypto");
-const Cart = require("../../models/cartModel");
 const Validate = require("../../Helpers/Validate");
-const Order = require("../../models/orderModel");
-const Product = require("../../models/productModel");
-const Store = require("../../models/storeModel");
-const uniqid = require("uniqid");
-const { ThrowError, MakeID } = require("../../Helpers/Helpers");
 const audit = require("../../services/auditService");
+
+const FIFTEEN_MINUTES = 15 * 60 * 1000;
 
 /**
  * @function resetPassword
- * @description Resets user's password using 6-digit reset token
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- * @param {string} req.body.password - New password to set (required)
- * @param {string} req.body.token - 6-digit reset token (required)
- * @param {string} req.body.email - User's email address (required)
- * @returns {Object} - Success message
- * @throws {Error} - Throws error if invalid token or user not found
+ * @description Step 3 of 3 — sets a new password.
+ *
+ *   Requires the `resetSession` nonce that was returned by step 2
+ *   (POST /api/user/verify-reset-token). The nonce is hashed and matched against
+ *   the stored `sessionHash`, so only the client that completed step 2 can reach
+ *   this endpoint. The token record is consumed atomically (findOneAndDelete) before
+ *   the password is written — no race window.
+ *
+ * @param {string} req.body.email        - The same email used in steps 1 & 2
+ * @param {string} req.body.password     - The new password (min 6 characters)
+ * @param {string} req.body.resetSession - The nonce returned by step 2
  */
 const resetPassword = asyncHandler(async (req, res) => {
-  const { password, token, email } = req.body;
-
-  // Validate input
-  if (!Validate.string(password)) {
-    ThrowError("Invalid Password");
-  }
-
-  if (!Validate.string(token) || token.length !== 6) {
-    ThrowError("Invalid Token - Must be 6 digits");
-  }
+  const { email, password, resetSession } = req.body;
 
   if (!Validate.email(email)) {
-    ThrowError("Invalid Email");
+    return res.status(400).json({ success: false, message: "Invalid email" });
   }
 
-  const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
-
-  // Find user and token
-  const user = await User.findOne(
-    { email },
-    { password: 1, _id: 1, fullName: 1 },
-  );
-  const tokenRecord = await Token.findOne({
-    email,
-    code: hashedToken,
-  });
-
-  if (!user) {
-    return res.status(404).json({
+  if (!Validate.string(password) || password.length < 6) {
+    return res.status(400).json({
       success: false,
-      message: "User not found",
+      message: "Password must be at least 6 characters",
     });
   }
+
+  if (!Validate.string(resetSession)) {
+    return res.status(400).json({
+      success: false,
+      message: "resetSession is required. Complete step 2 first (POST /api/user/verify-reset-token).",
+    });
+  }
+
+  const sessionHash = crypto.createHash("sha256").update(resetSession).digest("hex");
+
+  // Atomically consume the token — findOneAndDelete prevents race conditions
+  // where two concurrent requests could both read verified:true before either deletes it
+  const tokenRecord = await Token.findOneAndDelete({
+    email,
+    verified: true,
+    sessionHash,
+  });
 
   if (!tokenRecord) {
     return res.status(400).json({
       success: false,
-      message: "Invalid or expired token",
+      message: "Invalid or expired session. Please start the reset process again.",
     });
   }
 
-  // Check if token is expired (15 minutes)
-  const tokenAge = Date.now() - tokenRecord.createdAt;
-  const fifteenMinutes = 15 * 60 * 1000;
-
-  if (tokenAge > fifteenMinutes) {
-    await Token.deleteOne({ email });
+  // Guard against the verified record being used after the 15-minute window
+  if (Date.now() - new Date(tokenRecord.createdAt).getTime() > FIFTEEN_MINUTES) {
     return res.status(400).json({
       success: false,
-      message: "Token has expired. Please request a new one.",
+      message: "Session expired. Please start the reset process again.",
     });
   }
 
-  try {
-    // Update password
-    user.password = password;
-    await user.save();
-
-    // Delete the used token
-    await Token.deleteOne({ email });
-
-    audit.log({
-      action: "user.password_reset_success",
-      actor: { email },
-      resource: { type: "user", id: user._id },
-    });
-
-    res.json({
-      success: true,
-      message:
-        "Password reset successfully. You can now login with your new password.",
-    });
-  } catch (error) {
-    audit.error({
-      action: "user.password_reset_failed",
-      actor: { email },
-      metadata: { error: error.message },
-    });
-    throw new Error(error);
+  const user = await User.findOne({ email }, { _id: 1 });
+  if (!user) {
+    return res.status(404).json({ success: false, message: "User not found" });
   }
+
+  // Assign directly — userModel pre-save hook bcrypt-hashes it
+  user.password = password;
+  await user.save();
+
+  audit.log({
+    action: "user.password_reset_success",
+    actor: { email },
+    resource: { type: "user", id: user._id },
+  });
+
+  res.status(200).json({
+    success: true,
+    message: "Password reset successfully. Please log in with your new password.",
+  });
 });
 
 module.exports = resetPassword;

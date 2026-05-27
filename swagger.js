@@ -121,9 +121,14 @@ const options = {
         description:
           "Cloudinary signed-upload signatures — get a signature here, upload directly to Cloudinary, then pass the resulting URL to the relevant endpoint",
       },
+      {
+        name: "Home",
+        description: "Home-screen feed endpoints — top shops, categories, nearby shops, popular vendors, and personalised product suggestions",
+      },
     ],
   },
   apis: [
+    "./routes/homeRouter.js",
     "./routes/uploadRouter.js",
     "./routes/authRouter.js",
     "./routes/productRouter.js",

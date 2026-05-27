@@ -63,6 +63,11 @@ var storeSchema = new mongoose.Schema(
     description: {
       type: String,
     },
+    // Denormalised rating cache — recomputed from product ratings via syncStoreRating()
+    rating: {
+      average: { type: Number, default: 0, min: 0, max: 5 },
+      count:   { type: Number, default: 0, min: 0 },
+    },
     status: {
       type: String,
       enum: ["pending", "active", "suspended"],

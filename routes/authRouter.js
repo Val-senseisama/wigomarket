@@ -524,8 +524,12 @@ router.post("/register/delivery", createDeliveryAgent);
  * @swagger
  * /api/user/forgot-password-token:
  *   post:
- *     summary: Generate password reset token and send to user's email
- *     description: Generate password reset token. The email is dispatched immediately via background queue.
+ *     summary: "Step 1 — Request password reset: sends a 6-digit OTP to the email"
+ *     description: >
+ *       Generates a 6-digit numeric OTP, stores a hashed copy (15-minute TTL),
+ *       and emails it to the user. Always returns 200 with a generic message so that
+ *       the existence of an account cannot be inferred from the response.
+ *       Proceed to POST /api/user/verify-reset-token once the user has the code.
  *     tags:
  *       - Auth
  *     requestBody:
@@ -539,70 +543,44 @@ router.post("/register/delivery", createDeliveryAgent);
  *             properties:
  *               email:
  *                 type: string
- *                 description: User's email address
+ *                 format: email
+ *                 description: The email address registered to the account
+ *                 example: "user@example.com"
  *     responses:
  *       200:
- *         description: Generated password reset token
- *         content:
- *           application/json:
- *             schema:
- *               type: string
- *       400:
- *         description: User not found or token creation fails
- */
-router.post("/forgot-password-token", forgotPasswordToken);
-/**
- * @swagger
- * /api/user/reset-password:
- *   put:
- *     summary: Reset user's password using reset token
- *     description: Reset user's password using reset token
- *     tags:
- *       - Auth
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - password
- *               - token
- *               - email
- *             properties:
- *               password:
- *                 type: string
- *                 description: New password to set
- *               token:
- *                 type: string
- *                 description: Reset token
- *               email:
- *                 type: string
- *                 description: User's email address
- *     responses:
- *       200:
- *         description: Updated user information
+ *         description: Reset code sent (or silently dropped if email not registered)
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 id:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
  *                   type: string
- *                 email:
+ *                   example: "If an account with that email exists, a reset code has been sent."
+ *                 expiresIn:
  *                   type: string
- *                 password:
- *                   type: string
+ *                   example: "15 minutes"
  *       400:
- *         description: Invalid token or user not found
+ *         description: Invalid email format
  */
+router.post("/forgot-password-token", forgotPasswordToken);
 /**
  * @swagger
  * /api/user/verify-reset-token:
  *   post:
- *     summary: Verify a password reset token without resetting the password
+ *     summary: "Step 2 — Verify the 6-digit OTP from the email"
+ *     description: >
+ *       Validates the 6-digit code that was emailed in step 1. On success:
+ *       the OTP is consumed (cannot be replayed), and a one-time `resetSession`
+ *       token is returned. Store this value — it is required as proof-of-possession
+ *       in step 3 (PUT /api/user/reset-password). Only the client that calls this
+ *       endpoint receives the `resetSession` nonce, preventing any other party from
+ *       hijacking the reset even if they know the email address.
  *     tags:
- *       - Users
+ *       - Auth
  *     requestBody:
  *       required: true
  *       content:
@@ -610,22 +588,102 @@ router.post("/forgot-password-token", forgotPasswordToken);
  *           schema:
  *             type: object
  *             required:
- *               - token
  *               - email
+ *               - code
  *             properties:
- *               token:
- *                 type: string
- *                 example: "123456"
  *               email:
  *                 type: string
+ *                 format: email
  *                 example: "user@example.com"
+ *               code:
+ *                 type: string
+ *                 description: The 6-digit numeric OTP from the email
+ *                 example: "482910"
  *     responses:
  *       200:
- *         description: Token is valid
+ *         description: Code verified — `resetSession` token returned for step 3
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Code verified. You may now reset your password."
+ *                 resetSession:
+ *                   type: string
+ *                   description: >
+ *                     One-time proof-of-possession token. Pass this to
+ *                     PUT /api/user/reset-password as `resetSession`.
+ *                     Expires with the 15-minute reset window.
+ *                   example: "a3f1c8e2b9d4..."
  *       400:
- *         description: Invalid or expired token
+ *         description: Code is invalid, wrong format, or expired
  */
 router.post("/verify-reset-token", verifyResetToken);
+/**
+ * @swagger
+ * /api/user/reset-password:
+ *   put:
+ *     summary: "Step 3 — Set new password"
+ *     description: >
+ *       Sets the user's new password. Requires the `resetSession` token returned
+ *       by step 2 (POST /api/user/verify-reset-token) as proof that the caller
+ *       is the same client that verified the OTP. The session is consumed atomically
+ *       — concurrent requests cannot both succeed. The user must log in again after
+ *       a successful reset.
+ *     tags:
+ *       - Auth
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *               - resetSession
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: The same email used in steps 1 and 2
+ *                 example: "user@example.com"
+ *               password:
+ *                 type: string
+ *                 format: password
+ *                 minLength: 6
+ *                 description: The new password (min 6 characters)
+ *                 example: "newSecurePassword123"
+ *               resetSession:
+ *                 type: string
+ *                 description: >
+ *                   The one-time token returned by step 2. Proves that this
+ *                   client completed the OTP verification step.
+ *                 example: "a3f1c8e2b9d4..."
+ *     responses:
+ *       200:
+ *         description: Password reset successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Password reset successfully. Please log in with your new password."
+ *       400:
+ *         description: Invalid or expired resetSession, or password too short
+ *       404:
+ *         description: User not found
+ */
 router.put("/reset-password", resetPassword);
 /**
  * @swagger

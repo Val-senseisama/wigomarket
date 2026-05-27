@@ -8,6 +8,10 @@ var categorySchema = new mongoose.Schema({
         unique:true,
         index:true,
     },
+    image:{
+        type:String,          // Cloudinary URL — upload via POST /api/upload/signature (folder: categories)
+        default: null,
+    },
 });
 
 //Export the model
