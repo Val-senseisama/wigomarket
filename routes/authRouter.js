@@ -101,10 +101,15 @@ router.post("/register", createUser);
  * @swagger
  * /api/user/register/buyer:
  *   post:
- *     summary: Register as a buyer
- *     description: Create a new buyer account. Email verification code is sent via background queue.
+ *     summary: Register a new buyer account
+ *     description: >
+ *       Creates a buyer account and sends two emails in the background: a welcome
+ *       email and an email containing the OTP verification code. The account status
+ *       is `pending` until the code is submitted to POST /api/user/verify, which
+ *       activates the account and returns auth tokens so the user is immediately
+ *       logged in.
  *     tags:
- *       - Authentication
+ *       - Auth
  *     requestBody:
  *       required: true
  *       content:
@@ -119,36 +124,37 @@ router.post("/register", createUser);
  *               email:
  *                 type: string
  *                 format: email
- *                 description: User's email address
+ *                 description: Email address — must be unique across all accounts
  *                 example: "buyer@example.com"
  *               mobile:
  *                 type: string
- *                 description: User's mobile number
+ *                 description: Mobile number — must be unique across all accounts
  *                 example: "+2348012345678"
  *               password:
  *                 type: string
+ *                 format: password
  *                 minLength: 6
- *                 description: User's password
+ *                 description: Account password (min 6 characters)
  *                 example: "password123"
  *               fullName:
  *                 type: string
- *                 description: User's full name (optional)
+ *                 description: Full name (optional)
  *                 example: "John Doe"
  *               residentialAddress:
  *                 type: string
- *                 description: User's residential address (optional)
+ *                 description: Residential address (optional)
  *                 example: "123 Main Street, Lagos"
  *               city:
  *                 type: string
- *                 description: User's city (optional)
+ *                 description: City (optional)
  *                 example: "Lagos"
  *               state:
  *                 type: string
- *                 description: User's state (optional)
+ *                 description: State (optional)
  *                 example: "Lagos State"
  *     responses:
  *       201:
- *         description: Buyer account created successfully
+ *         description: Account created — verification email sent
  *         content:
  *           application/json:
  *             schema:
@@ -159,7 +165,7 @@ router.post("/register", createUser);
  *                   example: true
  *                 message:
  *                   type: string
- *                   example: "Buyer account created successfully. Please check your email for verification code."
+ *                   example: "Account created successfully. Please check your email for your verification code."
  *                 data:
  *                   type: object
  *                   properties:
@@ -168,26 +174,46 @@ router.post("/register", createUser);
  *                       properties:
  *                         _id:
  *                           type: string
+ *                           description: The new user's ID — store this to reference the account before tokens are issued
+ *                           example: "665f1a2b3c4d5e6f7a8b9c0d"
  *                         email:
  *                           type: string
+ *                           example: "buyer@example.com"
  *                         mobile:
  *                           type: string
+ *                           example: "+2348012345678"
  *                         fullName:
  *                           type: string
+ *                           example: "John Doe"
  *                         role:
  *                           type: array
+ *                           description: Roles assigned to this account
  *                           items:
  *                             type: string
  *                           example: ["buyer"]
  *                         activeRole:
  *                           type: string
+ *                           description: The role currently in use
  *                           example: "buyer"
  *                         status:
  *                           type: string
+ *                           description: >
+ *                             `pending` — account is awaiting email verification.
+ *                             Changes to `active` after POST /api/user/verify succeeds.
  *                           example: "pending"
- *                           description: Account is pending email verification
  *       400:
- *         description: Validation error or user already exists
+ *         description: Validation error or duplicate email / mobile
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 msg:
+ *                   type: string
+ *                   example: "User already exists"
  */
 router.post("/register/buyer", createBuyer);
 
@@ -195,10 +221,16 @@ router.post("/register/buyer", createBuyer);
  * @swagger
  * /api/user/register/seller:
  *   post:
- *     summary: Register as a seller
- *     description: Create a new seller account. Welcome and verification emails are sent via background queue.
+ *     summary: Register a new seller account
+ *     description: >
+ *       Creates a seller account and sends two emails in the background: a welcome
+ *       email and an email containing the OTP verification code. The account status
+ *       is `pending` until the code is submitted to POST /api/user/verify, which
+ *       activates the account and returns auth tokens. Sellers typically continue
+ *       onboarding after verification (e.g. store creation, wallet setup) using
+ *       the token received from the verify endpoint.
  *     tags:
- *       - Authentication
+ *       - Auth
  *     requestBody:
  *       required: true
  *       content:
@@ -214,41 +246,42 @@ router.post("/register/buyer", createBuyer);
  *               email:
  *                 type: string
  *                 format: email
- *                 description: User's email address
+ *                 description: Email address — must be unique across all accounts
  *                 example: "seller@example.com"
  *               mobile:
  *                 type: string
- *                 description: User's mobile number
+ *                 description: Mobile number — must be unique across all accounts
  *                 example: "+2348012345678"
  *               password:
  *                 type: string
+ *                 format: password
  *                 minLength: 6
- *                 description: User's password
+ *                 description: Account password (min 6 characters)
  *                 example: "password123"
  *               gender:
  *                 type: string
  *                 enum: [male, female, other]
- *                 description: User's gender
+ *                 description: Required for seller accounts
  *                 example: "female"
  *               fullName:
  *                 type: string
- *                 description: User's full name (optional)
+ *                 description: Full name (optional)
  *                 example: "Jane Smith"
  *               residentialAddress:
  *                 type: string
- *                 description: User's residential address (optional)
+ *                 description: Residential address (optional)
  *                 example: "456 Business Street, Lagos"
  *               city:
  *                 type: string
- *                 description: User's city (optional)
+ *                 description: City (optional)
  *                 example: "Lagos"
  *               state:
  *                 type: string
- *                 description: User's state (optional)
+ *                 description: State (optional)
  *                 example: "Lagos State"
  *     responses:
  *       201:
- *         description: Seller account created successfully
+ *         description: Account created — verification email sent
  *         content:
  *           application/json:
  *             schema:
@@ -259,7 +292,7 @@ router.post("/register/buyer", createBuyer);
  *                   example: true
  *                 message:
  *                   type: string
- *                   example: "Seller account created successfully. Please check your email for verification code."
+ *                   example: "Seller account created successfully. Please check your email for your verification code."
  *                 data:
  *                   type: object
  *                   properties:
@@ -268,29 +301,53 @@ router.post("/register/buyer", createBuyer);
  *                       properties:
  *                         _id:
  *                           type: string
+ *                           description: The new user's ID — store this to reference the account before tokens are issued
+ *                           example: "665f1a2b3c4d5e6f7a8b9c0d"
  *                         email:
  *                           type: string
+ *                           example: "seller@example.com"
  *                         mobile:
  *                           type: string
+ *                           example: "+2348012345678"
  *                         fullName:
  *                           type: string
+ *                           example: "Jane Smith"
+ *                         gender:
+ *                           type: string
+ *                           example: "female"
  *                         role:
  *                           type: array
+ *                           description: Roles assigned to this account
  *                           items:
  *                             type: string
  *                           example: ["seller"]
  *                         activeRole:
  *                           type: string
+ *                           description: The role currently in use
  *                           example: "seller"
  *                         status:
  *                           type: string
+ *                           description: >
+ *                             `pending` — account is awaiting email verification.
+ *                             Changes to `active` after POST /api/user/verify succeeds.
  *                           example: "pending"
- *                           description: Account is pending email verification
  *                     verificationCode:
  *                       type: string
- *                       description: "For testing purposes only — remove in production"
+ *                       description: "Returned for testing only — not present in production builds"
+ *                       example: "A1B2C3"
  *       400:
- *         description: Validation error or user already exists
+ *         description: Validation error, missing required field, or duplicate email / mobile
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 msg:
+ *                   type: string
+ *                   example: "User Already Exists"
  */
 router.post("/register/seller", createSeller);
 
@@ -298,10 +355,18 @@ router.post("/register/seller", createSeller);
  * @swagger
  * /api/user/register/delivery:
  *   post:
- *     summary: Register as a delivery agent
- *     description: Create a new delivery agent account. Welcome and verification emails are sent via background queue.
+ *     summary: Register a new delivery agent account
+ *     description: >
+ *       Creates a delivery agent (dispatch rider) account and sends two emails in
+ *       the background: a welcome email and an email containing the OTP verification
+ *       code. The account status is `pending` until the code is submitted to
+ *       POST /api/user/verify, which activates the account and returns auth tokens.
+ *       Riders typically continue onboarding after verification (e.g. wallet setup,
+ *       dispatch profile completion) using the token received from the verify endpoint.
+ *       Note: `gender`, `nextOfKin`, and `modeOfTransport` are all required for
+ *       delivery agents.
  *     tags:
- *       - Authentication
+ *       - Auth
  *     requestBody:
  *       required: true
  *       content:
@@ -312,46 +377,49 @@ router.post("/register/seller", createSeller);
  *               - email
  *               - mobile
  *               - password
+ *               - gender
  *               - nextOfKin
  *               - modeOfTransport
  *             properties:
  *               email:
  *                 type: string
  *                 format: email
- *                 description: User's email address
- *                 example: "delivery@example.com"
+ *                 description: Email address — must be unique across all accounts
+ *                 example: "rider@example.com"
  *               mobile:
  *                 type: string
- *                 description: User's mobile number
+ *                 description: Mobile number — must be unique across all accounts
  *                 example: "+2348012345678"
  *               password:
  *                 type: string
+ *                 format: password
  *                 minLength: 6
- *                 description: User's password
+ *                 description: Account password (min 6 characters)
  *                 example: "password123"
  *               gender:
  *                 type: string
  *                 enum: [male, female, other]
- *                 description: User's gender
- *                 example: "female"
+ *                 description: Required for delivery agent accounts
+ *                 example: "male"
  *               fullName:
  *                 type: string
- *                 description: User's full name (optional)
+ *                 description: Full name (optional)
  *                 example: "Mike Johnson"
  *               residentialAddress:
  *                 type: string
- *                 description: User's residential address (optional)
+ *                 description: Residential address (optional)
  *                 example: "789 Delivery Street, Lagos"
  *               city:
  *                 type: string
- *                 description: User's city (optional)
+ *                 description: City (optional)
  *                 example: "Lagos"
  *               state:
  *                 type: string
- *                 description: User's state (optional)
+ *                 description: State (optional)
  *                 example: "Lagos State"
  *               nextOfKin:
  *                 type: object
+ *                 description: Emergency contact — required for delivery agents
  *                 required:
  *                   - name
  *                   - mobile
@@ -364,15 +432,14 @@ router.post("/register/seller", createSeller);
  *                     type: string
  *                     description: Next of kin's mobile number
  *                     example: "+2348098765432"
-
  *               modeOfTransport:
  *                 type: string
  *                 enum: [bike, motorcycle, car, van, truck, bicycle, feet, bus]
- *                 description: Mode of transport for delivery
+ *                 description: The delivery agent's primary mode of transport
  *                 example: "motorcycle"
  *     responses:
  *       201:
- *         description: Delivery agent account created successfully
+ *         description: Account created — verification email sent
  *         content:
  *           application/json:
  *             schema:
@@ -383,7 +450,7 @@ router.post("/register/seller", createSeller);
  *                   example: true
  *                 message:
  *                   type: string
- *                   example: "Delivery agent account created successfully. Please check your email for verification code."
+ *                   example: "Delivery agent account created successfully. Please check your email for your verification code."
  *                 data:
  *                   type: object
  *                   properties:
@@ -392,38 +459,65 @@ router.post("/register/seller", createSeller);
  *                       properties:
  *                         _id:
  *                           type: string
+ *                           description: The new user's ID — store this to reference the account before tokens are issued
+ *                           example: "665f1a2b3c4d5e6f7a8b9c0d"
  *                         email:
  *                           type: string
+ *                           example: "rider@example.com"
  *                         mobile:
  *                           type: string
+ *                           example: "+2348012345678"
  *                         fullName:
  *                           type: string
+ *                           example: "Mike Johnson"
+ *                         gender:
+ *                           type: string
+ *                           example: "male"
  *                         role:
  *                           type: array
+ *                           description: Roles assigned to this account
  *                           items:
  *                             type: string
  *                           example: ["dispatch"]
  *                         activeRole:
  *                           type: string
+ *                           description: The role currently in use
  *                           example: "dispatch"
  *                         status:
  *                           type: string
+ *                           description: >
+ *                             `pending` — account is awaiting email verification.
+ *                             Changes to `active` after POST /api/user/verify succeeds.
  *                           example: "pending"
- *                           description: Account is pending email verification
  *                         nextOfKin:
  *                           type: object
  *                           properties:
  *                             name:
  *                               type: string
+ *                               example: "Sarah Johnson"
  *                             mobile:
  *                               type: string
+ *                               example: "+2348098765432"
  *                         modeOfTransport:
  *                           type: string
+ *                           example: "motorcycle"
  *                     verificationCode:
  *                       type: string
- *                       description: "For testing purposes only — remove in production"
+ *                       description: "Returned for testing only — not present in production builds"
+ *                       example: "A1B2C3"
  *       400:
- *         description: Validation error, missing required fields, or user already exists
+ *         description: Validation error, missing required field, or duplicate email / mobile
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 msg:
+ *                   type: string
+ *                   example: "User Already Exists"
  */
 router.post("/register/delivery", createDeliveryAgent);
 
