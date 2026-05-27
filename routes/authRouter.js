@@ -27,7 +27,6 @@ const {
   verifyResetToken,
 } = require("../controllers/user");
 const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
-const { commissionHandler } = require("../controllers/paymentController");
 const router = express.Router();
 /**
  * @swagger
@@ -1070,30 +1069,6 @@ router.get("/:id", authMiddleware, isAdmin, getAUser);
  */
 router.put("/edit-user", authMiddleware, updateAUser);
 /**
- * @swagger
- * /api/user/pay:
- *   post:
- *     summary: Handle payment processing
- *     description: Handle payment processing
- *     tags:
- *       - Users
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Payment processing result
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 result:
- *                   type: object
- *       400:
- *         description: Payment processing fails
- */
-router.post("/pay", authMiddleware, commissionHandler);
-/**
  * @route DELETE /delete/:id
  * @description Delete user by ID
  * @access Private, Admin only
@@ -1220,66 +1195,6 @@ router.put("/block-user/:id", authMiddleware, isAdmin, blockUser);
  *         description: Invalid MongoDB ID or database operation fails
  */
 router.put("/unblock-user/:id", authMiddleware, isAdmin, unblockUser);
-/**
- * @swagger
- * /api/user/get-cart:
- *   get:
- *     summary: Get user's cart with populated product details
- *     description: Get user's cart with populated product details
- *     tags:
- *       - Cart
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: User's cart with populated product details
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 _id:
- *                   type: string
- *                 products:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       product:
- *                         type: object
- *                         properties:
- *                           _id:
- *                             type: string
- *                           title:
- *                             type: string
- *                           listedPrice:
- *                             type: number
- *                           store:
- *                             type: object
- *                             properties:
- *                               _id:
- *                                 type: string
- *                               bankDetails:
- *                                 type: object
- *                               address:
- *                                 type: object
- *                               owner:
- *                                 type: object
- *                                 properties:
- *                                   mobile:
- *                                     type: string
- *                                   email:
- *                                     type: string
- *                       count:
- *                         type: number
- *                       price:
- *                         type: number
- *                 cartTotal:
- *                   type: number
- *       400:
- *         description: Cart retrieval fails
- */
-router.get("/get-cart", authMiddleware, getUserCart);
 /**
  * @swagger
  * /api/user/update-cart:
@@ -1690,8 +1605,6 @@ router.post("/verify", verifyOtp);
  *       401:
  *         description: Unauthorized
  */
-// router.get("/me", authMiddleware, getCurrentUser); // REMOVED FROM HERE
-
 /**
  * @swagger
  * /api/user/change-role:
@@ -1781,7 +1694,7 @@ router.put("/change-role", authMiddleware, changeActiveRole);
  *     summary: Authenticate with Google using Firebase ID token
  *     description: Authenticate user with Google using Firebase ID token verification
  *     tags:
- *       - Authentication
+ *       - Auth
  *     requestBody:
  *       required: true
  *       content:
