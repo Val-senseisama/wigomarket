@@ -1,42 +1,43 @@
 const asyncHandler = require("express-async-handler");
-const Order = require("../../models/orderModel");
 const DispatchProfile = require("../../models/dispatchProfileModel");
-const User = require("../../models/userModel");
-const validateMongodbId = require("../../utils/validateMongodbId");
-const { Validate } = require("../../Helpers/Validate");
-const { ThrowError } = require("../../Helpers/Helpers");
+const redisClient = require("../../config/redisClient");
+
+const TTL = 60; // 60 seconds — invalidated on every profile mutation
 
 /**
  * @function getDispatchProfile
- * @description Get dispatch profile
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- * @param {string} req.user._id - Authenticated user's ID
- * @returns {Object} - Dispatch profile data
+ * @description Get the authenticated agent's dispatch profile, including the
+ *              `setupLevel` and `setupSteps` onboarding checklist.
  */
 const getDispatchProfile = asyncHandler(async (req, res) => {
   const { _id } = req.user;
+  const cacheKey = `dispatch:profile:${_id}`;
 
+  // ── Cache read ────────────────────────────────────────────────────────────
   try {
-    const dispatchProfile = await DispatchProfile.findOne({ user: _id })
-      .populate('user', 'fullName email mobile');
+    const cached = await redisClient.get(cacheKey);
+    if (cached) return res.json(JSON.parse(cached));
+  } catch (_) {}
 
-    if (!dispatchProfile) {
-      return res.status(404).json({
-        success: false,
-        message: "Dispatch profile not found"
-      });
-    }
+  const dispatchProfile = await DispatchProfile.findOne({ user: _id })
+    .populate("user", "firstname lastname email mobile image")
+    .lean({ virtuals: true });
 
-    res.json({
-      success: true,
-      data: dispatchProfile
+  if (!dispatchProfile) {
+    return res.status(404).json({
+      success: false,
+      message: "Dispatch profile not found",
     });
-  } catch (error) {
-    console.log(error);
-    throw new Error(error.message || "Failed to get dispatch profile");
   }
 
+  const payload = { success: true, data: dispatchProfile };
+
+  // ── Cache write ───────────────────────────────────────────────────────────
+  try {
+    await redisClient.setex(cacheKey, TTL, JSON.stringify(payload));
+  } catch (_) {}
+
+  res.json(payload);
 });
 
 module.exports = getDispatchProfile;
