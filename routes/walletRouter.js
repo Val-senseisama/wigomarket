@@ -370,7 +370,7 @@ const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
  *       401:
  *         description: Unauthorized
  */
-router.post("/create", authMiddleware, createWallet);
+router.post("/wallet/create", authMiddleware, createWallet);
 
 /**
  * @swagger
@@ -397,7 +397,7 @@ router.post("/create", authMiddleware, createWallet);
  *       401:
  *         description: Unauthorized
  */
-router.get("/", authMiddleware, getWallet);
+router.get("/wallet", authMiddleware, getWallet);
 
 /**
  * @swagger
@@ -444,7 +444,7 @@ router.get("/", authMiddleware, getWallet);
  *       401:
  *         description: Unauthorized
  */
-router.post("/bank-account", authMiddleware, addBankAccount);
+router.post("/wallet/bank-account", authMiddleware, addBankAccount);
 
 /**
  * @swagger
@@ -488,7 +488,7 @@ router.post("/bank-account", authMiddleware, addBankAccount);
  *       401:
  *         description: Unauthorized
  */
-router.put("/bank-account/:accountId/default", authMiddleware, setDefaultBankAccount);
+router.put("/wallet/bank-account/:accountId/default", authMiddleware, setDefaultBankAccount);
 
 /**
  * @swagger
@@ -519,7 +519,7 @@ router.put("/bank-account/:accountId/default", authMiddleware, setDefaultBankAcc
  *       401:
  *         description: Unauthorized
  */
-router.delete("/bank-account/:accountId", authMiddleware, deleteBankAccount);
+router.delete("/wallet/bank-account/:accountId", authMiddleware, deleteBankAccount);
 
 /**
  * @swagger
@@ -577,8 +577,8 @@ router.delete("/bank-account/:accountId", authMiddleware, deleteBankAccount);
  *       429:
  *         description: Too many failed attempts — account locked temporarily
  */
-router.post("/pin", authMiddleware, createWithdrawalPin);
-router.put("/pin", authMiddleware, changeWithdrawalPin);
+router.post("/wallet/pin", authMiddleware, createWithdrawalPin);
+router.put("/wallet/pin", authMiddleware, changeWithdrawalPin);
 
 /**
  * @swagger
@@ -640,7 +640,7 @@ router.put("/pin", authMiddleware, changeWithdrawalPin);
  *       401:
  *         description: Unauthorized
  */
-router.post("/withdraw", authMiddleware, requestWithdrawal);
+router.post("/wallet/withdraw", authMiddleware, requestWithdrawal);
 
 /**
  * @swagger
@@ -692,7 +692,7 @@ router.post("/withdraw", authMiddleware, requestWithdrawal);
  *       401:
  *         description: Unauthorized
  */
-router.get("/withdrawals", authMiddleware, getWithdrawalHistory);
+router.get("/wallet/withdrawals", authMiddleware, getWithdrawalHistory);
 
 /**
  * @swagger
@@ -719,7 +719,7 @@ router.get("/withdrawals", authMiddleware, getWithdrawalHistory);
  *       401:
  *         description: Unauthorized
  */
-router.get("/stats", authMiddleware, getWalletStats);
+router.get("/wallet/stats", authMiddleware, getWalletStats);
 
 /**
  * @swagger
@@ -733,7 +733,7 @@ router.get("/stats", authMiddleware, getWalletStats);
  *       200:
  *         description: Earnings overview retrieved successfully
  */
-router.get("/earnings-overview", authMiddleware, getEarningsOverview);
+router.get("/wallet/earnings-overview", authMiddleware, getEarningsOverview);
 
 // Transaction Routes
 
@@ -1203,7 +1203,7 @@ router.get("/admin/withdrawals/stats", authMiddleware, isAdmin, getWithdrawalSta
  *                   type: string
  *                   example: "Failed to download withdrawal receipt"
  */
-router.get("/withdrawal-receipt/:transactionId", authMiddleware, async (req, res) => {
+router.get("/wallet/withdrawal-receipt/:transactionId", authMiddleware, async (req, res) => {
   const { transactionId } = req.params;
   const { _id } = req.user;
   

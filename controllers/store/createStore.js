@@ -10,17 +10,18 @@ const audit = require("../../services/auditService");
 /**
  * @function createStore
  * @description Create a new store for a seller.
- *              Both `storeImage` and `ownerNIN` must be Cloudinary URLs — upload
- *              them via POST /api/upload/signature before calling this endpoint.
+ *              `ownerNIN` is required and must be a Cloudinary URL. `storeImage`
+ *              is optional; when supplied it must also be a Cloudinary URL. Upload
+ *              images via POST /api/upload/signature before calling this endpoint.
  * @param {Object} req.body.name          - Store name (required, unique)
  * @param {Object} req.body.address       - Store address (required)
  * @param {string} req.body.storeMobile   - Store contact number (required)
  * @param {string} req.body.storeEmail    - Store contact email (required)
- * @param {string} req.body.storeImage    - Cloudinary URL of the store photo (required)
  * @param {string} req.body.ownerNIN      - Cloudinary URL of the owner NIN image (required)
  * @param {string} req.body.businessType  - Type of business e.g. "Retail" (required)
  * @param {string} req.body.city          - City (required)
  * @param {string} req.body.state         - State (required)
+ * @param {string} [req.body.storeImage]  - Cloudinary URL of the store photo (optional)
  * @param {string} [req.body.description] - Store description (optional)
  */
 const createStore = asyncHandler(async (req, res) => {
@@ -47,7 +48,8 @@ const createStore = asyncHandler(async (req, res) => {
   if (!Validate.string(city))         ThrowError("City is required");
   if (!Validate.string(state))        ThrowError("State is required");
 
-  if (!Validate.cloudinaryUrl(storeImage)) {
+  // storeImage is optional — but if provided it must be a valid Cloudinary URL.
+  if (storeImage && !Validate.cloudinaryUrl(storeImage)) {
     return res.status(400).json({
       success: false,
       message:

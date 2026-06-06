@@ -28,12 +28,16 @@ var storeSchema = new mongoose.Schema(
     address: {
       type: String,
     },
-    // GeoJSON location for map display & geospatial queries
+    // GeoJSON location for map display & geospatial queries.
+    // NOTE: do not default `type` to "Point" — Mongoose would then persist
+    // `location: { type: "Point" }` with no coordinates for stores created
+    // without a geocoded address, producing invalid GeoJSON that makes the
+    // 2dsphere index throw "Can't extract geo keys". The whole `location`
+    // object must be omitted (or carry valid coordinates) instead.
     location: {
       type: {
         type: String,
         enum: ["Point"],
-        default: "Point",
       },
       coordinates: {
         type: [Number], // [longitude, latitude]
