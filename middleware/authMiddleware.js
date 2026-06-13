@@ -66,7 +66,16 @@ const isAdmin = asyncHandler(async (req, res, next) => {
   const userRoles = req.userRoles;
 
   if (!userRoles || !userRoles.includes("admin")) {
+    res.status(403);
     throw new Error("You are not an admin");
+  }
+
+  // Admin actions require the user to have explicitly switched into their admin
+  // role (PUT /api/user/change-role with { role: "admin" }). This keeps admin
+  // operations off the default session of multi-role accounts.
+  if (req.activeRole !== "admin") {
+    res.status(403);
+    throw new Error("Switch to your admin role to access this resource");
   }
 
   next();

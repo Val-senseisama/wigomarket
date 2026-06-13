@@ -18,11 +18,7 @@ const {
   getVATSummary,
   reverseTransaction
 } = require("../controllers/transactionController");
-const {
-  processWithdrawal,
-  getPendingWithdrawals,
-  getWithdrawalStats
-} = require("../controllers/withdrawalController");
+// Admin withdrawal endpoints (pending / process / stats) live in routes/adminRouter.js
 const receiptService = require("../services/receiptService");
 const Transaction = require("../models/transactionModel");
 const User = require("../models/userModel");
@@ -978,7 +974,7 @@ router.post("/transactions/:transactionId/reverse", authMiddleware, isAdmin, rev
  *       403:
  *         description: Admin access required
  */
-router.get("/admin/withdrawals/pending", authMiddleware, isAdmin, getPendingWithdrawals);
+// Moved to routes/adminRouter.js → GET /api/admin/withdrawals/pending
 
 /**
  * @swagger
@@ -1050,7 +1046,7 @@ router.get("/admin/withdrawals/pending", authMiddleware, isAdmin, getPendingWith
  *       404:
  *         description: Withdrawal transaction not found
  */
-router.post("/admin/withdrawals/:transactionId/process", authMiddleware, isAdmin, processWithdrawal);
+// Moved to routes/adminRouter.js → POST /api/admin/withdrawals/:transactionId/process
 
 /**
  * @swagger
@@ -1121,7 +1117,7 @@ router.post("/admin/withdrawals/:transactionId/process", authMiddleware, isAdmin
  *       403:
  *         description: Admin access required
  */
-router.get("/admin/withdrawals/stats", authMiddleware, isAdmin, getWithdrawalStats);
+// Moved to routes/adminRouter.js → GET /api/admin/withdrawals/stats
 
 // Wallet Receipt Routes
 

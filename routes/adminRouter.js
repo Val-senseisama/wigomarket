@@ -14,11 +14,58 @@ const asyncHandler = require("express-async-handler");
 const mongoose = require("mongoose");
 const AuditLog = require("../models/auditLogModel");
 const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
+const admin = require("../controllers/admin");
+const {
+  getPendingWithdrawals,
+  processWithdrawal,
+  getWithdrawalStats,
+} = require("../controllers/withdrawalController");
 
 const router = express.Router();
 
-// All routes in this file require admin access
+// All routes in this file require admin access.
+// isAdmin also enforces that the caller's activeRole === "admin".
 router.use(authMiddleware, isAdmin);
+
+// ── Dashboard ───────────────────────────────────────────────────────────────
+
+// GET /api/admin/overview — aggregated counts for the admin home screen
+router.get("/overview", admin.getOverview);
+
+// ── User management ───────────────────────────────────────────────────────────
+
+router.get("/users", admin.listUsers);
+router.get("/users/:id", admin.getUserDetail);
+router.put("/users/:id/roles", admin.updateUserRoles);
+router.put("/users/:id/status", admin.setUserStatus);
+
+// ── Dispatch (rider) management ────────────────────────────────────────────────
+
+router.get("/dispatch-profiles", admin.listDispatchProfiles);
+router.put("/dispatch-profiles/:id/approve", admin.approveDispatchProfile);
+router.put("/dispatch-profiles/:id/reject", admin.rejectDispatchProfile);
+router.put("/dispatch-profiles/:id/suspend", admin.suspendDispatchProfile);
+router.put(
+  "/dispatch-profiles/:id/documents/:docType/verify",
+  admin.verifyDispatchDocument,
+);
+
+// ── Store management ──────────────────────────────────────────────────────────
+
+router.get("/stores", admin.listStores);
+router.put("/stores/:id/status", admin.setStoreStatus);
+
+// ── Wallet management ─────────────────────────────────────────────────────────
+
+router.get("/wallets", admin.listWallets);
+router.put("/wallets/:id/status", admin.setWalletStatus);
+router.put("/wallets/:id/limits", admin.updateWalletLimits);
+
+// ── Withdrawals (handlers shared with the wallet flow) ─────────────────────────
+
+router.get("/withdrawals/pending", getPendingWithdrawals);
+router.post("/withdrawals/:transactionId/process", processWithdrawal);
+router.get("/withdrawals/stats", getWithdrawalStats);
 
 // ── Audit logs ────────────────────────────────────────────────────────────────
 
