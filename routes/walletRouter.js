@@ -12,6 +12,9 @@ const {
   getEarningsOverview,
   createWithdrawalPin,
   changeWithdrawalPin,
+  forgotWithdrawalPin,
+  verifyWithdrawalPinReset,
+  resetWithdrawalPin,
 } = require("../controllers/wallet");
 const {
   getTransactionHistory,
@@ -575,6 +578,144 @@ router.delete("/wallet/bank-account/:accountId", authMiddleware, deleteBankAccou
  */
 router.post("/wallet/pin", authMiddleware, createWithdrawalPin);
 router.put("/wallet/pin", authMiddleware, changeWithdrawalPin);
+
+/**
+ * @swagger
+ * /api/wallet/pin/forgot:
+ *   post:
+ *     tags: [Wallet]
+ *     summary: "Reset PIN — Step 1: request a reset code"
+ *     description: >
+ *       Starts the withdrawal PIN reset flow for a user who has forgotten their PIN.
+ *       Generates a 6-digit OTP, stores a hashed copy (15-minute validity) and emails
+ *       the code to the account's registered email. The code is never returned in the
+ *       response. Requires that a withdrawal PIN already exists.
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Reset code sent to the registered email
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "A withdrawal PIN reset code has been sent to your email."
+ *                 expiresIn:
+ *                   type: string
+ *                   example: "15 minutes"
+ *       400:
+ *         description: No withdrawal PIN set
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Wallet not found
+ */
+router.post("/wallet/pin/forgot", authMiddleware, forgotWithdrawalPin);
+
+/**
+ * @swagger
+ * /api/wallet/pin/verify-reset:
+ *   post:
+ *     tags: [Wallet]
+ *     summary: "Reset PIN — Step 2: verify the reset code"
+ *     description: >
+ *       Verifies the 6-digit OTP emailed in step 1. On success the OTP is consumed
+ *       (cannot be replayed) and a one-time `resetSession` nonce is returned. Store
+ *       this value — it is required as proof-of-possession in step 3
+ *       (PUT /api/wallet/pin/reset). After 5 incorrect attempts the code is
+ *       invalidated and a new one must be requested.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - code
+ *             properties:
+ *               code:
+ *                 type: string
+ *                 description: The 6-digit numeric OTP from the email
+ *                 example: "482910"
+ *     responses:
+ *       200:
+ *         description: Code verified — `resetSession` token returned for step 3
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Code verified. You may now set a new withdrawal PIN."
+ *                 resetSession:
+ *                   type: string
+ *                   description: One-time proof-of-possession token for step 3
+ *                   example: "a3f1c8e2b9d4..."
+ *       400:
+ *         description: Invalid format, no active reset request, or expired/incorrect code
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Wallet not found
+ *       429:
+ *         description: Too many incorrect attempts — request a new code
+ */
+router.post("/wallet/pin/verify-reset", authMiddleware, verifyWithdrawalPinReset);
+
+/**
+ * @swagger
+ * /api/wallet/pin/reset:
+ *   put:
+ *     tags: [Wallet]
+ *     summary: "Reset PIN — Step 3: set a new PIN"
+ *     description: >
+ *       Sets a new withdrawal PIN. Requires the `resetSession` token returned by
+ *       step 2 (POST /api/wallet/pin/verify-reset) as proof that the caller verified
+ *       the OTP. The reset state is consumed and any active PIN lockout is cleared.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - newPin
+ *               - resetSession
+ *             properties:
+ *               newPin:
+ *                 type: string
+ *                 pattern: '^\d{4,6}$'
+ *                 description: The new 4–6 digit PIN
+ *                 example: "1234"
+ *               resetSession:
+ *                 type: string
+ *                 description: The one-time token returned by step 2
+ *                 example: "a3f1c8e2b9d4..."
+ *     responses:
+ *       200:
+ *         description: Withdrawal PIN reset successfully
+ *       400:
+ *         description: Invalid PIN format, or invalid/expired reset session
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Wallet not found
+ */
+router.put("/wallet/pin/reset", authMiddleware, resetWithdrawalPin);
 
 /**
  * @swagger

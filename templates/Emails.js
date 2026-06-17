@@ -51,6 +51,20 @@ Welcome to WigoMarket! We are thrilled to have you as part of our vibrant commun
 };
 
 
+// Withdrawal PIN Reset Template
+ const withdrawalPinResetTemplate = (firstname, code) => {
+    return `
+        <div>
+            <h1>Hello ${firstname},</h1>
+            <p>Your withdrawal PIN reset code is <strong>${code}</strong>.</p>
+            <p>Use this code to set a new withdrawal PIN. It is valid for 15 minutes.</p>
+            <p>If you did not request a withdrawal PIN reset, please ignore this email and consider securing your account.</p>
+            <p>Thank you for using WigoMarket!</p>
+        </div>
+    `;
+};
+
+
 // Store Creation Success Template
  const storeCreationSuccessTemplate = (storeName, address) => {
     return `
@@ -86,4 +100,4 @@ Welcome to WigoMarket! We are thrilled to have you as part of our vibrant commun
     `;
 };
 
-module.exports = { welcome, storeAccountUpdateSuccessTemplate, storeCreationSuccessTemplate, forgotPasswordTemplate, verificationCodeTemplate }
+module.exports = { welcome, storeAccountUpdateSuccessTemplate, storeCreationSuccessTemplate, forgotPasswordTemplate, verificationCodeTemplate, withdrawalPinResetTemplate }

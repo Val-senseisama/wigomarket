@@ -97,6 +97,14 @@ const walletSchema = new mongoose.Schema(
         count: { type: Number, default: 0 },
         lockedUntil: Date,
       },
+      // Forgot/reset PIN flow state (emailed OTP → proof-of-possession nonce).
+      // All sensitive values are hashed and excluded from query results by default.
+      reset: {
+        otpHash: { type: String, select: false },
+        sessionHash: { type: String, select: false },
+        requestedAt: Date,
+        attempts: { type: Number, default: 0 },
+      },
     },
     // Wallet metadata
     metadata: {

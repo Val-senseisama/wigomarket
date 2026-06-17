@@ -7,7 +7,13 @@ const requestWithdrawal = require('./requestWithdrawal');
 const getWithdrawalHistory = require('./getWithdrawalHistory');
 const getWalletStats = require('./getWalletStats');
 const getEarningsOverview = require('./getEarningsOverview');
-const { createWithdrawalPin, changeWithdrawalPin } = require('./withdrawalPin');
+const {
+  createWithdrawalPin,
+  changeWithdrawalPin,
+  forgotWithdrawalPin,
+  verifyWithdrawalPinReset,
+  resetWithdrawalPin,
+} = require('./withdrawalPin');
 
 module.exports = {
   createWallet,
@@ -21,4 +27,7 @@ module.exports = {
   getEarningsOverview,
   createWithdrawalPin,
   changeWithdrawalPin,
+  forgotWithdrawalPin,
+  verifyWithdrawalPinReset,
+  resetWithdrawalPin,
 };
