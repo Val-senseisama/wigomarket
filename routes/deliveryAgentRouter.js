@@ -12,8 +12,11 @@ const {
   getDispatchProfile,
   getEarnings,
   getEarningsHistory,
+  getEarningsOverview,
   getDashboardStats,
   takeDispatch,
+  updateRiderAccount,
+  deleteRiderAccount,
 } = require("../controllers/dispatch");
 const {
   getNotifications,
@@ -681,6 +684,89 @@ router.get("/profile", authMiddleware, isDispatch, getDispatchProfile);
  */
 router.put("/profile", authMiddleware, isDispatch, updateDispatchProfile);
 
+// Rider Account (personal) Routes
+/**
+ * @swagger
+ * /api/delivery-agent/account:
+ *   put:
+ *     summary: Edit rider personal account
+ *     description: |
+ *       Self-service edit for the agent's personal account — the fields behind the
+ *       rider "Edit profile" screen. All fields are optional; only those present in
+ *       the body are updated. A profile photo can be uploaded here, and the password
+ *       can be changed in the same request by supplying both `password` and
+ *       `currentPassword`.
+ *
+ *       Vehicle, document and payout details live on the dispatch profile — edit
+ *       those via `PUT /api/delivery-agent/profile`.
+ *     tags: [Delivery Agent]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               fullName:
+ *                 type: string
+ *               firstname:
+ *                 type: string
+ *               lastname:
+ *                 type: string
+ *               mobile:
+ *                 type: string
+ *               image:
+ *                 type: string
+ *                 format: uri
+ *                 description: >
+ *                   Cloudinary URL of the profile photo. Upload via
+ *                   POST /api/upload/signature (folder: profiles) first.
+ *               residentialAddress:
+ *                 type: string
+ *               nextOfKin:
+ *                 type: object
+ *                 properties:
+ *                   name:
+ *                     type: string
+ *                   mobile:
+ *                     type: string
+ *               password:
+ *                 type: string
+ *                 description: New password (min 6 chars). Requires currentPassword.
+ *               currentPassword:
+ *                 type: string
+ *                 description: Current password — required when changing the password.
+ *     responses:
+ *       200:
+ *         description: Account updated successfully
+ *       400:
+ *         description: Validation error (invalid image, wrong current password, duplicate mobile)
+ *       403:
+ *         description: Access denied - delivery agent only
+ *       404:
+ *         description: User not found
+ *   delete:
+ *     summary: Delete rider account
+ *     description: |
+ *       Lets the agent delete their own account. Blocked while there are active
+ *       deliveries or an unwithdrawn wallet balance, so parcels and funds are never
+ *       stranded. Removes the user and dispatch profile; the wallet record is closed
+ *       (not hard-deleted) for audit purposes.
+ *     tags: [Delivery Agent]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Account deleted successfully
+ *       400:
+ *         description: Active deliveries or remaining balance prevent deletion
+ *       403:
+ *         description: Access denied - delivery agent only
+ */
+router.put("/account", authMiddleware, isDispatch, updateRiderAccount);
+router.delete("/account", authMiddleware, isDispatch, deleteRiderAccount);
+
 // Earnings and Analytics Routes
 /**
  * @swagger
@@ -752,8 +838,55 @@ router.get("/earnings", authMiddleware, isDispatch, getEarnings);
  *                   properties:
  *                     orders:
  *                       type: array
+ *                       description: One row per completed delivery
  *                       items:
- *                         $ref: '#/components/schemas/Order'
+ *                         type: object
+ *                         properties:
+ *                           orderId:
+ *                             type: string
+ *                           reference:
+ *                             type: string
+ *                             description: Human-facing order reference (clientSideId) or order id
+ *                           date:
+ *                             type: string
+ *                             format: date
+ *                             description: Delivery date (YYYY-MM-DD)
+ *                           time:
+ *                             type: string
+ *                             description: Delivery time (HH:mm, UTC)
+ *                           deliveredAt:
+ *                             type: string
+ *                             format: date-time
+ *                           customer:
+ *                             type: string
+ *                           customerMobile:
+ *                             type: string
+ *                           pickup:
+ *                             type: string
+ *                             description: Store name / pickup location
+ *                           dropoff:
+ *                             type: string
+ *                             description: Delivery address
+ *                           amount:
+ *                             type: number
+ *                             description: Delivery fee earned for this order
+ *                           status:
+ *                             type: string
+ *                     summary:
+ *                       type: object
+ *                       properties:
+ *                         totalEarnings:
+ *                           type: number
+ *                           description: Total earnings across the filtered range
+ *                         totalDeliveries:
+ *                           type: integer
+ *                         range:
+ *                           type: object
+ *                           properties:
+ *                             startDate:
+ *                               type: string
+ *                             endDate:
+ *                               type: string
  *                     pagination:
  *                       type: object
  *                       properties:
@@ -769,6 +902,53 @@ router.get("/earnings", authMiddleware, isDispatch, getEarnings);
  *                           type: boolean
  */
 router.get("/earnings-history", authMiddleware, isDispatch, getEarningsHistory);
+
+/**
+ * @swagger
+ * /api/delivery-agent/earnings/overview:
+ *   get:
+ *     summary: Get earnings overview figures
+ *     description: |
+ *       Returns the four headline numbers shown on the rider earnings screen:
+ *       today's earnings, this week's earnings, pending payout, and lifetime total
+ *       earnings — plus the currently withdrawable wallet balance.
+ *     tags: [Delivery Agent]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Earnings overview retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     today:
+ *                       type: number
+ *                       description: Delivery fees earned since midnight (Africa/Lagos)
+ *                     thisWeek:
+ *                       type: number
+ *                       description: Delivery fees earned since the start of the week
+ *                     pendingPayout:
+ *                       type: number
+ *                       description: Total of withdrawal requests still being processed
+ *                     totalEarnings:
+ *                       type: number
+ *                       description: Lifetime delivery earnings
+ *                     availableBalance:
+ *                       type: number
+ *                       description: Currently withdrawable wallet balance
+ *                     totalDeliveries:
+ *                       type: number
+ *       403:
+ *         description: Access denied - delivery agent only
+ */
+router.get("/earnings/overview", authMiddleware, isDispatch, getEarningsOverview);
 
 /**
  * @swagger

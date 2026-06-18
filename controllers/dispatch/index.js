@@ -8,6 +8,9 @@ const takeDispatch = require('./takeDispatch');
 const getDispatchOrders = require('./getDispatchOrders');
 
 const getEarningsHistory = require('./getEarningsHistory');
+const getEarningsOverview = require('./getEarningsOverview');
+const updateRiderAccount = require('./updateRiderAccount');
+const deleteRiderAccount = require('./deleteRiderAccount');
 
 module.exports = {
   createDispatchProfile,
@@ -15,8 +18,11 @@ module.exports = {
   getDispatchProfile,
   getEarnings,
   getEarningsHistory,
+  getEarningsOverview,
   getDashboardStats,
   updateAvailability,
   takeDispatch,
   getDispatchOrders,
+  updateRiderAccount,
+  deleteRiderAccount,
 };

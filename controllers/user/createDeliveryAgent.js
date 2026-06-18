@@ -47,10 +47,18 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
   const nextOfKin = req.body.nextOfKin;
   const gender = req.body.gender;
   const modeOfTransport = req.body.modeOfTransport;
+  const image = req.body.image;
   try {
     // Validate required fields
     if (!Validate.email(email)) {
       ThrowError("Invalid Email");
+    }
+
+    // Optional profile photo — must be a Cloudinary URL when supplied
+    if (image !== undefined && !Validate.cloudinaryUrl(image)) {
+      ThrowError(
+        "image must be a valid Cloudinary URL. Upload via POST /api/upload/signature (folder: profiles).",
+      );
     }
 
     if (!Validate.string(number)) {
@@ -113,6 +121,7 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
           mobile: nextOfKin.mobile,
         },
         modeOfTransport: modeOfTransport,
+        ...(image !== undefined && { image }),
       };
 
       const code = MakeID(6);
@@ -159,6 +168,7 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
             email: createUser.email,
             mobile: createUser.mobile,
             fullName: createUser.fullName,
+            image: createUser.image,
             role: createUser.role,
             activeRole: createUser.activeRole,
             gender: createUser.gender,
