@@ -4,6 +4,7 @@ const {
   selectOrder,
   updateDeliveryStatus,
   getMyDeliveries,
+  getDeliveryCounts,
   updateAvailability,
 } = require("../controllers/deliveryAgentController");
 const {
@@ -14,7 +15,6 @@ const {
   getEarningsHistory,
   getEarningsOverview,
   getDashboardStats,
-  takeDispatch,
   updateRiderAccount,
   deleteRiderAccount,
 } = require("../controllers/dispatch");
@@ -75,31 +75,7 @@ const router = express.Router();
  *                     orders:
  *                       type: array
  *                       items:
- *                         type: object
- *                         properties:
- *                           _id:
- *                             type: string
- *                           products:
- *                             type: array
- *                             items:
- *                               type: object
- *                               properties:
- *                                 product:
- *                                   type: object
- *                                 count:
- *                                   type: number
- *                                 price:
- *                                   type: number
- *                           deliveryMethod:
- *                             type: string
- *                           deliveryAddress:
- *                             type: string
- *                           deliveryStatus:
- *                             type: string
- *                           deliveryFee:
- *                             type: number
- *                           orderedBy:
- *                             type: object
+ *                         $ref: '#/components/schemas/DeliveryOrder'
  *                     pagination:
  *                       type: object
  *                       properties:
@@ -175,12 +151,15 @@ router.post("/orders/select", authMiddleware, isDispatch, selectOrder);
  * @swagger
  * /api/delivery-agent/orders/take:
  *   post:
- *     summary: Take an available order
+ *     deprecated: true
+ *     summary: "[Deprecated] Take an available order — alias of /orders/select"
  *     description: |
- *       Atomically assigns the requesting dispatch agent to a pending order.
- *       The order must have deliveryStatus of "pending_assignment". If two agents
- *       request the same order simultaneously, only one will succeed.
- *       The customer is notified by email (sent via background queue) when an agent is assigned.
+ *       **Deprecated.** This is now a thin alias of `POST /orders/select`; both
+ *       run the same handler. Prefer `/orders/select`, which atomically assigns the
+ *       requesting agent to a pending order (only one of two racing agents wins),
+ *       enforces the online + single-active-delivery guards, sets the estimated
+ *       delivery time, and emails the customer that an agent was assigned.
+ *       This route is kept only so existing clients keep working.
  *     tags: [Delivery Agent]
  *     security:
  *       - bearerAuth: []
@@ -198,25 +177,15 @@ router.post("/orders/select", authMiddleware, isDispatch, selectOrder);
  *                 description: ID of the order to take
  *     responses:
  *       200:
- *         description: Order assigned successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   type: object
- *                   description: The updated order document
+ *         description: Order assigned successfully (see /orders/select response)
  *       400:
- *         description: orderId missing or invalid
+ *         description: orderId missing/invalid, agent offline, or already has an active delivery
  *       403:
  *         description: Not a dispatch agent
  *       404:
  *         description: Order not found or already assigned to another agent
  */
-router.post("/orders/take", authMiddleware, isDispatch, takeDispatch);
+router.post("/orders/take", authMiddleware, isDispatch, selectOrder);
 
 /**
  * @swagger
@@ -275,8 +244,20 @@ router.put("/orders/status", authMiddleware, isDispatch, updateDeliveryStatus);
  * @swagger
  * /api/delivery-agent/delivery-agent/orders/my-deliveries:
  *   get:
- *     summary: Get my deliveries
- *     description: Get orders assigned to the current delivery agent
+ *     summary: Get my deliveries (rider's own orders, by tab)
+ *     description: |
+ *       Returns the authenticated rider's own orders — this is what powers the
+ *       Ongoing / Completed / Cancelled tabs (NOT `/orders/available`, which is the
+ *       unassigned pool). Pass `tab` to scope the list:
+ *
+ *       | tab        | matches deliveryStatus / order state                 |
+ *       |------------|-------------------------------------------------------|
+ *       | ongoing    | assigned, picked_up, in_transit                       |
+ *       | completed  | delivered                                             |
+ *       | cancelled  | failed, or order cancelled by the seller              |
+ *
+ *       Use `GET /orders/counts` for the tab badge numbers. The advanced `status`
+ *       param still filters by an exact deliveryStatus and is ignored when `tab` is set.
  *     tags:
  *       - Delivery Agent
  *     security:
@@ -295,11 +276,17 @@ router.put("/orders/status", authMiddleware, isDispatch, updateDeliveryStatus);
  *           default: 10
  *         description: Number of orders per page
  *       - in: query
+ *         name: tab
+ *         schema:
+ *           type: string
+ *           enum: [ongoing, completed, cancelled]
+ *         description: UI tab to scope the rider's orders by
+ *       - in: query
  *         name: status
  *         schema:
  *           type: string
  *           enum: [assigned, picked_up, in_transit, delivered, failed]
- *         description: Filter by delivery status
+ *         description: Exact deliveryStatus filter (advanced; ignored if tab is set)
  *     responses:
  *       200:
  *         description: My deliveries retrieved successfully
@@ -316,9 +303,11 @@ router.put("/orders/status", authMiddleware, isDispatch, updateDeliveryStatus);
  *                     orders:
  *                       type: array
  *                       items:
- *                         type: object
+ *                         $ref: '#/components/schemas/DeliveryOrder'
  *                     pagination:
  *                       type: object
+ *       400:
+ *         description: Invalid tab value
  *       403:
  *         description: Access denied - not a delivery agent
  */
@@ -328,6 +317,46 @@ router.get(
   isDispatch,
   getMyDeliveries,
 );
+
+/**
+ * @swagger
+ * /api/delivery-agent/delivery-agent/orders/counts:
+ *   get:
+ *     summary: Get rider order tab badge counts
+ *     description: |
+ *       Returns the badge numbers for the rider's order tabs (e.g. "Ongoing (3)")
+ *       plus the size of the available (unassigned) pool. Pair with
+ *       `GET /orders/my-deliveries?tab=...` to render each tab's list.
+ *     tags:
+ *       - Delivery Agent
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Counts retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     ongoing:
+ *                       type: integer
+ *                     completed:
+ *                       type: integer
+ *                     cancelled:
+ *                       type: integer
+ *                     available:
+ *                       type: integer
+ *                       description: Unassigned orders the rider could take
+ *       403:
+ *         description: Access denied - not a delivery agent
+ */
+router.get("/orders/counts", authMiddleware, isDispatch, getDeliveryCounts);
 
 /**
  * @swagger
@@ -1117,6 +1146,75 @@ router.get(
  * @swagger
  * components:
  *   schemas:
+ *     DeliveryOrder:
+ *       type: object
+ *       description: Rider-facing order shape returned by the available pool, my-deliveries and take/select endpoints.
+ *       properties:
+ *         orderId:
+ *           type: string
+ *           description: Mongo _id of the order (used for take/select/status calls).
+ *         orderNumber:
+ *           type: string
+ *           description: Human-facing Order ID shown in the UI, e.g. "#WM1201".
+ *           example: "#WM1201"
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *           description: When the order was placed — use for the "2 hours ago" label.
+ *         customer:
+ *           type: object
+ *           properties:
+ *             id: { type: string }
+ *             name: { type: string, example: "Ada Obi" }
+ *             phone: { type: string, example: "08012345678" }
+ *             email: { type: string }
+ *         pickup:
+ *           type: object
+ *           nullable: true
+ *           description: Primary pickup location (the store). null if the store is unknown.
+ *           properties:
+ *             id: { type: string }
+ *             store: { type: string, example: "Wigo Store" }
+ *             address: { type: string, example: "12 Yaba Road, Lagos" }
+ *             mobile: { type: string }
+ *         pickups:
+ *           type: array
+ *           description: All distinct pickup stores (multi-store orders); usually one entry.
+ *           items:
+ *             type: object
+ *             properties:
+ *               id: { type: string }
+ *               store: { type: string }
+ *               address: { type: string }
+ *               mobile: { type: string }
+ *         dropoff:
+ *           type: string
+ *           description: Customer delivery address.
+ *         products:
+ *           type: array
+ *           items:
+ *             type: object
+ *             properties:
+ *               productId: { type: string }
+ *               name: { type: string, example: "Nike Air Max" }
+ *               quantity: { type: integer, example: 2 }
+ *               price: { type: number, description: "Unit price", example: 25000 }
+ *               subtotal: { type: number, description: "price × quantity", example: 50000 }
+ *               image: { type: string, nullable: true }
+ *               store: { type: string, nullable: true }
+ *         itemsTotal: { type: number }
+ *         deliveryFee: { type: number }
+ *         total: { type: number }
+ *         currency: { type: string, example: "NGN" }
+ *         deliveryMethod: { type: string, example: "delivery_agent" }
+ *         deliveryStatus:
+ *           type: string
+ *           enum: [pending_assignment, assigned, picked_up, in_transit, delivered, failed]
+ *         orderStatus:
+ *           type: string
+ *           enum: [pending, confirmed, preparing, pickUpReady, inTransit, delivered, cancelled]
+ *         estimatedDeliveryTime: { type: string, format: date-time, nullable: true }
+ *         deliveryNotes: { type: string, nullable: true }
  *     DispatchProfile:
  *       type: object
  *       properties:

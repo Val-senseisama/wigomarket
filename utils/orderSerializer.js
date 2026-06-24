@@ -212,8 +212,93 @@ const serializeOrderDetail = (order) => {
   };
 };
 
+const customerPhone = (orderedBy) =>
+  (orderedBy && typeof orderedBy === "object" && orderedBy.mobile) || null;
+
+/**
+ * Build the list of pickup locations for an order. A rider order is usually a
+ * single store, but multi-store orders are supported: stores are de-duplicated
+ * by id. Requires products.store to be populated (name, address, mobile).
+ */
+const buildPickups = (order) => {
+  const seen = new Map();
+  for (const line of order.products || []) {
+    const store = line.store && typeof line.store === "object" ? line.store : null;
+    if (!store || !store._id) continue;
+    const id = store._id.toString();
+    if (seen.has(id)) continue;
+    seen.set(id, {
+      id: store._id,
+      store: store.name || null,
+      address: store.address || store.location?.formattedAddress || null,
+      mobile: store.mobile || null,
+    });
+  }
+  return Array.from(seen.values());
+};
+
+/**
+ * Rider-facing order shape for the delivery-agent app (available pool,
+ * my-deliveries tabs, take/select responses). Requires populated
+ * products.product (title, listedPrice, images, brand), products.store
+ * (name, address, mobile) and orderedBy (firstname, lastname, fullName,
+ * email, mobile).
+ */
+const serializeDeliveryOrder = (order) => {
+  const products = (order.products || []).map((line) => {
+    const item = serializeLineItem(line);
+    const store = line.store && typeof line.store === "object" ? line.store : null;
+    return {
+      productId: item.productId,
+      name: item.title,
+      quantity: item.quantity,
+      price: item.unitPrice,
+      subtotal: item.subtotal,
+      image: item.image,
+      store: store?.name || null,
+    };
+  });
+  const itemsTotal = products.reduce((sum, p) => sum + p.subtotal, 0);
+  const pickups = buildPickups(order);
+  const deliveryFee = order.deliveryFee || 0;
+
+  return {
+    // _id is the Mongo id; orderNumber (e.g. "#WM1201") is the human-facing
+    // Order ID shown in the UI.
+    orderId: order._id,
+    orderNumber: formatOrderNumber(order),
+    createdAt: order.createdAt, // drives the "2 hours ago" label
+    customer: {
+      id: order.orderedBy?._id || order.orderedBy || null,
+      name: customerName(order.orderedBy),
+      phone: customerPhone(order.orderedBy),
+      email: order.orderedBy?.email || null,
+    },
+    // pickup = primary store (most orders are single-store); pickups lists all
+    // distinct stores for multi-store orders.
+    pickup: pickups[0] || null,
+    pickups,
+    dropoff: order.deliveryAddress || order.deliveryLocation?.formattedAddress || null,
+    products,
+    itemsTotal,
+    deliveryFee,
+    total: order.paymentIntent?.amount ?? itemsTotal + deliveryFee,
+    currency: order.paymentIntent?.currency || "NGN",
+    deliveryMethod: order.deliveryMethod,
+    deliveryStatus: order.deliveryStatus,
+    orderStatus: order.orderStatus,
+    estimatedDeliveryTime: order.estimatedDeliveryTime || null,
+    deliveryNotes: order.deliveryNotes || null,
+  };
+};
+
+const serializeDeliveryOrderList = (orders) =>
+  (orders || []).map(serializeDeliveryOrder);
+
 module.exports = {
   serializeOrderSummary,
   serializeOrderDetail,
+  serializeDeliveryOrder,
+  serializeDeliveryOrderList,
   formatOrderNumber,
 };

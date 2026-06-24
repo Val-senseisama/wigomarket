@@ -8,6 +8,7 @@ const { ThrowError } = require("../Helpers/Helpers");
 const {
   sendPickedUpEmail,
   sendInTransitEmail,
+  sendAgentAssignedEmail,
 } = require("../services/dispatchEmailService");
 const audit = require("../services/auditService");
 const {
@@ -16,6 +17,28 @@ const {
   ROLE,
   STATUS,
 } = require("../services/orderTransitionService");
+const {
+  serializeDeliveryOrder,
+  serializeDeliveryOrderList,
+} = require("../utils/orderSerializer");
+
+// Maps the rider app's Ongoing / Completed / Cancelled tabs onto the underlying
+// deliveryStatus values. "cancelled" also matches orders the seller cancelled
+// (orderStatus === "cancelled") even if the rider never marked them failed.
+const TAB_FILTERS = {
+  ongoing: { deliveryStatus: { $in: ["assigned", "picked_up", "in_transit"] } },
+  completed: { deliveryStatus: "delivered" },
+  cancelled: {
+    $or: [{ deliveryStatus: "failed" }, { orderStatus: "cancelled" }],
+  },
+};
+
+// Standard population for rider order responses, consumed by serializeDeliveryOrder.
+const populateDeliveryOrder = (query) =>
+  query
+    .populate("products.product", "title listedPrice images brand")
+    .populate("products.store", "name address mobile location")
+    .populate("orderedBy", "firstname lastname fullName email mobile");
 
 /**
  * @function getAvailableOrders
@@ -66,10 +89,7 @@ const getAvailableOrders = asyncHandler(async (req, res) => {
   try {
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const orders = await Order.find(filters)
-      .populate("products.product", "title listedPrice images brand")
-      .populate("products.store", "name address mobile")
-      .populate("orderedBy", "firstname lastname email mobile")
+    const orders = await populateDeliveryOrder(Order.find(filters))
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -79,7 +99,7 @@ const getAvailableOrders = asyncHandler(async (req, res) => {
     res.json({
       success: true,
       data: {
-        orders,
+        orders: serializeDeliveryOrderList(orders),
         pagination: {
           currentPage: parseInt(page),
           totalPages: Math.ceil(total / parseInt(limit)),
@@ -191,15 +211,13 @@ const selectOrder = asyncHandler(async (req, res) => {
       {
         $set: {
           deliveryAgent: _id,
+          dispatch: _id, // keep legacy dispatch ref in sync (was set by /orders/take)
           deliveryStatus: "assigned",
           estimatedDeliveryTime: new Date(Date.now() + 2 * 60 * 60 * 1000), // 2 hours from now
         },
       },
       { new: true },
-    )
-      .populate("products.product", "title listedPrice images brand")
-      .populate("products.store", "name address mobile")
-      .populate("orderedBy", "firstname lastname email mobile");
+    );
 
     if (!updatedOrder) {
       return res.status(400).json({
@@ -208,18 +226,36 @@ const selectOrder = asyncHandler(async (req, res) => {
       });
     }
 
+    const populatedOrder = await populateDeliveryOrder(
+      Order.findById(updatedOrder._id),
+    );
+
     // Update delivery agent's status to busy (dot notation preserves workingDays etc.)
     await DispatchProfile.findOneAndUpdate(
       { user: _id },
       { "availability.status": "busy", lastActiveAt: new Date() },
     );
 
+    // Notify the customer that an agent has been assigned — non-blocking.
+    const agent = await User.findById(_id).select("fullName firstname lastname");
+    sendAgentAssignedEmail(populatedOrder.orderedBy, agent, populatedOrder);
+
+    audit.log({
+      action: "dispatch.taken",
+      actor: audit.actor(req),
+      resource: { type: "order", id: orderId },
+      changes: {
+        before: { deliveryStatus: "pending_assignment" },
+        after: { deliveryStatus: "assigned", deliveryAgent: _id },
+      },
+    });
+
     res.json({
       success: true,
       message: "Order selected successfully",
       data: {
-        order: updatedOrder,
-        estimatedDeliveryTime: updatedOrder.estimatedDeliveryTime,
+        order: serializeDeliveryOrder(populatedOrder),
+        estimatedDeliveryTime: populatedOrder.estimatedDeliveryTime,
       },
     });
   } catch (error) {
@@ -311,12 +347,9 @@ const updateDeliveryStatus = asyncHandler(async (req, res) => {
     const updateData = { deliveryStatus: status };
     if (notes) updateData.deliveryNotes = notes;
 
-    const updatedOrder = await Order.findByIdAndUpdate(orderId, updateData, {
-      new: true,
-    })
-      .populate("products.product", "title listedPrice images brand")
-      .populate("products.store", "name address mobile")
-      .populate("orderedBy", "firstname lastname email mobile");
+    const updatedOrder = await populateDeliveryOrder(
+      Order.findByIdAndUpdate(orderId, updateData, { new: true }),
+    );
 
     // Update agent availability
     const dispatchProfile = await DispatchProfile.findOne({ user: _id });
@@ -353,7 +386,7 @@ const updateDeliveryStatus = asyncHandler(async (req, res) => {
     res.json({
       success: true,
       message: `Delivery status updated to ${status}`,
-      data: updatedOrder,
+      data: serializeDeliveryOrder(updatedOrder),
     });
   } catch (error) {
     console.log(error);
@@ -363,18 +396,20 @@ const updateDeliveryStatus = asyncHandler(async (req, res) => {
 
 /**
  * @function getMyDeliveries
- * @description Get delivery agent's assigned orders
+ * @description Get the authenticated rider's own orders, optionally narrowed to
+ *              one of the Ongoing / Completed / Cancelled UI tabs.
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  * @param {string} req.user._id - Authenticated delivery agent's ID
  * @param {number} [req.query.page=1] - Page number
  * @param {number} [req.query.limit=10] - Items per page
- * @param {string} [req.query.status] - Filter by delivery status
+ * @param {string} [req.query.tab] - UI tab: ongoing | completed | cancelled
+ * @param {string} [req.query.status] - Exact deliveryStatus filter (advanced; ignored if tab is set)
  * @returns {Object} - Delivery agent's orders
  */
 const getMyDeliveries = asyncHandler(async (req, res) => {
   const { _id } = req.user;
-  const { page = 1, limit = 10, status } = req.query;
+  const { page = 1, limit = 10, status, tab } = req.query;
 
   // Verify user is a delivery agent
   if (!req.userRoles.includes("dispatch")) {
@@ -384,23 +419,30 @@ const getMyDeliveries = asyncHandler(async (req, res) => {
     });
   }
 
-  // Build filter
+  if (tab && !TAB_FILTERS[tab]) {
+    return res.status(400).json({
+      success: false,
+      message: `Invalid tab. Must be one of: ${Object.keys(TAB_FILTERS).join(", ")}`,
+    });
+  }
+
+  // Base scope: only this rider's delivery-agent orders.
   const filters = {
     deliveryAgent: _id,
     deliveryMethod: "delivery_agent",
   };
 
-  if (status) {
+  // A tab (UI) takes precedence over an exact status filter (advanced use).
+  if (tab) {
+    Object.assign(filters, TAB_FILTERS[tab]);
+  } else if (status) {
     filters.deliveryStatus = status;
   }
 
   try {
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const orders = await Order.find(filters)
-      .populate("products.product", "title listedPrice images brand")
-      .populate("products.store", "name address mobile")
-      .populate("orderedBy", "firstname lastname email mobile")
+    const orders = await populateDeliveryOrder(Order.find(filters))
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -410,7 +452,7 @@ const getMyDeliveries = asyncHandler(async (req, res) => {
     res.json({
       success: true,
       data: {
-        orders,
+        orders: serializeDeliveryOrderList(orders),
         pagination: {
           currentPage: parseInt(page),
           totalPages: Math.ceil(total / parseInt(limit)),
@@ -486,10 +528,50 @@ const updateAvailability = asyncHandler(async (req, res) => {
   }
 });
 
+/**
+ * @function getDeliveryCounts
+ * @description Returns the badge counts for the rider's order tabs
+ *              (e.g. "Ongoing (3)"), plus the size of the available pool.
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.user._id - Authenticated delivery agent's ID
+ * @returns {Object} - { ongoing, completed, cancelled, available }
+ */
+const getDeliveryCounts = asyncHandler(async (req, res) => {
+  const { _id } = req.user;
+
+  if (!req.userRoles.includes("dispatch")) {
+    return res.status(403).json({
+      success: false,
+      message: "Access denied. Only delivery agents can view order counts.",
+    });
+  }
+
+  const mine = { deliveryAgent: _id, deliveryMethod: "delivery_agent" };
+
+  const [ongoing, completed, cancelled, available] = await Promise.all([
+    Order.countDocuments({ ...mine, ...TAB_FILTERS.ongoing }),
+    Order.countDocuments({ ...mine, ...TAB_FILTERS.completed }),
+    Order.countDocuments({ ...mine, ...TAB_FILTERS.cancelled }),
+    Order.countDocuments({
+      deliveryMethod: "delivery_agent",
+      deliveryStatus: "pending_assignment",
+      deliveryAgent: { $exists: false },
+      orderStatus: { $ne: "cancelled" },
+    }),
+  ]);
+
+  res.json({
+    success: true,
+    data: { ongoing, completed, cancelled, available },
+  });
+});
+
 module.exports = {
   getAvailableOrders,
   selectOrder,
   updateDeliveryStatus,
   getMyDeliveries,
+  getDeliveryCounts,
   updateAvailability,
 };
