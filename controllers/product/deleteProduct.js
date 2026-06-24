@@ -2,7 +2,8 @@ const Product = require("../../models/productModel");
 const Order = require("../../models/orderModel");
 const asyncHandler = require("express-async-handler");
 const validateMongodbId = require("../../utils/validateMongodbId");
-const { OrderStatus, PaymentStatus } = require("../../utils/constants");
+const { PaymentStatus } = require("../../utils/constants");
+const { ACTIVE_STATUSES } = require("../../utils/orderStatus");
 const audit = require("../../services/auditService");
 
 /**
@@ -23,9 +24,8 @@ const deleteProduct = asyncHandler(async (req, res) => {
   const activeOrder = await Order.findOne({
     "products.product": id,
     paymentStatus: PaymentStatus.PAID,
-    orderStatus: {
-      $in: [OrderStatus.NOT_PROCESSED, OrderStatus.PROCESSING, OrderStatus.PENDING],
-    },
+    // Any non-terminal (in-progress) lifecycle state blocks deletion.
+    orderStatus: { $in: ACTIVE_STATUSES },
   });
 
   if (activeOrder) {

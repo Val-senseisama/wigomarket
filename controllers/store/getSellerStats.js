@@ -34,7 +34,7 @@ const getSellerStats = asyncHandler(async (req, res) => {
       Product.countDocuments({ store: storeId }),
       Order.countDocuments({
         "products.store": storeId,
-        orderStatus: "Delivered",
+        orderStatus: "delivered",
       }),
       Store.aggregate([
         { $match: { _id: store._id } },

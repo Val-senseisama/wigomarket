@@ -73,7 +73,7 @@ const getSuggestedProducts = asyncHandler(async (req, res) => {
   // ── Personalised path ────────────────────────────────────────────────────────
   if (userId) {
     const recentOrders = await Order.find(
-      { orderedBy: userId, orderStatus: "Delivered" },
+      { orderedBy: userId, orderStatus: "delivered" },
       { "products.product": 1 },
     )
       .sort({ createdAt: -1 })

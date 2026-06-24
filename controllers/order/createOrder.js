@@ -7,6 +7,7 @@ const Product = require("../../models/productModel");
 const Store = require("../../models/storeModel");
 const User = require("../../models/userModel");
 const { validateMongodbId } = require("../../utils/validateMongodbId");
+const { generateOrderNumber } = require("../../utils/generateOrderNumber");
 const appConfig = require("../../config/appConfig");
 const deliveryFeeService = require("../../services/deliveryFeeService");
 const googleMapsService = require("../../services/googleMapsService");
@@ -226,8 +227,13 @@ const createOrder = asyncHandler(async (req, res) => {
         }
       }
 
+      // Generate the human-friendly sequential order number (e.g. WM1201).
+      // Uses the session so the counter rolls back if the transaction aborts.
+      const orderNumber = await generateOrderNumber(session);
+
       // Create order
       const order = new Order({
+        orderNumber,
         products: userCart.products,
         paymentIntent: {
           id: uniqid(),
@@ -250,7 +256,10 @@ const createOrder = asyncHandler(async (req, res) => {
             ? DeliveryStatus.PENDING_ASSIGNMENT
             : DeliveryStatus.ASSIGNED,
         orderedBy: _id,
-        orderStatus: OrderStatus.NOT_PROCESSED,
+        orderStatus: OrderStatus.PENDING,
+        statusHistory: [
+          { status: OrderStatus.PENDING, at: new Date(), role: "system" },
+        ],
         paymentStatus: PaymentStatus.UNPAID,
         paymentMethod: paymentMethod,
         clientSideId: clientSideId,
@@ -318,7 +327,7 @@ const createOrder = asyncHandler(async (req, res) => {
       resource: {
         type: "order",
         id: populatedOrder._id,
-        displayName: `#${populatedOrder.paymentIntent.id}`,
+        displayName: `#${populatedOrder.orderNumber}`,
       },
       changes: {
         after: {
@@ -327,7 +336,7 @@ const createOrder = asyncHandler(async (req, res) => {
           totalAmount,
           deliveryFee,
           paymentStatus: "Unpaid",
-          orderStatus: "Not yet processed",
+          orderStatus: OrderStatus.PENDING,
         },
       },
     });
@@ -343,14 +352,14 @@ const createOrder = asyncHandler(async (req, res) => {
       await sendOrderNotification(
         _id,
         "Order Created Successfully",
-        `Your order #${populatedOrder.paymentIntent.id} has been created. ${
+        `Your order #${populatedOrder.orderNumber} has been created. ${
           deliveryMethod === DeliveryMethod.DELIVERY_AGENT
             ? "Waiting for delivery agent assignment."
             : "Ready for pickup."
         }`,
         {
           orderId: populatedOrder._id.toString(),
-          orderNumber: populatedOrder.paymentIntent.id,
+          orderNumber: populatedOrder.orderNumber,
           totalAmount: totalAmount.toString(),
           deliveryMethod: deliveryMethod,
         },
@@ -361,10 +370,10 @@ const createOrder = asyncHandler(async (req, res) => {
       if (deliveryMethod === DeliveryMethod.DELIVERY_AGENT) {
         await sendDeliveryAgentNotification(
           "new_order_available",
-          `New delivery order available: Order #${populatedOrder.paymentIntent.id}`,
+          `New delivery order available: Order #${populatedOrder.orderNumber}`,
           {
             orderId: populatedOrder._id.toString(),
-            orderNumber: populatedOrder.paymentIntent.id,
+            orderNumber: populatedOrder.orderNumber,
             deliveryAddress: deliveryAddress,
             totalAmount: totalAmount.toString(),
           },

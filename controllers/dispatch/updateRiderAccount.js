@@ -24,6 +24,8 @@ const audit = require("../../services/auditService");
  * @body {string} [mobile]
  * @body {string} [image]            - Cloudinary URL of the profile photo
  * @body {string} [residentialAddress]
+ * @body {string} [state]
+ * @body {string} [city]
  * @body {Object} [nextOfKin]        - { name, mobile }
  * @body {string} [password]         - New password
  * @body {string} [currentPassword]  - Required when `password` is supplied
@@ -37,6 +39,8 @@ const updateRiderAccount = asyncHandler(async (req, res) => {
     mobile,
     image,
     residentialAddress,
+    state,
+    city,
     nextOfKin,
     password,
     currentPassword,
@@ -58,6 +62,8 @@ const updateRiderAccount = asyncHandler(async (req, res) => {
   if (lastname !== undefined) updates.lastname = lastname;
   if (image !== undefined) updates.image = image;
   if (residentialAddress !== undefined) updates.residentialAddress = residentialAddress;
+  if (state !== undefined) updates.state = state;
+  if (city !== undefined) updates.city = city;
   if (nextOfKin !== undefined) {
     if (nextOfKin?.name !== undefined) updates["nextOfKin.name"] = nextOfKin.name;
     if (nextOfKin?.mobile !== undefined) updates["nextOfKin.mobile"] = nextOfKin.mobile;
@@ -155,6 +161,8 @@ function serialize(user) {
     lastname: user.lastname,
     image: user.image,
     residentialAddress: user.residentialAddress,
+    state: user.state,
+    city: user.city,
     nextOfKin: user.nextOfKin,
     role: user.role,
     activeRole: user.activeRole,

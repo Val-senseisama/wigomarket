@@ -10,6 +10,12 @@ const {
   sendInTransitEmail,
 } = require("../services/dispatchEmailService");
 const audit = require("../services/auditService");
+const {
+  transitionOrder,
+  OrderTransitionError,
+  ROLE,
+  STATUS,
+} = require("../services/orderTransitionService");
 
 /**
  * @function getAvailableOrders
@@ -47,7 +53,7 @@ const getAvailableOrders = asyncHandler(async (req, res) => {
   const filters = {
     deliveryMethod: "delivery_agent",
     deliveryStatus: status || "pending_assignment",
-    orderStatus: { $ne: "Cancelled" },
+    orderStatus: { $ne: "cancelled" },
   };
 
   // If looking for pending assignments, exclude orders already assigned to this agent
@@ -279,6 +285,27 @@ const updateDeliveryStatus = asyncHandler(async (req, res) => {
         success: false,
         message: "Order not found or not assigned to you",
       });
+    }
+
+    // Going in transit advances the canonical lifecycle (pickUpReady → inTransit)
+    // via the state machine. This also enforces ordering: the seller must have
+    // marked the order pickUpReady before the rider can set it in transit.
+    if (status === "in_transit") {
+      try {
+        await transitionOrder({
+          orderId,
+          toStatus: STATUS.IN_TRANSIT,
+          role: ROLE.RIDER,
+          req,
+        });
+      } catch (err) {
+        if (err instanceof OrderTransitionError) {
+          return res
+            .status(err.statusCode)
+            .json({ success: false, message: err.message });
+        }
+        throw err;
+      }
     }
 
     const updateData = { deliveryStatus: status };

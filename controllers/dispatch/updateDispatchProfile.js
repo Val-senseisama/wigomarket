@@ -5,6 +5,7 @@ const User = require("../../models/userModel");
 const validateMongodbId = require("../../utils/validateMongodbId");
 const { Validate } = require("../../Helpers/Validate");
 const { ThrowError } = require("../../Helpers/Helpers");
+const { normalizeVehicleType, UI_VEHICLE_TYPES } = require("../../utils/vehicleType");
 
 /**
  * @function updateDispatchProfile
@@ -25,6 +26,18 @@ const updateDispatchProfile = asyncHandler(async (req, res) => {
       success: false,
       message: "Access denied. Only delivery agents can update dispatch profiles."
     });
+  }
+
+  // Normalise the vehicle type (e.g. "motor bike" → "motorcycle") if supplied.
+  if (updateData.vehicleInfo && updateData.vehicleInfo.type !== undefined) {
+    const normalized = normalizeVehicleType(updateData.vehicleInfo.type);
+    if (!normalized) {
+      return res.status(400).json({
+        success: false,
+        message: `vehicleInfo.type must be one of: ${UI_VEHICLE_TYPES.join(", ")}`,
+      });
+    }
+    updateData.vehicleInfo.type = normalized;
   }
 
   try {

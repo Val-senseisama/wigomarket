@@ -244,7 +244,7 @@ async function _creditEarnings(order, agentUserId, actorContext = {}) {
     changes: {
       after: {
         deliveryStatus: "delivered",
-        orderStatus: "Delivered",
+        orderStatus: "delivered",
         earningsCredited: earningsAmount,
       },
     },

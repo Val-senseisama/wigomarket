@@ -257,7 +257,7 @@ const refundPayment = asyncHandler(async (req, res) => {
             after: {
               refundAmount,
               paymentStatus: "Refunded",
-              orderStatus: "Cancelled",
+              orderStatus: "cancelled",
               reason: reason || "Customer request",
             },
           },

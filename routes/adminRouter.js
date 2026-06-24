@@ -55,6 +55,91 @@ router.put(
 router.get("/stores", admin.listStores);
 router.put("/stores/:id/status", admin.setStoreStatus);
 
+// ── Order management ──────────────────────────────────────────────────────────
+
+/**
+ * @swagger
+ * /api/admin/orders:
+ *   get:
+ *     summary: List all orders across stores (paginated, filterable)
+ *     description: |
+ *       Platform-wide order list for the admin dashboard. Same query contract as
+ *       the seller order list: category (recent/ongoing/history), status,
+ *       orderType, dateFrom, dateTo, search (order number or customer name),
+ *       sortBy, sortOrder, page, limit.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Paginated list of order rows with category counts
+ */
+router.get("/orders", admin.listOrders);
+
+/**
+ * @swagger
+ * /api/admin/orders/{id}:
+ *   get:
+ *     summary: Get full order detail (any order)
+ *     description: |
+ *       Full order detail for the admin order-details screen: header, buyer &
+ *       delivery info, line items, totals, payment info, lifecycle timeline, and
+ *       buyer note.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Order detail
+ *       404:
+ *         description: Order not found
+ */
+router.get("/orders/:id", admin.getOrderDetail);
+
+/**
+ * @swagger
+ * /api/admin/orders/{id}/contact:
+ *   post:
+ *     summary: Send a direct message to the buyer of an order
+ *     description: |
+ *       Sends a free-text message to the customer who placed the order. The
+ *       message is stored as an in-app notification and delivered over the
+ *       buyer's enabled channels (push + email).
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [message]
+ *             properties:
+ *               message:
+ *                 type: string
+ *                 maxLength: 2000
+ *                 example: "Hi, your order is being prepared and will ship today."
+ *     responses:
+ *       200:
+ *         description: Message sent
+ *       400:
+ *         description: Missing or invalid message
+ *       404:
+ *         description: Order not found
+ */
+router.post("/orders/:id/contact", admin.contactCustomer);
+
 // ── Wallet management ─────────────────────────────────────────────────────────
 
 router.get("/wallets", admin.listWallets);

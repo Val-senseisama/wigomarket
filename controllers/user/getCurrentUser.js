@@ -12,6 +12,7 @@ const Validate = require("../../Helpers/Validate");
 const Order = require("../../models/orderModel");
 const Product = require("../../models/productModel");
 const Store = require("../../models/storeModel");
+const Wallet = require("../../models/walletModel");
 const uniqid = require("uniqid");
 const { ThrowError, MakeID } = require("../../Helpers/Helpers");
 
@@ -54,6 +55,12 @@ const getCurrentUser = asyncHandler(async (req, res) => {
       }).select("vehicleInfo availability rating earnings status isActive");
       populatedUser.dispatchProfile = dispatchProfile;
     }
+
+    // Cheap existence check so the dashboard can show wallet setup state without
+    // a separate GET /wallet call. Wallet creation is optional during onboarding.
+    populatedUser.hasWallet = Boolean(
+      await Wallet.exists({ user: user._id }),
+    );
 
     res.json({
       success: true,

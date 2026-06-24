@@ -14,11 +14,15 @@ var dispatchProfileSchema = new mongoose.Schema(
         enum: ["bike", "motorcycle", "car", "van", "truck", "bicycle", "feet", "bus"],
         required: true,
       },
-      make:        { type: String, required: true },
-      model:       { type: String, required: true },
-      year:        { type: Number, required: true },
-      plateNumber: { type: String, required: true, unique: true },
-      color:       { type: String, required: true },
+      // make/model/year/plateNumber/color only apply to motorised vehicles.
+      // Non-motorised agents (feet, bicycle) leave these blank — the controller
+      // enforces them per vehicle type. plateNumber stays unique but sparse so
+      // multiple plate-less agents don't collide on a null value.
+      make:        { type: String },
+      model:       { type: String },
+      year:        { type: Number },
+      plateNumber: { type: String, unique: true, sparse: true },
+      color:       { type: String },
     },
 
     coverageAreas: [

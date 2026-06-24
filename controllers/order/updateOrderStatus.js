@@ -1,96 +1,58 @@
 const asyncHandler = require("express-async-handler");
 const mongoose = require("mongoose");
-const Order = require("../../models/orderModel");
-const Product = require("../../models/productModel");
 const Transaction = require("../../models/transactionModel");
-const { validateMongodbId } = require("../../utils/validateMongodbId");
+const validateMongodbId = require("../../utils/validateMongodbId");
 const { MakeID } = require("../../Helpers/Helpers");
-const { OrderStatus, PaymentStatus } = require("../../utils/constants");
-const audit = require("../../services/auditService");
+const { normalizeStatus } = require("../../utils/orderStatus");
+const {
+  transitionOrder,
+  OrderTransitionError,
+  ROLE,
+} = require("../../services/orderTransitionService");
 
 /**
  * @function updateOrderStatus
- * @description Updates the status of a specific order.
- *   - Wrapped in a MongoDB transaction so the status update, stock restoration,
- *     and audit record are atomic.
- *   - Restores product stock (quantity + sold) atomically when cancelling an
- *     order that was not already cancelled.
- *   - Creates an order_cancellation Transaction record for every status change
- *     as an audit trail.
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
+ * @description Admin order status override. Admins may perform any valid
+ *   transition in the state machine (validated by orderTransitionService).
+ *   Cancellation side-effects (stock restoration + payment reconciliation) are
+ *   handled inside the service. A zero-value Transaction row is written as an
+ *   immutable audit trail, atomically with the status change.
+ * @access Admin only
  * @param {string} req.params.id - Order ID
- * @param {string} req.body.status - New OrderStatus value
+ * @param {string} req.body.status - Target canonical status
+ * @param {string} [req.body.reason] - Optional reason (recorded in audit log)
  */
 const updateOrderStatus = asyncHandler(async (req, res) => {
-  const { status } = req.body;
+  const { status, reason } = req.body;
   const { id } = req.params;
 
   validateMongodbId(id);
 
-  if (!Object.values(OrderStatus).includes(status)) {
+  if (!status) {
     return res
       .status(400)
-      .json({ success: false, message: "Invalid order status value" });
+      .json({ success: false, message: "status is required" });
   }
 
   const session = await mongoose.startSession();
-
   try {
     let updatedOrder;
-    let isCancelling = false;
     let previousStatus;
 
     await session.withTransaction(async () => {
-      const order = await Order.findById(id)
-        .populate("products.product", "_id quantity sold")
-        .session(session);
+      const Order = require("../../models/orderModel");
+      const existing = await Order.findById(id).select("orderStatus orderedBy").session(session);
+      previousStatus = existing ? normalizeStatus(existing.orderStatus) : undefined;
 
-      if (!order) {
-        throw new Error("Order not found");
-      }
-
-      if (order.orderStatus === status) {
-        throw new Error(`Order is already in '${status}' status`);
-      }
-
-      previousStatus = order.orderStatus;
-      isCancelling =
-        status === OrderStatus.CANCELLED &&
-        order.orderStatus !== OrderStatus.CANCELLED;
-
-      // Atomically restore product stock when cancelling.
-      // Guard sold >= item.count so a double-cancellation can never push sold below 0.
-      if (isCancelling) {
-        const productUpdates = order.products
-          .filter((item) => item.product)
-          .map((item) => ({
-            updateOne: {
-              filter: { _id: item.product._id, sold: { $gte: item.count } },
-              update: { $inc: { quantity: item.count, sold: -item.count } },
-            },
-          }));
-
-        if (productUpdates.length > 0) {
-          await Product.bulkWrite(productUpdates, { session });
-        }
-      }
-
-      const orderUpdate = { orderStatus: status };
-      if (isCancelling) {
-        // Mark as refunded if already paid, otherwise failed
-        orderUpdate.paymentStatus =
-          order.paymentStatus === PaymentStatus.PAID
-            ? PaymentStatus.REFUNDED
-            : PaymentStatus.FAILED;
-      }
-
-      updatedOrder = await Order.findByIdAndUpdate(id, orderUpdate, {
-        new: true,
+      updatedOrder = await transitionOrder({
+        orderId: id,
+        toStatus: status,
+        role: ROLE.ADMIN,
+        req,
+        reason,
         session,
       });
 
-      // Audit trail — record every status transition as a zero-value transaction
       await Transaction.createTransaction(
         {
           transactionId: `STS_${Date.now()}_${MakeID(16)}`,
@@ -100,14 +62,14 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
           entries: [
             {
               account: "accounts_receivable",
-              userId: order.orderedBy,
+              userId: updatedOrder.orderedBy,
               debit: 0,
               credit: 0,
-              description: `Order status: '${order.orderStatus}' → '${status}'`,
+              description: `Order status: '${previousStatus}' → '${status}'`,
             },
             {
               account: "cash_account",
-              userId: order.orderedBy,
+              userId: updatedOrder.orderedBy,
               debit: 0,
               credit: 0,
               description: `Audit entry for order ${id}`,
@@ -116,25 +78,20 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
           relatedEntity: { type: "order", id },
           status: "completed",
           metadata: {
-            notes: `Status changed from '${order.orderStatus}' to '${status}'. Stock restored: ${isCancelling}`,
+            notes: `Status changed from '${previousStatus}' to '${status}' by admin.`,
           },
         },
         session,
       );
     });
 
-    audit.log({
-      action: "order.status_updated",
-      actor: audit.actor(req),
-      resource: { type: "order", id },
-      changes: {
-        before: { orderStatus: previousStatus },
-        after: { orderStatus: status, stockRestored: isCancelling },
-      },
-    });
-
     res.json({ success: true, data: updatedOrder });
   } catch (error) {
+    if (error instanceof OrderTransitionError) {
+      return res
+        .status(error.statusCode)
+        .json({ success: false, message: error.message });
+    }
     throw new Error(error.message || "Order status update failed");
   } finally {
     await session.endSession();

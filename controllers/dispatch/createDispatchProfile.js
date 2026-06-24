@@ -1,6 +1,11 @@
 const asyncHandler = require("express-async-handler");
 const DispatchProfile = require("../../models/dispatchProfileModel");
 const { Validate } = require("../../Helpers/Validate");
+const {
+  UI_VEHICLE_TYPES,
+  NON_MOTORISED_TYPES,
+  normalizeVehicleType,
+} = require("../../utils/vehicleType");
 
 /**
  * @function createDispatchProfile
@@ -14,6 +19,9 @@ const { Validate } = require("../../Helpers/Validate");
  *   The returned `setupLevel` and `setupSteps` fields show onboarding progress.
  *
  * @param {Object}   req.body.vehicleInfo               - Vehicle details (required)
+ *   vehicleInfo.type accepts the UI labels: feet, bicycle, car, motor bike, bus
+ *   (normalised to the schema enum). For non-motorised types (feet, bicycle)
+ *   only `type` is needed — make/model/year/plateNumber/color are not required.
  * @param {string[]} [req.body.coverageAreas]           - Service areas (optional)
  * @param {string[]} [req.body.workingDays]             - Working days (optional)
  * @param {Object}   [req.body.documents]               - Documents (optional at creation)
@@ -35,13 +43,31 @@ const createDispatchProfile = asyncHandler(async (req, res) => {
   if (!vehicleInfo || typeof vehicleInfo !== "object") {
     return res.status(400).json({ success: false, message: "vehicleInfo is required" });
   }
-  const { type, make, model, year, plateNumber, color } = vehicleInfo;
-  if (!Validate.string(type))        return res.status(400).json({ success: false, message: "vehicleInfo.type is required" });
-  if (!Validate.string(make))        return res.status(400).json({ success: false, message: "vehicleInfo.make is required" });
-  if (!Validate.string(model))       return res.status(400).json({ success: false, message: "vehicleInfo.model is required" });
-  if (!Validate.integer(year))       return res.status(400).json({ success: false, message: "vehicleInfo.year must be an integer" });
-  if (!Validate.string(plateNumber)) return res.status(400).json({ success: false, message: "vehicleInfo.plateNumber is required" });
-  if (!Validate.string(color))       return res.status(400).json({ success: false, message: "vehicleInfo.color is required" });
+  const { make, model, year, plateNumber, color } = vehicleInfo;
+
+  if (!Validate.string(vehicleInfo.type)) {
+    return res.status(400).json({ success: false, message: "vehicleInfo.type is required" });
+  }
+
+  // Normalise UI labels (e.g. "motor bike") to the canonical enum value.
+  const type = normalizeVehicleType(vehicleInfo.type);
+  if (!type) {
+    return res.status(400).json({
+      success: false,
+      message: `vehicleInfo.type must be one of: ${UI_VEHICLE_TYPES.join(", ")}`,
+    });
+  }
+
+  // Non-motorised agents (feet, bicycle) carry no make/model/plate/etc.
+  // Motorised vehicles still require the full set.
+  const isMotorised = !NON_MOTORISED_TYPES.has(type);
+  if (isMotorised) {
+    if (!Validate.string(make))        return res.status(400).json({ success: false, message: "vehicleInfo.make is required" });
+    if (!Validate.string(model))       return res.status(400).json({ success: false, message: "vehicleInfo.model is required" });
+    if (!Validate.integer(year))       return res.status(400).json({ success: false, message: "vehicleInfo.year must be an integer" });
+    if (!Validate.string(plateNumber)) return res.status(400).json({ success: false, message: "vehicleInfo.plateNumber is required" });
+    if (!Validate.string(color))       return res.status(400).json({ success: false, message: "vehicleInfo.color is required" });
+  }
 
   // ── Documents — optional at creation, validated if provided ──────────────
   let validatedDocuments = {};
@@ -90,7 +116,9 @@ const createDispatchProfile = asyncHandler(async (req, res) => {
   try {
     const dispatchProfile = await DispatchProfile.create({
       user: _id,
-      vehicleInfo: { type, make, model, year, plateNumber, color },
+      vehicleInfo: isMotorised
+        ? { type, make, model, year, plateNumber, color }
+        : { type },
       coverageAreas: coverageAreas || [],
       documents: validatedDocuments,
       availability: {

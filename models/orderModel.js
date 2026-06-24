@@ -3,6 +3,14 @@ const mongoose = require("mongoose"); // Erase if already required
 // Declare the Schema of the Mongo model
 var orderSchema = new mongoose.Schema(
   {
+    // Human-friendly sequential order number (e.g. "WM1201") shown in dashboards.
+    // Generated atomically at creation via utils/generateOrderNumber.
+    orderNumber: {
+      type: String,
+      unique: true,
+      sparse: true,
+      index: true,
+    },
     products: [
       {
         product: {
@@ -21,18 +29,31 @@ var orderSchema = new mongoose.Schema(
       },
     ],
     paymentIntent: {},
+    // Canonical lifecycle state. Transitions are enforced by
+    // services/orderTransitionService via the utils/orderStatus state machine.
     orderStatus: {
       type: String,
-      default: "Not yet processed",
+      default: "pending",
       enum: [
-        "Not yet processed",
-        "Pending",
-        "Processing",
-        "Dispatched",
-        "Cancelled",
-        "Delivered",
+        "pending",
+        "confirmed",
+        "preparing",
+        "pickUpReady",
+        "inTransit",
+        "delivered",
+        "cancelled",
       ],
     },
+    // Append-only audit trail of lifecycle transitions, used to render the order
+    // timeline. Written by orderTransitionService on every successful transition.
+    statusHistory: [
+      {
+        status: { type: String },
+        at: { type: Date, default: Date.now },
+        role: { type: String }, // seller | rider | admin | system
+        _id: false,
+      },
+    ],
     orderedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

@@ -17,6 +17,11 @@ const verifyDispatchDocument = require("./verifyDispatchDocument");
 const listStores = require("./listStores");
 const setStoreStatus = require("./setStoreStatus");
 
+// Orders
+const listOrders = require("./listOrders");
+const getOrderDetail = require("./getOrderDetail");
+const contactCustomer = require("./contactCustomer");
+
 // Wallets
 const listWallets = require("./listWallets");
 const setWalletStatus = require("./setWalletStatus");
@@ -35,6 +40,9 @@ module.exports = {
   verifyDispatchDocument,
   listStores,
   setStoreStatus,
+  listOrders,
+  getOrderDetail,
+  contactCustomer,
   listWallets,
   setWalletStatus,
   updateWalletLimits,

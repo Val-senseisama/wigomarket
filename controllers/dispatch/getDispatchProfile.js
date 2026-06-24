@@ -20,7 +20,7 @@ const getDispatchProfile = asyncHandler(async (req, res) => {
   } catch (_) {}
 
   const dispatchProfile = await DispatchProfile.findOne({ user: _id })
-    .populate("user", "firstname lastname email mobile image")
+    .populate("user", "firstname lastname email mobile image state city")
     .lean({ virtuals: true });
 
   if (!dispatchProfile) {

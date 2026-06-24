@@ -1032,6 +1032,12 @@ router.get("/get-cart", authMiddleware, getUserCart);
  * /api/user/me:
  *   get:
  *     summary: Get current authenticated user's information
+ *     description: |
+ *       Returns the user plus role-derived data. `data.user.hasWallet` is a
+ *       boolean indicating whether the user has created a wallet yet (wallet
+ *       creation is optional during onboarding), so the dashboard can show
+ *       setup state without a separate GET /wallet call. For dispatch users,
+ *       `data.user.dispatchProfile` is null until a profile is created.
  *     tags:
  *       - Users
  *     security:

@@ -51,7 +51,7 @@ const getTopShops = asyncHandler(async (req, res) => {
           {
             $match: {
               $expr: { $in: ["$$storeId", "$products.store"] },
-              orderStatus: "Delivered",
+              orderStatus: "delivered",
             },
           },
           { $count: "n" },

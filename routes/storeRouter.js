@@ -7,6 +7,10 @@ const {
   updateBankDetails,
   getPopularSellers,
   getNearbySellers,
+  getStoreOrders,
+  getStoreOrderDetail,
+  updateOrderStatus,
+  contactCustomer,
 } = require("../controllers/store");
 const { updateStoreLocation } = require("../controllers/storeController");
 const { authMiddleware, isSeller } = require("../middleware/authMiddleware");
@@ -170,6 +174,182 @@ router.post("/create", authMiddleware, createStore);
  *         description: Store not found or retrieval fails
  */
 router.get("/my-store", authMiddleware, isSeller, getMyStore);
+
+/**
+ * @swagger
+ * /api/store/orders:
+ *   get:
+ *     summary: List the logged-in seller's store orders (paginated, filterable)
+ *     description: |
+ *       Returns orders containing at least one product from the seller's store,
+ *       shaped for the order-management dashboard table. Supports category tabs
+ *       (recent / ongoing / history), status & order-type filters, date range,
+ *       search by order number or customer name, sorting, and pagination.
+ *     tags: [Stores]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: category
+ *         schema: { type: string, enum: [recent, ongoing, history], default: recent }
+ *       - in: query
+ *         name: status
+ *         schema: { type: string }
+ *         description: "Display status: Pending, Confirmed, Preparing, Pick up Ready, In Transit, Delivered, Cancelled"
+ *       - in: query
+ *         name: orderType
+ *         schema: { type: string, enum: ["Pick up", "Delivery"] }
+ *       - in: query
+ *         name: dateFrom
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: dateTo
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *         description: Matches order number or customer name
+ *       - in: query
+ *         name: sortBy
+ *         schema: { type: string, enum: [date, amount], default: date }
+ *       - in: query
+ *         name: sortOrder
+ *         schema: { type: string, enum: [asc, desc], default: desc }
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 10, maximum: 100 }
+ *     responses:
+ *       200:
+ *         description: Paginated list of order rows with category counts
+ *       404:
+ *         description: No store found for this account
+ */
+router.get("/orders", authMiddleware, isSeller, getStoreOrders);
+
+/**
+ * @swagger
+ * /api/store/orders/{id}:
+ *   get:
+ *     summary: Get full order detail (seller's order)
+ *     description: |
+ *       Returns everything the order-details screen needs: header (order number,
+ *       date, status), buyer & delivery info, line items with per-unit price and
+ *       subtotals, order summary totals, payment info (incl. derived payout
+ *       status), the lifecycle timeline (with timestamps from status history),
+ *       and the buyer note. Scoped to the logged-in seller's store.
+ *     tags: [Stores]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Order detail
+ *       404:
+ *         description: Order not found or not in this seller's store
+ */
+router.get("/orders/:id", authMiddleware, isSeller, getStoreOrderDetail);
+
+/**
+ * @swagger
+ * /api/store/orders/{id}/status:
+ *   put:
+ *     summary: Update an order's status (seller-controlled transitions)
+ *     description: |
+ *       Advances one of the seller's own orders through the order state machine.
+ *       Transitions are validated and role-enforced — a seller may only move an
+ *       order along the allowed flow; non-sequential or out-of-role updates are
+ *       rejected (HTTP 422) and the attempt is recorded in the audit log.
+ *
+ *       **Seller-controlled transitions**
+ *       - `pending` → `confirmed`
+ *       - `confirmed` → `preparing`
+ *       - `preparing` → `pickUpReady`
+ *       - `pickUpReady` → `delivered` *(self_delivery / pickup orders only)*
+ *       - any pre-shipment state → `cancelled`
+ *
+ *       Rider-stage transitions (`pickUpReady` → `inTransit` → `delivered`) are
+ *       handled by the delivery-agent endpoints, and `delivered` for
+ *       delivery_agent orders is gated by the agent+customer dual-confirm flow.
+ *     tags: [Stores]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [status]
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 enum: [confirmed, preparing, pickUpReady, delivered, cancelled]
+ *               reason:
+ *                 type: string
+ *                 description: Optional reason, recorded in the audit log
+ *     responses:
+ *       200:
+ *         description: Updated order
+ *       400:
+ *         description: Missing/invalid status value
+ *       403:
+ *         description: Order does not belong to this seller's store
+ *       422:
+ *         description: Illegal or role-forbidden transition
+ */
+router.put("/orders/:id/status", authMiddleware, isSeller, updateOrderStatus);
+
+/**
+ * @swagger
+ * /api/store/orders/{id}/contact:
+ *   post:
+ *     summary: Send a direct message to the buyer of one of the seller's orders
+ *     description: |
+ *       Sends a free-text message to the customer who placed the order. Scoped to
+ *       orders containing a product from the seller's store. The message is
+ *       stored as an in-app notification and delivered over the buyer's enabled
+ *       channels (push + email).
+ *     tags: [Store]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [message]
+ *             properties:
+ *               message:
+ *                 type: string
+ *                 maxLength: 2000
+ *                 example: "Hi, just confirming your delivery address before we ship."
+ *     responses:
+ *       200:
+ *         description: Message sent
+ *       400:
+ *         description: Missing or invalid message
+ *       404:
+ *         description: Order not found or does not belong to this seller's store
+ */
+router.post("/orders/:id/contact", authMiddleware, isSeller, contactCustomer);
 
 /**
  * @swagger

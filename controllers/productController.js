@@ -1009,7 +1009,7 @@ const createProductReview = asyncHandler(async (req, res) => {
   // ── Purchase verification: must have a Delivered order with this product ──
   const verifyingOrder = await Order.findOne({
     orderedBy:   userId,
-    orderStatus: "Delivered",
+    orderStatus: "delivered",
     "products.product": new mongoose.Types.ObjectId(id),
   }).select("_id").lean();
 

@@ -26,7 +26,8 @@ const takeDispatch = asyncHandler(async (req, res) => {
         deliveryAgent: agentId,
         dispatch: agentId,
         deliveryStatus: "assigned",
-        orderStatus: "Dispatched",
+        // orderStatus is the seller-facing lifecycle and is advanced separately
+        // (pending → confirmed → …). Taking an order only assigns the rider.
       },
     },
     { new: true }

@@ -43,7 +43,7 @@ const getPopularSellers = asyncHandler(async (req, res) => {
                 $expr: {
                   $in: ["$$storeId", "$products.store"]
                 },
-                orderStatus: "Delivered"
+                orderStatus: "delivered"
               }
             }
           ],

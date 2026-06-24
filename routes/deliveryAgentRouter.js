@@ -494,16 +494,20 @@ router.post(
  *             type: object
  *             required:
  *               - vehicleInfo
- *               - documents
  *             properties:
  *               vehicleInfo:
  *                 type: object
- *                 required: [type, make, model, year, plateNumber, color]
+ *                 description: >
+ *                   `type` is always required. For non-motorised types (feet,
+ *                   bicycle) that is the only field needed. For motorised types
+ *                   (car, motor bike, bus) make/model/year/plateNumber/color are
+ *                   also required.
+ *                 required: [type]
  *                 properties:
  *                   type:
  *                     type: string
- *                     enum: [bike, motorcycle, car, van, truck, bicycle, feet, bus]
- *                     example: "motorcycle"
+ *                     enum: [feet, bicycle, car, motor bike, bus]
+ *                     example: "motor bike"
  *                   make:
  *                     type: string
  *                     example: "Honda"
@@ -723,6 +727,10 @@ router.put("/profile", authMiddleware, isDispatch, updateDispatchProfile);
  *                   Cloudinary URL of the profile photo. Upload via
  *                   POST /api/upload/signature (folder: profiles) first.
  *               residentialAddress:
+ *                 type: string
+ *               state:
+ *                 type: string
+ *               city:
  *                 type: string
  *               nextOfKin:
  *                 type: object

@@ -92,7 +92,22 @@ router.get("/:id", authMiddleware, getOrderById);
  * @swagger
  * /api/order/{id}/status:
  *   put:
- *     summary: Update order status (Admin/Internal use)
+ *     summary: Update order status (Admin override)
+ *     description: |
+ *       Admin override for the order state machine. Admins may perform any valid
+ *       transition between canonical states; the same engine that enforces
+ *       seller/rider rules validates the request. Cancellation restores stock and
+ *       reconciles payment status, and the change is written atomically with an
+ *       audit Transaction record.
+ *
+ *       Canonical states: `pending`, `confirmed`, `preparing`, `pickUpReady`,
+ *       `inTransit`, `delivered`, `cancelled`.
+ *
+ *       This endpoint enforces role-based order status transitions. Sellers may
+ *       only update orders through the allowed flow
+ *       (`pending` → `confirmed` → `preparing` → `pickUpReady`); riders handle
+ *       delivery-stage transitions. Direct or non-sequential status updates are
+ *       rejected (HTTP 422).
  *     tags: [Orders]
  *     security:
  *       - bearerAuth: []
@@ -113,9 +128,16 @@ router.get("/:id", authMiddleware, getOrderById);
  *             properties:
  *               status:
  *                 type: string
+ *                 enum: [pending, confirmed, preparing, pickUpReady, inTransit, delivered, cancelled]
+ *               reason:
+ *                 type: string
  *     responses:
  *       200:
  *         description: Status updated
+ *       400:
+ *         description: Missing or invalid status value
+ *       422:
+ *         description: Illegal transition
  */
 router.put("/:id/status", authMiddleware, isAdmin, updateOrderStatus);
 

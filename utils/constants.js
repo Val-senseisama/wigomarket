@@ -6,13 +6,17 @@ const PaymentStatus = {
   UNPAID: "Unpaid",
 };
 
+// Canonical order lifecycle states. The transition rules, labels and legacy
+// normalisation live in utils/orderStatus.js (the state machine). Keep these
+// values in sync with STATUS there.
 const OrderStatus = {
-  PENDING: "Pending",
-  NOT_PROCESSED: "Not yet processed",
-  PROCESSING: "Processing",
-  DISPATCHED: "Dispatched",
-  CANCELLED: "Cancelled",
-  DELIVERED: "Delivered",
+  PENDING: "pending",
+  CONFIRMED: "confirmed",
+  PREPARING: "preparing",
+  PICKUP_READY: "pickUpReady",
+  IN_TRANSIT: "inTransit",
+  DELIVERED: "delivered",
+  CANCELLED: "cancelled",
 };
 
 const DeliveryStatus = {

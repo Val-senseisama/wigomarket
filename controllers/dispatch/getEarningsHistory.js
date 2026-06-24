@@ -95,6 +95,7 @@ const getEarningsHistory = asyncHandler(async (req, res) => {
         customerMobile: order.orderedBy?.mobile || null,
         pickup: pickupStore?.name || pickupStore?.address || null,
         dropoff: order.deliveryAddress || null,
+        deliveryFee: order.deliveryFee || 0,
         amount: order.deliveryFee || 0,
         status: order.deliveryStatus,
       };
