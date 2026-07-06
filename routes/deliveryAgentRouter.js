@@ -4,6 +4,7 @@ const {
   selectOrder,
   updateDeliveryStatus,
   getMyDeliveries,
+  getOrdersFeed,
   getDeliveryCounts,
   updateAvailability,
 } = require("../controllers/deliveryAgentController");
@@ -29,6 +30,86 @@ const { authMiddleware, isDispatch } = require("../middleware/authMiddleware");
 const asyncHandler = require("express-async-handler");
 const { agentConfirmDelivery } = require("../services/dispatchEarningsService");
 const router = express.Router();
+
+/**
+ * @swagger
+ * /api/delivery-agent/orders:
+ *   get:
+ *     summary: Unified rider order feed (All / Available / Ongoing / Completed / Cancelled)
+ *     description: |
+ *       Single endpoint that powers every tab on the rider orders screen. The default
+ *       `tab=all` returns, in one paginated call, the shared **available** pool
+ *       (pending_assignment orders open to any rider) merged with **this rider's own**
+ *       ongoing, completed and cancelled orders — which is the first screen the rider sees.
+ *
+ *       | tab        | returns                                                                 |
+ *       |------------|-------------------------------------------------------------------------|
+ *       | all        | available pool + this rider's ongoing/completed/cancelled (default)      |
+ *       | available  | shared unassigned pool (pending_assignment) — same as /orders/available  |
+ *       | ongoing    | this rider's assigned / picked_up / in_transit                          |
+ *       | completed  | this rider's delivered                                                   |
+ *       | cancelled  | this rider's failed, or seller-cancelled                                |
+ *
+ *       Use `GET /orders/counts` for the matching tab badge numbers. Prefer this
+ *       endpoint over the separate `/orders/available` + `/orders/my-deliveries` calls.
+ *     tags:
+ *       - Delivery Agent
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: tab
+ *         schema:
+ *           type: string
+ *           enum: [all, available, ongoing, completed, cancelled]
+ *           default: all
+ *         description: Which tab to return
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *         description: >
+ *           Free-text search across order number (with or without a leading "#"),
+ *           raw order id, delivery address, and customer name / phone / email.
+ *       - in: query
+ *         name: month
+ *         schema: { type: integer, minimum: 1, maximum: 12 }
+ *         description: Filter by calendar month (1-12). Combine with year, or use alone for the current year.
+ *       - in: query
+ *         name: year
+ *         schema: { type: integer, example: 2026 }
+ *         description: Filter by calendar year. Use alone for the whole year, or with month.
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *         description: Page number
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 10 }
+ *         description: Items per page
+ *     responses:
+ *       200:
+ *         description: Orders retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     tab: { type: string }
+ *                     orders:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/DeliveryOrder'
+ *                     pagination: { type: object }
+ *       400:
+ *         description: Invalid tab value
+ *       403:
+ *         description: Access denied - not a delivery agent
+ */
+router.get("/orders", authMiddleware, isDispatch, getOrdersFeed);
 
 /**
  * @swagger
@@ -325,12 +406,27 @@ router.get(
  *     summary: Get rider order tab badge counts
  *     description: |
  *       Returns the badge numbers for the rider's order tabs (e.g. "Ongoing (3)")
- *       plus the size of the available (unassigned) pool. Pair with
- *       `GET /orders/my-deliveries?tab=...` to render each tab's list.
+ *       plus "all" and the size of the available (unassigned) pool. Pair with
+ *       `GET /orders?tab=...` to render each tab's list. Accepts the same
+ *       `search` / `month` / `year` filters as the feed so the badges stay
+ *       consistent with the filtered table.
  *     tags:
  *       - Delivery Agent
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *         description: Same free-text search as GET /orders
+ *       - in: query
+ *         name: month
+ *         schema: { type: integer, minimum: 1, maximum: 12 }
+ *         description: Filter by calendar month (1-12)
+ *       - in: query
+ *         name: year
+ *         schema: { type: integer, example: 2026 }
+ *         description: Filter by calendar year
  *     responses:
  *       200:
  *         description: Counts retrieved successfully
@@ -344,15 +440,18 @@ router.get(
  *                 data:
  *                   type: object
  *                   properties:
+ *                     all:
+ *                       type: integer
+ *                       description: available pool + this rider's ongoing/completed/cancelled
+ *                     available:
+ *                       type: integer
+ *                       description: Unassigned orders the rider could take
  *                     ongoing:
  *                       type: integer
  *                     completed:
  *                       type: integer
  *                     cancelled:
  *                       type: integer
- *                     available:
- *                       type: integer
- *                       description: Unassigned orders the rider could take
  *       403:
  *         description: Access denied - not a delivery agent
  */
@@ -521,17 +620,16 @@ router.post(
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - vehicleInfo
  *             properties:
  *               vehicleInfo:
  *                 type: object
  *                 description: >
- *                   `type` is always required. For non-motorised types (feet,
- *                   bicycle) that is the only field needed. For motorised types
- *                   (car, motor bike, bus) make/model/year/plateNumber/color are
- *                   also required.
- *                 required: [type]
+ *                   Optional. Omit entirely for a foot courier — `type` then
+ *                   defaults to `feet`. When supplied, `type` accepts the UI
+ *                   labels (normalised server-side, e.g. "motor bike" →
+ *                   "motorcycle"). For non-motorised types (feet, bicycle) only
+ *                   `type` is needed; for motorised types (car, motor bike, bus)
+ *                   make/model/year/plateNumber/color are also required.
  *                 properties:
  *                   type:
  *                     type: string
@@ -1202,9 +1300,19 @@ router.get(
  *               subtotal: { type: number, description: "price × quantity", example: 50000 }
  *               image: { type: string, nullable: true }
  *               store: { type: string, nullable: true }
- *         itemsTotal: { type: number }
- *         deliveryFee: { type: number }
- *         total: { type: number }
+ *         itemsCount:
+ *           type: integer
+ *           description: Number of items in the order (sum of quantities) — the "Items" column.
+ *           example: 3
+ *         itemsTotal:
+ *           type: number
+ *           description: Subtotal of the items (unit × quantity).
+ *         deliveryFee:
+ *           type: number
+ *           description: The rider's delivery fee for this order.
+ *         total:
+ *           type: number
+ *           description: Total order value the customer paid (items + delivery fee).
  *         currency: { type: string, example: "NGN" }
  *         deliveryMethod: { type: string, example: "delivery_agent" }
  *         deliveryStatus:

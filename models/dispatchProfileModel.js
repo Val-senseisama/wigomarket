@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { normalizeVehicleType } = require("../utils/vehicleType");
 
 var dispatchProfileSchema = new mongoose.Schema(
   {
@@ -13,6 +14,10 @@ var dispatchProfileSchema = new mongoose.Schema(
         type: String,
         enum: ["bike", "motorcycle", "car", "van", "truck", "bicycle", "feet", "bus"],
         required: true,
+        // Normalise UI labels (e.g. "motor bike" → "motorcycle") on every write
+        // path, so no controller can accidentally persist a raw UI label. Unknown
+        // values pass through unchanged so the enum validator still reports them.
+        set: (v) => normalizeVehicleType(v) || v,
       },
       // make/model/year/plateNumber/color only apply to motorised vehicles.
       // Non-motorised agents (feet, bicycle) leave these blank — the controller

@@ -1,6 +1,7 @@
 const mongoose = require("mongoose"); // Erase if already required
 const bcrypt = require("bcrypt");
 const crypto = require("crypto");
+const { normalizeVehicleType } = require("../utils/vehicleType");
 
 // Declare the Schema of the Mongo model
 var userSchema = new mongoose.Schema(
@@ -140,6 +141,8 @@ var userSchema = new mongoose.Schema(
         "feet",
         "bus",
       ],
+      // Accept UI labels ("motor bike") and store the canonical value.
+      set: (v) => normalizeVehicleType(v) || v,
     },
     // FCM tokens for push notifications
     fcmTokens: [

@@ -18,10 +18,11 @@ const {
  *
  *   The returned `setupLevel` and `setupSteps` fields show onboarding progress.
  *
- * @param {Object}   req.body.vehicleInfo               - Vehicle details (required)
+ * @param {Object}   [req.body.vehicleInfo]             - Vehicle details (optional)
  *   vehicleInfo.type accepts the UI labels: feet, bicycle, car, motor bike, bus
  *   (normalised to the schema enum). For non-motorised types (feet, bicycle)
  *   only `type` is needed — make/model/year/plateNumber/color are not required.
+ *   Omit vehicleInfo entirely for a foot courier — it defaults to `feet`.
  * @param {string[]} [req.body.coverageAreas]           - Service areas (optional)
  * @param {string[]} [req.body.workingDays]             - Working days (optional)
  * @param {Object}   [req.body.documents]               - Documents (optional at creation)
@@ -40,22 +41,23 @@ const createDispatchProfile = asyncHandler(async (req, res) => {
   }
 
   // ── vehicleInfo validation ────────────────────────────────────────────────
-  if (!vehicleInfo || typeof vehicleInfo !== "object") {
-    return res.status(400).json({ success: false, message: "vehicleInfo is required" });
-  }
-  const { make, model, year, plateNumber, color } = vehicleInfo;
+  // vehicleInfo is OPTIONAL: an agent who selected "feet" carries no vehicle, so
+  // the app may omit it entirely (or send just { type: "feet" }). When no type is
+  // supplied we default to "feet". A supplied type is normalised (e.g.
+  // "motor bike" → "motorcycle") and must be one of the UI options.
+  const { make, model, year, plateNumber, color } = vehicleInfo || {};
 
-  if (!Validate.string(vehicleInfo.type)) {
-    return res.status(400).json({ success: false, message: "vehicleInfo.type is required" });
-  }
-
-  // Normalise UI labels (e.g. "motor bike") to the canonical enum value.
-  const type = normalizeVehicleType(vehicleInfo.type);
-  if (!type) {
-    return res.status(400).json({
-      success: false,
-      message: `vehicleInfo.type must be one of: ${UI_VEHICLE_TYPES.join(", ")}`,
-    });
+  let type;
+  if (vehicleInfo && Validate.string(vehicleInfo.type)) {
+    type = normalizeVehicleType(vehicleInfo.type);
+    if (!type) {
+      return res.status(400).json({
+        success: false,
+        message: `vehicleInfo.type must be one of: ${UI_VEHICLE_TYPES.join(", ")}`,
+      });
+    }
+  } else {
+    type = "feet"; // no vehicle info supplied → the agent delivers on foot
   }
 
   // Non-motorised agents (feet, bicycle) carry no make/model/plate/etc.

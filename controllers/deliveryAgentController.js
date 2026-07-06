@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Order = require("../models/orderModel");
 const User = require("../models/userModel");
 const DispatchProfile = require("../models/dispatchProfileModel");
@@ -22,15 +23,73 @@ const {
   serializeDeliveryOrderList,
 } = require("../utils/orderSerializer");
 
+// Filter for the shared "available" pool: unassigned delivery-agent orders that
+// any online rider can take. Not scoped to a single agent.
+const AVAILABLE_POOL_FILTER = {
+  deliveryMethod: "delivery_agent",
+  deliveryStatus: "pending_assignment",
+  deliveryAgent: { $exists: false },
+  orderStatus: { $ne: "cancelled" },
+};
+
+// Base scope for a rider's own orders (any status).
+const mineScope = (agentId) => ({
+  deliveryAgent: agentId,
+  deliveryMethod: "delivery_agent",
+});
+
 // Maps the rider app's Ongoing / Completed / Cancelled tabs onto the underlying
-// deliveryStatus values. "cancelled" also matches orders the seller cancelled
-// (orderStatus === "cancelled") even if the rider never marked them failed.
+// deliveryStatus values. These are the status-only portions, combined with
+// mineScope() at query time. The three buckets are kept mutually exclusive:
+// "ongoing" excludes seller-cancelled orders so a cancelled order shows only in
+// the Cancelled tab, never in both.
 const TAB_FILTERS = {
-  ongoing: { deliveryStatus: { $in: ["assigned", "picked_up", "in_transit"] } },
+  ongoing: {
+    deliveryStatus: { $in: ["assigned", "picked_up", "in_transit"] },
+    orderStatus: { $ne: "cancelled" },
+  },
   completed: { deliveryStatus: "delivered" },
   cancelled: {
     $or: [{ deliveryStatus: "failed" }, { orderStatus: "cancelled" }],
   },
+};
+
+// Tabs supported by the unified feed endpoint (GET /orders). "all" unions the
+// available pool with every order belonging to this rider; "available" is the
+// shared pool; the rest are this rider's own orders by tab.
+const buildFeedFilter = (tab, agentId) => {
+  switch (tab) {
+    case "available":
+      return AVAILABLE_POOL_FILTER;
+    case "ongoing":
+    case "completed":
+    case "cancelled":
+      return { ...mineScope(agentId), ...TAB_FILTERS[tab] };
+    case "all":
+      return { $or: [AVAILABLE_POOL_FILTER, mineScope(agentId)] };
+    default:
+      return null;
+  }
+};
+
+// Returns a specific rejection message if the agent can't act on orders yet, or
+// null if the profile is approved & active. Distinguishes the "no profile",
+// "pending approval", "rejected" and "suspended" cases so the rider app can show
+// something more useful than "profile not found or not active".
+const profileGateMessage = (profile) => {
+  if (!profile) {
+    return "Delivery agent profile not found. Please complete your onboarding.";
+  }
+  if (profile.status === "suspended") {
+    return "Your delivery agent account is suspended. Please contact support.";
+  }
+  if (profile.status === "rejected") {
+    return "Your delivery agent profile was rejected. Please update your documents and resubmit.";
+  }
+  if (!profile.isActive || profile.status !== "approved") {
+    return "Your delivery agent profile is pending admin approval.";
+  }
+  return null;
 };
 
 // Standard population for rider order responses, consumed by serializeDeliveryOrder.
@@ -39,6 +98,89 @@ const populateDeliveryOrder = (query) =>
     .populate("products.product", "title listedPrice images brand")
     .populate("products.store", "name address mobile location")
     .populate("orderedBy", "firstname lastname fullName email mobile");
+
+// Escape user input before using it in a RegExp so a search like "a.b" isn't
+// treated as a wildcard.
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Restrict orders to a calendar month and/or year (the table's period dropdown).
+ * - month (1-12) + year  → that month
+ * - year only            → the whole year
+ * - month only           → that month in the current year
+ * Returns a { createdAt: {...} } fragment, or null if neither is provided/valid.
+ */
+const buildPeriodFilter = (month, year) => {
+  const m = month != null && month !== "" ? parseInt(month, 10) : null;
+  const y = year != null && year !== "" ? parseInt(year, 10) : null;
+  if (m == null && y == null) return null;
+  if (m != null && (isNaN(m) || m < 1 || m > 12)) return null;
+  if (y != null && isNaN(y)) return null;
+
+  const baseYear = y != null ? y : new Date().getUTCFullYear();
+  let start;
+  let end;
+  if (m != null) {
+    start = new Date(Date.UTC(baseYear, m - 1, 1));
+    end = new Date(Date.UTC(baseYear, m, 1));
+  } else {
+    start = new Date(Date.UTC(baseYear, 0, 1));
+    end = new Date(Date.UTC(baseYear + 1, 0, 1));
+  }
+  return { createdAt: { $gte: start, $lt: end } };
+};
+
+/**
+ * Free-text search across the fields shown in the orders table: order number
+ * (with or without the leading "#"), the raw order id, delivery address, and the
+ * customer's name / phone / email. Because the customer lives on a referenced
+ * User doc, we resolve matching users first and filter orders by their ids.
+ * Returns an { $or: [...] } fragment, or null when the term is empty.
+ */
+const buildSearchFilter = async (search) => {
+  const term = (search || "").trim();
+  if (!term) return null;
+
+  const rx = new RegExp(escapeRegex(term), "i");
+  const or = [
+    { orderNumber: new RegExp(escapeRegex(term.replace(/^#/, "")), "i") },
+    { deliveryAddress: rx },
+  ];
+
+  if (mongoose.isValidObjectId(term)) {
+    or.push({ _id: term });
+  }
+
+  const users = await User.find({
+    $or: [
+      { fullName: rx },
+      { firstname: rx },
+      { lastname: rx },
+      { email: rx },
+      { mobile: rx },
+    ],
+  })
+    .select("_id")
+    .limit(100);
+
+  if (users.length) {
+    or.push({ orderedBy: { $in: users.map((u) => u._id) } });
+  }
+
+  return { $or: or };
+};
+
+/**
+ * Combine the tab filter with optional period + search fragments. Each fragment
+ * may carry its own $or, so they are ANDed together (a single top-level $or key
+ * can't hold them all).
+ */
+const combineFilters = (...fragments) => {
+  const parts = fragments.filter(Boolean);
+  if (parts.length === 0) return {};
+  if (parts.length === 1) return parts[0];
+  return { $and: parts };
+};
 
 /**
  * @function getAvailableOrders
@@ -65,25 +207,23 @@ const getAvailableOrders = asyncHandler(async (req, res) => {
 
   // Get delivery agent's profile
   const dispatchProfile = await DispatchProfile.findOne({ user: _id });
-  if (!dispatchProfile || !dispatchProfile.isActive) {
-    return res.status(400).json({
-      success: false,
-      message: "Delivery agent profile not found or not active",
-    });
+  const gate = profileGateMessage(dispatchProfile);
+  if (gate) {
+    return res.status(400).json({ success: false, message: gate });
   }
 
-  // Build filter for available orders
-  const filters = {
-    deliveryMethod: "delivery_agent",
-    deliveryStatus: status || "pending_assignment",
-    orderStatus: { $ne: "cancelled" },
-  };
-
-  // If looking for pending assignments, exclude orders already assigned to this agent
-  if (status === "pending_assignment") {
-    filters.deliveryAgent = { $exists: false };
-  } else if (status === "assigned") {
-    filters.deliveryAgent = _id;
+  // Build filter for available orders. Defaults to the shared unassigned pool;
+  // an explicit ?status= narrows to that delivery status for this agent.
+  let filters;
+  if (!status || status === "pending_assignment") {
+    filters = AVAILABLE_POOL_FILTER;
+  } else {
+    filters = {
+      deliveryMethod: "delivery_agent",
+      deliveryStatus: status,
+      orderStatus: { $ne: "cancelled" },
+      deliveryAgent: _id,
+    };
   }
 
   try {
@@ -148,11 +288,9 @@ const selectOrder = asyncHandler(async (req, res) => {
   try {
     // Get delivery agent's profile
     const dispatchProfile = await DispatchProfile.findOne({ user: _id });
-    if (!dispatchProfile || !dispatchProfile.isActive) {
-      return res.status(400).json({
-        success: false,
-        message: "Delivery agent profile not found or not active",
-      });
+    const gate = profileGateMessage(dispatchProfile);
+    if (gate) {
+      return res.status(400).json({ success: false, message: gate });
     }
 
     // Check if agent is available
@@ -529,16 +667,96 @@ const updateAvailability = asyncHandler(async (req, res) => {
 });
 
 /**
+ * @function getOrdersFeed
+ * @description Unified rider order feed powering every tab on the orders screen,
+ *              including the default "All" tab which combines the available pool
+ *              (pending_assignment, open to any rider) with this rider's own
+ *              ongoing / completed / cancelled orders in a single paginated call.
+ * @param {Object} req - Express request object
+ * @param {string} req.user._id - Authenticated delivery agent's ID
+ * @param {number} [req.query.page=1] - Page number
+ * @param {number} [req.query.limit=10] - Items per page
+ * @param {string} [req.query.tab=all] - all | available | ongoing | completed | cancelled
+ * @param {string} [req.query.search] - Free-text search (order id, customer, address)
+ * @param {number} [req.query.month] - Filter by calendar month (1-12)
+ * @param {number} [req.query.year] - Filter by calendar year (e.g. 2026)
+ * @returns {Object} - Serialized orders + pagination
+ * @route GET /api/delivery-agent/orders
+ */
+const getOrdersFeed = asyncHandler(async (req, res) => {
+  const { _id } = req.user;
+  const { page = 1, limit = 10, tab = "all", search, month, year } = req.query;
+
+  if (!req.userRoles.includes("dispatch")) {
+    return res.status(403).json({
+      success: false,
+      message: "Access denied. Only delivery agents can view orders.",
+    });
+  }
+
+  const tabFilter = buildFeedFilter(tab, _id);
+  if (!tabFilter) {
+    return res.status(400).json({
+      success: false,
+      message:
+        "Invalid tab. Must be one of: all, available, ongoing, completed, cancelled",
+    });
+  }
+
+  try {
+    // Layer the period dropdown and the search box on top of the tab filter.
+    const filters = combineFilters(
+      tabFilter,
+      buildPeriodFilter(month, year),
+      await buildSearchFilter(search),
+    );
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const orders = await populateDeliveryOrder(Order.find(filters))
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await Order.countDocuments(filters);
+
+    res.json({
+      success: true,
+      data: {
+        tab,
+        orders: serializeDeliveryOrderList(orders),
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(total / parseInt(limit)),
+          totalOrders: total,
+          hasNext: page < Math.ceil(total / parseInt(limit)),
+          hasPrev: page > 1,
+        },
+      },
+    });
+  } catch (error) {
+    console.log(error);
+    throw new Error(error);
+  }
+});
+
+/**
  * @function getDeliveryCounts
  * @description Returns the badge counts for the rider's order tabs
- *              (e.g. "Ongoing (3)"), plus the size of the available pool.
+ *              (e.g. "Ongoing (3)"), including "all" and the available pool.
+ *              Honours the same search / month / year filters as the feed so the
+ *              badges stay consistent with the filtered table.
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  * @param {string} req.user._id - Authenticated delivery agent's ID
- * @returns {Object} - { ongoing, completed, cancelled, available }
+ * @param {string} [req.query.search] - Free-text search
+ * @param {number} [req.query.month] - Filter by calendar month (1-12)
+ * @param {number} [req.query.year] - Filter by calendar year
+ * @returns {Object} - { all, available, ongoing, completed, cancelled }
  */
 const getDeliveryCounts = asyncHandler(async (req, res) => {
   const { _id } = req.user;
+  const { search, month, year } = req.query;
 
   if (!req.userRoles.includes("dispatch")) {
     return res.status(403).json({
@@ -547,23 +765,27 @@ const getDeliveryCounts = asyncHandler(async (req, res) => {
     });
   }
 
-  const mine = { deliveryAgent: _id, deliveryMethod: "delivery_agent" };
+  const periodFilter = buildPeriodFilter(month, year);
+  const searchFilter = await buildSearchFilter(search);
+  // Count each tab through the same period/search fragments as the feed. The
+  // "all" bucket is counted via its union filter (not a sum) so an order that
+  // could match two buckets is never double-counted.
+  const countTab = (t) =>
+    Order.countDocuments(
+      combineFilters(buildFeedFilter(t, _id), periodFilter, searchFilter),
+    );
 
-  const [ongoing, completed, cancelled, available] = await Promise.all([
-    Order.countDocuments({ ...mine, ...TAB_FILTERS.ongoing }),
-    Order.countDocuments({ ...mine, ...TAB_FILTERS.completed }),
-    Order.countDocuments({ ...mine, ...TAB_FILTERS.cancelled }),
-    Order.countDocuments({
-      deliveryMethod: "delivery_agent",
-      deliveryStatus: "pending_assignment",
-      deliveryAgent: { $exists: false },
-      orderStatus: { $ne: "cancelled" },
-    }),
+  const [all, available, ongoing, completed, cancelled] = await Promise.all([
+    countTab("all"),
+    countTab("available"),
+    countTab("ongoing"),
+    countTab("completed"),
+    countTab("cancelled"),
   ]);
 
   res.json({
     success: true,
-    data: { ongoing, completed, cancelled, available },
+    data: { all, available, ongoing, completed, cancelled },
   });
 });
 
@@ -572,6 +794,7 @@ module.exports = {
   selectOrder,
   updateDeliveryStatus,
   getMyDeliveries,
+  getOrdersFeed,
   getDeliveryCounts,
   updateAvailability,
 };

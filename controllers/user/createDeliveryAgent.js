@@ -16,6 +16,7 @@ const uniqid = require("uniqid");
 const { ThrowError, MakeID } = require("../../Helpers/Helpers");
 const { welcome, verificationCodeTemplate } = require("../../templates/Emails");
 const audit = require("../../services/auditService");
+const { normalizeVehicleType, UI_VEHICLE_TYPES } = require("../../utils/vehicleType");
 
 /**
  * @function createDeliveryAgent
@@ -46,7 +47,7 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
   const state = req.body.state;
   const nextOfKin = req.body.nextOfKin;
   const gender = req.body.gender;
-  const modeOfTransport = req.body.modeOfTransport;
+  const rawModeOfTransport = req.body.modeOfTransport;
   const image = req.body.image;
   try {
     // Validate required fields
@@ -74,7 +75,7 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
       ThrowError("Next of kin information is required for delivery agents");
     }
 
-    if (!modeOfTransport) {
+    if (!rawModeOfTransport) {
       ThrowError("Mode of transport is required for delivery agents");
     }
     const validGenders = ["male", "female", "other"];
@@ -82,20 +83,13 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
       ThrowError("Gender is required for delivery agents");
     }
 
-    const validTransportModes = [
-      "bike",
-      "motorcycle",
-      "car",
-      "van",
-      "truck",
-      "bicycle",
-      "feet",
-      "bus",
-    ];
-    if (!validTransportModes.includes(modeOfTransport)) {
+    // Accept the UI labels (feet, bicycle, car, motor bike, bus) and normalise to
+    // the canonical value stored on the user (e.g. "motor bike" → "motorcycle").
+    const modeOfTransport = normalizeVehicleType(rawModeOfTransport);
+    if (!modeOfTransport) {
       ThrowError(
         "Invalid mode of transport. Must be one of: " +
-          validTransportModes.join(", "),
+          UI_VEHICLE_TYPES.join(", "),
       );
     }
 

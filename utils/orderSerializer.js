@@ -280,6 +280,12 @@ const serializeDeliveryOrder = (order) => {
     pickups,
     dropoff: order.deliveryAddress || order.deliveryLocation?.formattedAddress || null,
     products,
+    // itemsCount = number of items in the order (sum of quantities) — the
+    // "Items" column. The three money fields are distinct:
+    //   itemsTotal → subtotal of the items (unit × qty)
+    //   deliveryFee → the rider's delivery fee
+    //   total      → total order value the customer paid (items + fee)
+    itemsCount: itemsCount(order),
     itemsTotal,
     deliveryFee,
     total: order.paymentIntent?.amount ?? itemsTotal + deliveryFee,
