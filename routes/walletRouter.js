@@ -4,6 +4,7 @@ const {
   createWallet,
   getWallet,
   addBankAccount,
+  editBankAccount,
   setDefaultBankAccount,
   deleteBankAccount,
   requestWithdrawal,
@@ -444,6 +445,74 @@ router.get("/wallet", authMiddleware, getWallet);
  *         description: Unauthorized
  */
 router.post("/wallet/bank-account", authMiddleware, addBankAccount);
+
+/**
+ * @swagger
+ * /api/wallet/bank-account/{accountId}:
+ *   put:
+ *     tags: [Wallet]
+ *     summary: Edit the details of an existing bank account
+ *     description: >
+ *       Updates the details of a saved bank account. This is a partial update —
+ *       send only the fields you want to change. It does not add an account, so
+ *       the 3-account limit is unaffected, but changing the account number is
+ *       still rejected if it collides with another of your saved accounts.
+ *       Changing the account number, bank name or bank code resets the account's
+ *       verified status. To change which account is the default, use
+ *       PUT /api/wallet/bank-account/{accountId}/default instead.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: accountId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The _id of the bank account subdocument
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               accountName:
+ *                 type: string
+ *               accountNumber:
+ *                 type: string
+ *               bankName:
+ *                 type: string
+ *               bankCode:
+ *                 type: string
+ *               phoneNumber:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Bank account updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     bankAccounts:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/BankAccount'
+ *       400:
+ *         description: No editable fields provided, empty required field, or duplicate account number
+ *       404:
+ *         description: Wallet or bank account not found
+ *       401:
+ *         description: Unauthorized
+ */
+router.put("/wallet/bank-account/:accountId", authMiddleware, editBankAccount);
 
 /**
  * @swagger
