@@ -11,7 +11,7 @@ const getOrderDetailAdmin = asyncHandler(async (req, res) => {
   const { id } = req.params;
   validateMongodbId(id);
 
-  const detail = await getOrderDetail(id);
+  const detail = await getOrderDetail(id, {}, { role: "admin" });
   if (!detail) {
     return res
       .status(404)

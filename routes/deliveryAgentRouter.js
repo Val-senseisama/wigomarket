@@ -5,6 +5,7 @@ const {
   updateDeliveryStatus,
   getMyDeliveries,
   getOrdersFeed,
+  getRecentDeliveries,
   getDeliveryCounts,
   updateAvailability,
 } = require("../controllers/deliveryAgentController");
@@ -456,6 +457,53 @@ router.get(
  *         description: Access denied - not a delivery agent
  */
 router.get("/orders/counts", authMiddleware, isDispatch, getDeliveryCounts);
+
+/**
+ * @swagger
+ * /api/delivery-agent/orders/recent:
+ *   get:
+ *     summary: Recent deliveries for the rider dashboard card
+ *     description: |
+ *       Compact, non-paginated list backing the **Recent Deliveries** card on the
+ *       rider dashboard. Returns the rider's own most recent orders — everything
+ *       they have accepted (ongoing, delivered and cancelled) — newest first.
+ *
+ *       Unlike `GET /orders`, this excludes the shared unassigned pool (those
+ *       aren't the rider's orders yet). The card's "View all" link should point at
+ *       `GET /orders`, which is the full paginated, filterable feed.
+ *     tags:
+ *       - Delivery Agent
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 5
+ *           minimum: 1
+ *           maximum: 20
+ *         description: How many recent orders to return (default 5, capped at 20)
+ *     responses:
+ *       200:
+ *         description: Recent deliveries retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     orders:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/DeliveryOrder'
+ *       403:
+ *         description: Access denied - not a delivery agent
+ */
+router.get("/orders/recent", authMiddleware, isDispatch, getRecentDeliveries);
 
 /**
  * @swagger

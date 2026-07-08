@@ -136,14 +136,14 @@ const listOrders = async ({ baseFilter = {}, query = {} }) => {
  * @param {Object} [baseFilter={}] Scope filter (e.g. seller's store) merged into the lookup.
  * @returns {Promise<Object|null>} Serialized order detail, or null if not found / out of scope.
  */
-const getOrderDetail = async (orderId, baseFilter = {}) => {
+const getOrderDetail = async (orderId, baseFilter = {}, options = {}) => {
   const order = await Order.findOne({ _id: orderId, ...baseFilter })
     .populate("products.product", "title listedPrice price images brand")
     .populate("orderedBy", "fullName firstname lastname email mobile")
     .populate("deliveryAgent", "fullName firstname lastname mobile")
     .lean();
 
-  return order ? serializeOrderDetail(order) : null;
+  return order ? serializeOrderDetail(order, options) : null;
 };
 
 module.exports = { listOrders, getOrderDetail, CATEGORY };

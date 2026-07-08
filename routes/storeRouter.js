@@ -240,6 +240,12 @@ router.get("/orders", authMiddleware, isSeller, getStoreOrders);
  *       subtotals, order summary totals, payment info (incl. derived payout
  *       status), the lifecycle timeline (with timestamps from status history),
  *       and the buyer note. Scoped to the logged-in seller's store.
+ *
+ *       Also includes `allowedActions`: an array of `{ status, label }` the seller
+ *       may transition this order to right now (given its state and delivery
+ *       method), so the UI renders exactly the valid status buttons. Feed the
+ *       chosen `status` to `PUT /api/store/orders/{id}/status`. Empty once the
+ *       order is delivered/cancelled or handed to the rider.
  *     tags: [Stores]
  *     security:
  *       - bearerAuth: []
@@ -269,10 +275,15 @@ router.get("/orders/:id", authMiddleware, isSeller, getStoreOrderDetail);
  *
  *       **Seller-controlled transitions**
  *       - `pending` → `confirmed`
- *       - `confirmed` → `preparing`
- *       - `preparing` → `pickUpReady`
+ *       - `confirmed` → `pickUpReady` *(or via the optional `preparing` step)*
+ *       - `confirmed` → `preparing` → `pickUpReady`
  *       - `pickUpReady` → `delivered` *(self_delivery / pickup orders only)*
  *       - any pre-shipment state → `cancelled`
+ *
+ *       `preparing` is optional — the seller can skip straight from `confirmed`
+ *       to `pickUpReady`. The order detail response (`GET /api/store/orders/{id}`)
+ *       returns an `allowedActions` array listing exactly which statuses are valid
+ *       from the current state, so the UI can render the right buttons.
  *
  *       Rider-stage transitions (`pickUpReady` → `inTransit` → `delivered`) are
  *       handled by the delivery-agent endpoints, and `delivered` for

@@ -1,5 +1,10 @@
 const { DeliveryMethod } = require("./constants");
-const { STATUS, normalizeStatus, statusLabel } = require("./orderStatus");
+const {
+  STATUS,
+  normalizeStatus,
+  statusLabel,
+  allowedTransitions,
+} = require("./orderStatus");
 const { ORDER_NUMBER_PREFIX } = require("./generateOrderNumber");
 
 /**
@@ -154,8 +159,15 @@ const derivePayoutStatus = (order) => {
 /**
  * Full order detail for the order-details screen. Requires populated
  * products.product, orderedBy and deliveryAgent.
+ *
+ * @param {Object} order
+ * @param {Object} [options]
+ * @param {string} [options.role] Viewer role (seller | rider | admin). When given,
+ *   the response includes `allowedActions` — the status transitions this viewer
+ *   may perform on the order right now, so the UI can render exactly the valid
+ *   action buttons instead of hardcoding them.
  */
-const serializeOrderDetail = (order) => {
+const serializeOrderDetail = (order, { role } = {}) => {
   const items = (order.products || []).map(serializeLineItem);
   const itemsTotal = items.reduce((sum, i) => sum + i.subtotal, 0);
   const deliveryFee = order.deliveryFee || 0;
@@ -168,12 +180,20 @@ const serializeOrderDetail = (order) => {
         }
       : null;
 
+  // Next statuses this viewer can move the order to (empty when no role given).
+  const allowedActions = role
+    ? allowedTransitions(order.orderStatus, role, order.deliveryMethod).map(
+        (status) => ({ status, label: statusLabel(status) }),
+      )
+    : [];
+
   return {
     id: order._id,
     orderNumber: formatOrderNumber(order),
     orderDate: order.createdAt,
     status: normalizeStatus(order.orderStatus),
     statusLabel: statusLabel(order.orderStatus),
+    allowedActions,
 
     buyer: {
       id: order.orderedBy?._id || order.orderedBy || null,
