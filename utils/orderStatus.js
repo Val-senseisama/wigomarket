@@ -63,7 +63,11 @@ const ACTIVE_STATUSES = ALL_STATUSES.filter((s) => !TERMINAL_STATUSES.includes(s
  */
 const TRANSITIONS = [
   { from: STATUS.PENDING, to: STATUS.CONFIRMED, roles: [ROLE.SELLER] },
+  // "Preparing" is an optional intermediate step. The seller may pass through it
+  // (confirmed → preparing → pickUpReady) or skip straight to Ready
+  // (confirmed → pickUpReady) to match the simplified UI flow.
   { from: STATUS.CONFIRMED, to: STATUS.PREPARING, roles: [ROLE.SELLER] },
+  { from: STATUS.CONFIRMED, to: STATUS.PICKUP_READY, roles: [ROLE.SELLER] },
   { from: STATUS.PREPARING, to: STATUS.PICKUP_READY, roles: [ROLE.SELLER] },
 
   // Rider leg (delivery_agent orders).

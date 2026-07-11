@@ -18,7 +18,11 @@ const getStoreOrderDetail = asyncHandler(async (req, res) => {
       .json({ success: false, message: "No store found for this account" });
   }
 
-  const detail = await getOrderDetail(id, { "products.store": req.store });
+  const detail = await getOrderDetail(
+    id,
+    { "products.store": req.store },
+    { role: "seller" },
+  );
   if (!detail) {
     return res.status(404).json({
       success: false,

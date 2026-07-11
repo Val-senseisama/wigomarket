@@ -741,6 +741,46 @@ const getOrdersFeed = asyncHandler(async (req, res) => {
 });
 
 /**
+ * @function getRecentDeliveries
+ * @description Compact "Recent Deliveries" list for the rider dashboard card.
+ *              Returns the rider's own most recent orders — everything they have
+ *              accepted: ongoing, delivered and cancelled — newest first. Unlike
+ *              the unified feed this excludes the shared unassigned pool (those
+ *              orders aren't the rider's yet) and is not paginated; it's a small
+ *              capped list backing the dashboard card with its "View all" link
+ *              (which points at GET /orders).
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {string} req.user._id - Authenticated delivery agent's ID
+ * @param {number} [req.query.limit=5] - How many recent orders to return (1-20)
+ * @returns {Object} - { orders } serialized as DeliveryOrder
+ * @route GET /api/delivery-agent/orders/recent
+ */
+const getRecentDeliveries = asyncHandler(async (req, res) => {
+  const { _id } = req.user;
+  const { limit = 5 } = req.query;
+
+  if (!req.userRoles.includes("dispatch")) {
+    return res.status(403).json({
+      success: false,
+      message: "Access denied. Only delivery agents can view their deliveries.",
+    });
+  }
+
+  // Cap the list — this is a dashboard card, not a full browsable feed.
+  const take = Math.min(Math.max(parseInt(limit, 10) || 5, 1), 20);
+
+  const orders = await populateDeliveryOrder(Order.find(mineScope(_id)))
+    .sort({ createdAt: -1 })
+    .limit(take);
+
+  res.json({
+    success: true,
+    data: { orders: serializeDeliveryOrderList(orders) },
+  });
+});
+
+/**
  * @function getDeliveryCounts
  * @description Returns the badge counts for the rider's order tabs
  *              (e.g. "Ongoing (3)"), including "all" and the available pool.
@@ -795,6 +835,7 @@ module.exports = {
   updateDeliveryStatus,
   getMyDeliveries,
   getOrdersFeed,
+  getRecentDeliveries,
   getDeliveryCounts,
   updateAvailability,
 };

@@ -1,6 +1,7 @@
 const createWallet = require('./createWallet');
 const getWallet = require('./getWallet');
 const addBankAccount = require('./updateBankAccount');        // POST  /bank-account
+const editBankAccount = require('./editBankAccount');         // PUT  /bank-account/:id
 const setDefaultBankAccount = require('./setDefaultBankAccount'); // PUT /bank-account/:id/default
 const deleteBankAccount = require('./deleteBankAccount');     // DELETE /bank-account/:id
 const requestWithdrawal = require('./requestWithdrawal');
@@ -19,6 +20,7 @@ module.exports = {
   createWallet,
   getWallet,
   addBankAccount,
+  editBankAccount,
   setDefaultBankAccount,
   deleteBankAccount,
   requestWithdrawal,
