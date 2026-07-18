@@ -13,19 +13,19 @@ const request = require("supertest");
 const app = require("../app");
 const { createTestUser, createTestSeller, createTestProduct, setupCart } = require("./helpers");
 
-describe("Orders - GET /api/order", () => {
+describe("Orders - GET /api/order/my-orders", () => {
   it("returns 200 with empty orders list for new user", async () => {
     const { token } = await createTestUser();
 
     const res = await request(app)
-      .get("/api/order")
+      .get("/api/order/my-orders")
       .set("Authorization", `Bearer ${token}`);
 
     expect(res.status).toBe(200);
   });
 
   it("rejects unauthenticated request", async () => {
-    const res = await request(app).get("/api/order");
+    const res = await request(app).get("/api/order/my-orders");
     expect(res.status).toBe(500);
   });
 });

@@ -1006,6 +1006,43 @@ router.get("/earnings", authMiddleware, isDispatch, getEarnings);
  *         schema:
  *           type: string
  *           format: date
+ *       - in: query
+ *         name: status
+ *         description: >
+ *           Which rows to return. `delivered` (default) is earned deliveries only.
+ *           `cancelled` returns order-level cancellations (orderStatus=cancelled),
+ *           which report deliveryFee 0. `all` returns both. Note that
+ *           summary.totalEarnings always counts delivered orders only, so with
+ *           `cancelled`/`all` the visible rows will not sum to the total.
+ *         schema:
+ *           type: string
+ *           enum: [delivered, cancelled, all]
+ *           default: delivered
+ *       - in: query
+ *         name: search
+ *         description: >
+ *           Free-text search across order id, reference (clientSideId),
+ *           customer name, customer mobile, store name, delivery address,
+ *           and a typed date (YYYY-MM-DD or YYYY-MM). Case-insensitive,
+ *           partial match.
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: month
+ *         description: >
+ *           Filter to a single month (1-12). Without `year`, defaults to the
+ *           current year.
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 12
+ *       - in: query
+ *         name: year
+ *         description: Filter to a single year. Combine with `month` to narrow further.
+ *         schema:
+ *           type: integer
+ *           minimum: 2000
+ *           maximum: 2100
  *     responses:
  *       200:
  *         description: Earnings history retrieved successfully
@@ -1044,17 +1081,37 @@ router.get("/earnings", authMiddleware, isDispatch, getEarnings);
  *                             type: string
  *                           customerMobile:
  *                             type: string
+ *                           orderNumber:
+ *                             type: string
+ *                             description: Display order id, e.g. "#WM-1A2B3C" — the table's Order ID column
+ *                           itemCount:
+ *                             type: integer
+ *                             description: Total units ordered (sum of every line's quantity)
+ *                           lineItemCount:
+ *                             type: integer
+ *                             description: Number of distinct products in the order
  *                           pickup:
  *                             type: string
  *                             description: Store name / pickup location
  *                           dropoff:
  *                             type: string
  *                             description: Delivery address
- *                           amount:
+ *                           deliveryFee:
  *                             type: number
  *                             description: Delivery fee earned for this order
+ *                           amount:
+ *                             type: number
+ *                             description: Alias of deliveryFee, for the earnings table's amount column
  *                           status:
  *                             type: string
+ *                             enum: [delivered, cancelled]
+ *                             description: What the Status column renders
+ *                           deliveryStatus:
+ *                             type: string
+ *                             description: Raw deliveryStatus from the order
+ *                           orderStatus:
+ *                             type: string
+ *                             description: Raw orderStatus from the order
  *                     summary:
  *                       type: object
  *                       properties:
@@ -1068,8 +1125,36 @@ router.get("/earnings", authMiddleware, isDispatch, getEarnings);
  *                           properties:
  *                             startDate:
  *                               type: string
+ *                               description: startDate as supplied by the caller
  *                             endDate:
  *                               type: string
+ *                               description: endDate as supplied by the caller
+ *                             from:
+ *                               type: string
+ *                               format: date-time
+ *                               nullable: true
+ *                               description: Effective window start after month/year narrowing
+ *                             to:
+ *                               type: string
+ *                               format: date-time
+ *                               nullable: true
+ *                               description: Effective window end after month/year narrowing
+ *                         filters:
+ *                           type: object
+ *                           description: Echo of the filters actually applied
+ *                           properties:
+ *                             search:
+ *                               type: string
+ *                               nullable: true
+ *                             month:
+ *                               type: integer
+ *                               nullable: true
+ *                             year:
+ *                               type: integer
+ *                               nullable: true
+ *                             status:
+ *                               type: string
+ *                               enum: [delivered, cancelled, all]
  *                     pagination:
  *                       type: object
  *                       properties:
@@ -1083,6 +1168,8 @@ router.get("/earnings", authMiddleware, isDispatch, getEarnings);
  *                           type: boolean
  *                         hasPrev:
  *                           type: boolean
+ *       400:
+ *         description: Invalid month or year
  */
 router.get("/earnings-history", authMiddleware, isDispatch, getEarningsHistory);
 

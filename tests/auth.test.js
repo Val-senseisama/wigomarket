@@ -18,7 +18,7 @@ describe("Auth - Register (POST /api/user/register)", () => {
       fullName: "John Doe",
     });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
     expect(res.body.message).toMatch(/verification/i);
   });
