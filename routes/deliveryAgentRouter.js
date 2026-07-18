@@ -1169,7 +1169,9 @@ router.get("/earnings", authMiddleware, isDispatch, getEarnings);
  *                         hasPrev:
  *                           type: boolean
  *       400:
- *         description: Invalid month or year
+ *         description: Invalid month, year or status
+ *       403:
+ *         description: Access denied - not a delivery agent
  */
 router.get("/earnings-history", authMiddleware, isDispatch, getEarningsHistory);
 
