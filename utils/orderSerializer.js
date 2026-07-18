@@ -326,5 +326,6 @@ module.exports = {
   serializeOrderDetail,
   serializeDeliveryOrder,
   serializeDeliveryOrderList,
+  itemsCount,
   formatOrderNumber,
 };
