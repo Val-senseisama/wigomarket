@@ -14,14 +14,18 @@ const makeToken = (userId) =>
  * Create a test user and return the user + auth token.
  * The User model's pre('save') hook hashes the password, so pass raw password here.
  */
+// Date.now() alone collides when two users are created in the same
+// millisecond, which duplicate-keys on the unique email/mobile indexes.
+let userSeq = 0;
+
 const createTestUser = async (overrides = {}) => {
   const rawPassword = "TestPass123!";
-  const ts = Date.now();
+  const unique = `${Date.now()}${String(++userSeq).padStart(4, "0")}`;
 
   const user = await User.create({
     fullName: "Test User",
-    email: `test-${ts}@example.com`,
-    mobile: `2348${String(ts).slice(-8)}`,
+    email: `test-${unique}@example.com`,
+    mobile: `2348${unique.slice(-8)}`,
     password: rawPassword,
     role: ["buyer"],
     activeRole: "buyer",
