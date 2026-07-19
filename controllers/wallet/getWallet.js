@@ -28,9 +28,22 @@ const getWallet = asyncHandler(async (req, res) => {
       });
     }
     
+    // Cheap existence check so the UI can branch between "create PIN" and
+    // "enter PIN" without a separate call. withdrawalPin.hash is select:false,
+    // so this never pulls the hash itself into memory.
+    const hasWithdrawalPin = Boolean(
+      await Wallet.exists({
+        user: _id,
+        "withdrawalPin.hash": { $type: "string" },
+      }),
+    );
+
     res.json({
       success: true,
-      data: wallet
+      data: {
+        ...wallet.toObject(),
+        hasWithdrawalPin,
+      }
     });
   } catch (error) {
     throw new Error(error.message);
