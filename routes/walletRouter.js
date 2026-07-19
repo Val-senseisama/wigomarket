@@ -391,7 +391,17 @@ router.post("/wallet/create", authMiddleware, createWallet);
  *                 success:
  *                   type: boolean
  *                 data:
- *                   $ref: '#/components/schemas/Wallet'
+ *                   allOf:
+ *                     - $ref: '#/components/schemas/Wallet'
+ *                     - type: object
+ *                       properties:
+ *                         hasWithdrawalPin:
+ *                           type: boolean
+ *                           description: >
+ *                             Whether the user has set a withdrawal PIN. Lets the UI
+ *                             branch between the "create PIN" and "enter PIN" flows
+ *                             without a separate call. The PIN hash itself is never
+ *                             returned.
  *       404:
  *         description: Wallet not found
  *       401:

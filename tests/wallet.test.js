@@ -99,4 +99,28 @@ describe("Wallet - GET /api/wallet", () => {
     const res = await request(app).get("/api/wallet");
     expect(res.status).toBe(500);
   });
+
+  it("reports hasWithdrawalPin false before a PIN is set, true after", async () => {
+    const { token } = await createTestUser();
+    const auth = { Authorization: `Bearer ${token}` };
+
+    await request(app).post("/api/wallet/create").set(auth).send(bankAccount);
+
+    const before = await request(app).get("/api/wallet").set(auth);
+    expect(before.status).toBe(200);
+    expect(before.body.data.hasWithdrawalPin).toBe(false);
+
+    const created = await request(app)
+      .post("/api/wallet/pin")
+      .set(auth)
+      .send({ pin: "1234" });
+    expect(created.status).toBe(201);
+
+    const after = await request(app).get("/api/wallet").set(auth);
+    expect(after.body.data.hasWithdrawalPin).toBe(true);
+
+    // The hash must never leave the server
+    expect(JSON.stringify(after.body)).not.toMatch(/\$2[aby]\$/);
+    expect(after.body.data.withdrawalPin?.hash).toBeUndefined();
+  });
 });
