@@ -56,11 +56,28 @@ const getCurrentUser = asyncHandler(async (req, res) => {
       populatedUser.dispatchProfile = dispatchProfile;
     }
 
-    // Cheap existence check so the dashboard can show wallet setup state without
-    // a separate GET /wallet call. Wallet creation is optional during onboarding.
-    populatedUser.hasWallet = Boolean(
-      await Wallet.exists({ user: user._id }),
-    );
+    // Wallet setup state, so the dashboard and the PIN navigation flow can
+    // branch without a separate GET /wallet call. Wallet creation is optional
+    // during onboarding, hence hasWallet as well as hasWithdrawalPin.
+    //
+    // One aggregate rather than two exists() calls: /me is hit on every app
+    // launch. withdrawalPin.hash is select:false and the $type comparison is
+    // evaluated server-side, so the hash never enters application memory.
+    //
+    // Note both flags are needed to disambiguate: hasWithdrawalPin is false
+    // both for "no wallet" and for "wallet, no PIN yet".
+    const [walletState] = await Wallet.aggregate([
+      { $match: { user: user._id } },
+      {
+        $project: {
+          _id: 0,
+          hasWithdrawalPin: { $eq: [{ $type: "$withdrawalPin.hash" }, "string"] },
+        },
+      },
+    ]);
+
+    populatedUser.hasWallet = Boolean(walletState);
+    populatedUser.hasWithdrawalPin = Boolean(walletState?.hasWithdrawalPin);
 
     res.json({
       success: true,

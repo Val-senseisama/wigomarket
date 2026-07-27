@@ -126,6 +126,78 @@ describe("Auth - Get Current User (GET /api/user/me)", () => {
 
   it("rejects request without token", async () => {
     const res = await request(app).get("/api/user/me");
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects a Bearer header with no token value", async () => {
+    const res = await request(app)
+      .get("/api/user/me")
+      .set("Authorization", "Bearer");
+
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects a malformed token", async () => {
+    const res = await request(app)
+      .get("/api/user/me")
+      .set("Authorization", "Bearer not-a-real-jwt");
+
+    expect(res.status).toBe(401);
+  });
+
+  // The client branches its wallet/PIN navigation on the pair of flags, so all
+  // three reachable states are pinned here.
+  describe("wallet setup flags", () => {
+    const bankAccount = {
+      accountName: "Test User",
+      accountNumber: "0123456789",
+      bankName: "Test Bank",
+      phoneNumber: "08012345678",
+    };
+
+    const getMe = (token) =>
+      request(app).get("/api/user/me").set("Authorization", `Bearer ${token}`);
+
+    it("reports no wallet and no PIN before onboarding", async () => {
+      const { token } = await createTestUser();
+
+      const res = await getMe(token);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.user.hasWallet).toBe(false);
+      expect(res.body.data.user.hasWithdrawalPin).toBe(false);
+    });
+
+    it("reports a wallet with no PIN after wallet creation", async () => {
+      const { token } = await createTestUser();
+      const auth = { Authorization: `Bearer ${token}` };
+
+      await request(app).post("/api/wallet/create").set(auth).send(bankAccount);
+
+      const res = await getMe(token);
+
+      expect(res.body.data.user.hasWallet).toBe(true);
+      expect(res.body.data.user.hasWithdrawalPin).toBe(false);
+    });
+
+    it("reports both flags true once a PIN is set, without leaking the hash", async () => {
+      const { token } = await createTestUser();
+      const auth = { Authorization: `Bearer ${token}` };
+
+      await request(app).post("/api/wallet/create").set(auth).send(bankAccount);
+      const created = await request(app)
+        .post("/api/wallet/pin")
+        .set(auth)
+        .send({ pin: "1234" });
+      expect(created.status).toBe(201);
+
+      const res = await getMe(token);
+
+      expect(res.body.data.user.hasWallet).toBe(true);
+      expect(res.body.data.user.hasWithdrawalPin).toBe(true);
+
+      // The hash must never leave the server
+      expect(JSON.stringify(res.body)).not.toMatch(/\$2[aby]\$/);
+    });
   });
 });

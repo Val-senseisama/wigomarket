@@ -1033,18 +1033,32 @@ router.get("/get-cart", authMiddleware, getUserCart);
  *   get:
  *     summary: Get current authenticated user's information
  *     description: |
- *       Returns the user plus role-derived data. `data.user.hasWallet` is a
- *       boolean indicating whether the user has created a wallet yet (wallet
- *       creation is optional during onboarding), so the dashboard can show
- *       setup state without a separate GET /wallet call. For dispatch users,
+ *       Returns the user plus role-derived data. For dispatch users,
  *       `data.user.dispatchProfile` is null until a profile is created.
+ *
+ *       **Wallet setup flags.** `data.user.hasWallet` and
+ *       `data.user.hasWithdrawalPin` let the client drive the wallet/PIN
+ *       navigation flow without a separate GET /wallet call. Both are derived
+ *       from a single existence query; the PIN hash is never returned.
+ *
+ *       IMPORTANT: `hasWithdrawalPin` is meaningless on its own — it is
+ *       `false` both for a user with no wallet at all and for a user who has a
+ *       wallet but has not set a PIN. Always branch on the pair:
+ *
+ *       | hasWallet | hasWithdrawalPin | Next screen  |
+ *       |-----------|------------------|--------------|
+ *       | false     | false            | Create wallet |
+ *       | true      | false            | Create PIN    |
+ *       | true      | true             | Enter PIN     |
+ *
+ *       (`hasWallet: false` with `hasWithdrawalPin: true` is not reachable.)
  *     tags:
  *       - Users
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       200:
- *         description: Current user information
+ *         description: Current user information with roles and permissions
  *         content:
  *           application/json:
  *             schema:
@@ -1054,10 +1068,71 @@ router.get("/get-cart", authMiddleware, getUserCart);
  *                   type: boolean
  *                 data:
  *                   type: object
- *                 roles:
- *                   type: array
- *                 activeRole:
- *                   type: string
+ *                   properties:
+ *                     user:
+ *                       type: object
+ *                       properties:
+ *                         _id:
+ *                           type: string
+ *                         fullName:
+ *                           type: string
+ *                         email:
+ *                           type: string
+ *                         mobile:
+ *                           type: string
+ *                         role:
+ *                           type: array
+ *                           items:
+ *                             type: string
+ *                         residentialAddress:
+ *                           type: string
+ *                         city:
+ *                           type: string
+ *                         state:
+ *                           type: string
+ *                         image:
+ *                           type: string
+ *                         status:
+ *                           type: string
+ *                         balance:
+ *                           type: number
+ *                         hasWallet:
+ *                           type: boolean
+ *                           description: >
+ *                             Whether the user has created a wallet yet. Wallet
+ *                             creation is optional during onboarding.
+ *                         hasWithdrawalPin:
+ *                           type: boolean
+ *                           description: >
+ *                             Whether the user has set a withdrawal PIN. Only
+ *                             meaningful when hasWallet is true — see the
+ *                             endpoint description for the branch table. The
+ *                             PIN hash itself is never returned.
+ *                         store:
+ *                           type: object
+ *                           description: Store information (if user is a seller)
+ *                         dispatchProfile:
+ *                           type: object
+ *                           description: Dispatch profile (if user is dispatch)
+ *                     roles:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                     activeRole:
+ *                       type: string
+ *                       description: Currently active role
+ *                       example: "buyer"
+ *                     permissions:
+ *                       type: object
+ *                       properties:
+ *                         canSell:
+ *                           type: boolean
+ *                         canDispatch:
+ *                           type: boolean
+ *                         isAdmin:
+ *                           type: boolean
+ *                         isBuyer:
+ *                           type: boolean
  *       404:
  *         description: User not found
  *       401:
@@ -1589,86 +1664,6 @@ router.post("/empty-cart", authMiddleware, emptyCart);
  */
 router.post("/verify", verifyOtp);
 
-/**
- * @swagger
- * /api/user/me:
- *   get:
- *     summary: Get current authenticated user's information
- *     description: Get current authenticated user's information with role-based data
- *     tags:
- *       - Users
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Current user information with roles and permissions
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   type: object
- *                   properties:
- *                     user:
- *                       type: object
- *                       properties:
- *                         _id:
- *                           type: string
- *                         fullName:
- *                           type: string
- *                         email:
- *                           type: string
- *                         mobile:
- *                           type: string
- *                         role:
- *                           type: array
- *                           items:
- *                             type: string
- *                         residentialAddress:
- *                           type: string
- *                         city:
- *                           type: string
- *                         state:
- *                           type: string
- *                         image:
- *                           type: string
- *                         status:
- *                           type: string
- *                         balance:
- *                           type: number
- *                         store:
- *                           type: object
- *                           description: Store information (if user is a seller)
- *                         dispatchProfile:
- *                           type: object
- *                           description: Dispatch profile (if user is dispatch)
- *                     roles:
- *                       type: array
- *                       items:
- *                         type: string
- *                     activeRole:
- *                       type: string
- *                       description: Currently active role
- *                       example: "buyer"
- *                     permissions:
- *                       type: object
- *                       properties:
- *                         canSell:
- *                           type: boolean
- *                         canDispatch:
- *                           type: boolean
- *                         isAdmin:
- *                           type: boolean
- *                         isBuyer:
- *                           type: boolean
- *       404:
- *         description: User not found
- *       401:
- *         description: Unauthorized
- */
 /**
  * @swagger
  * /api/user/change-role:

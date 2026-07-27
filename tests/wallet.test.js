@@ -62,7 +62,7 @@ describe("Wallet - POST /api/wallet/create", () => {
 
   it("rejects unauthenticated request", async () => {
     const res = await request(app).post("/api/wallet/create");
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(401);
   });
 });
 
@@ -97,7 +97,7 @@ describe("Wallet - GET /api/wallet", () => {
 
   it("rejects unauthenticated request", async () => {
     const res = await request(app).get("/api/wallet");
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(401);
   });
 
   it("reports hasWithdrawalPin false before a PIN is set, true after", async () => {

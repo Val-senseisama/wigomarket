@@ -26,7 +26,7 @@ describe("Orders - GET /api/order/my-orders", () => {
 
   it("rejects unauthenticated request", async () => {
     const res = await request(app).get("/api/order/my-orders");
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(401);
   });
 });
 
@@ -70,7 +70,7 @@ describe("Orders - POST /api/order/create", () => {
       deliveryAddress: { street: "123 Test", city: "Lagos", state: "Lagos" },
     });
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(401);
   });
 
   it("rejects order with missing required fields", async () => {
