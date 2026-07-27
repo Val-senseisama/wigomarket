@@ -21,7 +21,7 @@ describe("Ratings - POST /api/rating", () => {
       breakdown: { punctuality: 4, professionalism: 4 },
     });
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(401);
   });
 
   it("rejects rating with missing fields", async () => {
@@ -82,6 +82,6 @@ describe("Ratings - GET /api/rating/my-ratings", () => {
 
   it("rejects unauthenticated request", async () => {
     const res = await request(app).get("/api/rating/my-ratings");
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(401);
   });
 });

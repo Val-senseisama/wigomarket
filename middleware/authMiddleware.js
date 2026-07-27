@@ -3,46 +3,70 @@ const jwt = require("jsonwebtoken");
 const asyncHandler = require("express-async-handler");
 const Store = require("../models/storeModel");
 
+/**
+ * Every failure path here sets an explicit status before throwing. The global
+ * errorHandler falls back to 500 whenever res.statusCode is still 200, so a
+ * bare `throw` would report an auth failure as a server error.
+ */
 const authMiddleware = asyncHandler(async (req, res, next) => {
-  let token;
-  if (req?.headers?.authorization?.startsWith("Bearer")) {
-    token = req.headers.authorization.split(" ")[1];
-    try {
-      if (token) {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await User.findById(decoded?.id).select('-password -refreshToken');
-        
-        if (!user) {
-          throw new Error("User not found");
-        }
-        
-        if (user.isBlocked) {
-          throw new Error("User account is blocked");
-        }
-        
-        if (user.status !== 'active') {
-          throw new Error("User account is not active");
-        }
-        
-        // Add user info to request
-        req.user = user;
-        req.userId = user._id;
-        req.userRoles = user.role;
-        req.activeRole = user.activeRole;
-        next();
-      }
-    } catch (error) {
-      throw new Error(`Not Authorised token expired please login again`);
-    }
-  } else {
+  if (!req?.headers?.authorization?.startsWith("Bearer")) {
+    res.status(401);
     throw new Error(`There is no token attached to the header`);
   }
+
+  // A header of exactly "Bearer" (no value) yields undefined here. This used to
+  // fall through without calling next() or throwing, leaving the request hanging
+  // until the client timed out.
+  const token = req.headers.authorization.split(" ")[1];
+
+  if (!token) {
+    res.status(401);
+    throw new Error(`There is no token attached to the header`);
+  }
+
+  let decoded;
+  try {
+    decoded = jwt.verify(token, process.env.JWT_SECRET);
+  } catch (error) {
+    // Scoped to jwt.verify alone. This catch previously wrapped the account
+    // checks below too, so a blocked or deactivated user was told their token
+    // had expired and would loop through login forever.
+    res.status(401);
+    throw new Error(`Not Authorised token expired please login again`);
+  }
+
+  const user = await User.findById(decoded?.id).select("-password -refreshToken");
+
+  if (!user) {
+    res.status(401);
+    throw new Error("User not found");
+  }
+
+  // The token is valid but the account may not be usable. 403 rather than 401:
+  // re-authenticating will not help, so the client must not bounce to login.
+  if (user.isBlocked) {
+    res.status(403);
+    throw new Error("User account is blocked");
+  }
+
+  if (user.status !== "active") {
+    res.status(403);
+    throw new Error("User account is not active");
+  }
+
+  // Add user info to request
+  req.user = user;
+  req.userId = user._id;
+  req.userRoles = user.role;
+  req.activeRole = user.activeRole;
+  next();
 });
 
 const isSeller = asyncHandler(async (req, res, next) => {
   const userRoles = req.userRoles;
 
   if (!userRoles || !userRoles.includes("seller")) {
+    res.status(403);
     throw new Error("You are not a seller");
   }
 
@@ -56,6 +80,7 @@ const isDispatch = asyncHandler(async (req, res, next) => {
   const userRoles = req.userRoles;
 
   if (!userRoles || !userRoles.includes("dispatch")) {
+    res.status(403);
     throw new Error("You are not a dispatch user");
   }
 
