@@ -11,7 +11,7 @@ const {
   storeAccountUpdateSuccessTemplate,
 } = require("../templates/Emails");
 const sendEmail = require("./emailController");
-const googleMapsService = require("../services/googleMapsService");
+const mapboxService = require("../services/mapboxService");
 const { getFlutterwaveInstance } = require("../config/flutterwaveClient");
 
 // Create Store
@@ -102,7 +102,7 @@ const createStore = asyncHandler(async (req, res) => {
 
     if (!findStore) {
       // Geocode the store address to get coordinates
-      const geocoded = await googleMapsService.geocodeAddress(address);
+      const geocoded = await mapboxService.geocodeAddress(address);
 
       const locationData = geocoded
         ? {
@@ -572,7 +572,7 @@ const updateStoreLocation = asyncHandler(async (req, res) => {
 
     if (lat && lng) {
       // Direct coordinate override (e.g. from map pin drop)
-      const reversed = await googleMapsService.reverseGeocode(
+      const reversed = await mapboxService.reverseGeocode(
         parseFloat(lat),
         parseFloat(lng),
       );
@@ -583,7 +583,7 @@ const updateStoreLocation = asyncHandler(async (req, res) => {
       };
     } else {
       // Geocode the text address
-      const geocoded = await googleMapsService.geocodeAddress(address);
+      const geocoded = await mapboxService.geocodeAddress(address);
       if (!geocoded) {
         ThrowError(
           "Could not geocode the provided address. Please try a more specific address.",

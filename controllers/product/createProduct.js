@@ -6,6 +6,7 @@ const validateMongodbId = require("../../utils/validateMongodbId");
 const { Validate } = require("../../Helpers/Validate");
 const { ThrowError } = require("../../Helpers/Helpers");
 const audit = require("../../services/auditService");
+const money = require("../../utils/money");
 
 /**
  * @function createProduct
@@ -58,9 +59,9 @@ const createProduct = asyncHandler(async (req, res) => {
     validatedImages = images;
   }
 
-  const sellersPrice  = price;
-  const commission    = (sellersPrice * 2) / 100;
-  const listedPrice   = sellersPrice + commission;
+  const sellersPrice  = money.round(price);
+  const commission    = money.percentage(sellersPrice, 2);
+  const listedPrice   = money.add(sellersPrice, commission);
 
   try {
     let newProduct = await Product.create({

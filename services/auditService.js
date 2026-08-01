@@ -22,12 +22,42 @@
 
 const AuditLog = require("../models/auditLogModel");
 const { notifyAdmins } = require("./alertService");
+const money = require("../utils/money");
 
 const BATCH_SIZE = 10;
 const FLUSH_INTERVAL_MS = 30_000; // 30 seconds
 
 let buffer = [];
 let flushTimer = null;
+
+// Entries whose action starts with one of these prefixes are retained
+// indefinitely (expiresAt = null). Everything else is a routine operational
+// entry and expires after RETENTION_DAYS.
+const PERMANENT_PREFIXES = [
+  "wallet.",
+  "payment.",
+  "transaction.",
+  "withdrawal.",
+  "finance.",
+  "vat.",
+  "refund.",
+  "billpayment.",
+  "auth.", // security events — needed for incident forensics
+  "admin.", // privileged actions against other people's money/accounts
+];
+
+const RETENTION_DAYS = 400;
+
+/**
+ * Retention deadline for an entry, or null to keep it forever.
+ * @param {string} action
+ * @returns {Date|null}
+ */
+function expiryFor(action) {
+  const a = String(action || "");
+  if (PERMANENT_PREFIXES.some((p) => a.startsWith(p))) return null;
+  return new Date(Date.now() + RETENTION_DAYS * 24 * 60 * 60 * 1000);
+}
 
 const criticalActions = [
   "auth.brute_force_detected",
@@ -135,6 +165,7 @@ const audit = {
       metadata,
       status,
       createdAt: new Date(),
+      expiresAt: expiryFor(action),
     });
 
     if (buffer.length >= BATCH_SIZE) {
@@ -147,6 +178,55 @@ const audit = {
     } else {
       scheduleFlush();
     }
+  },
+
+  /**
+   * Write an audit entry inside an open transaction, so it commits atomically
+   * with the change it describes.
+   *
+   * The buffered `log()` above is fire-and-forget: it batches in memory and
+   * flushes later, which is fine for routine activity but means a crash between
+   * a committed balance change and the next flush loses the record of money
+   * having moved. Money paths use this instead — if the transaction rolls back
+   * the audit entry rolls back with it, and if it commits the entry is durable.
+   *
+   * Unlike log(), this awaits the write and will propagate a failure, which is
+   * intentional: an unauditable money movement should not silently succeed.
+   *
+   * @param {Object} params - same shape as log()
+   * @param {mongoose.ClientSession} session
+   */
+  async logWithSession(
+    {
+      action,
+      actor = {},
+      resource = {},
+      changes = {},
+      metadata = {},
+      status = "success",
+    },
+    session,
+  ) {
+    const doc = {
+      action,
+      actor,
+      resource,
+      changes,
+      metadata,
+      status,
+      createdAt: new Date(),
+      expiresAt: expiryFor(action),
+    };
+
+    // No session (e.g. a non-transactional caller) — fall back to the buffer
+    // rather than failing the operation outright.
+    if (!session) {
+      this.log(doc);
+      return null;
+    }
+
+    const [written] = await AuditLog.create([doc], { session });
+    return written;
   },
 
   /**
@@ -173,6 +253,7 @@ const audit = {
   async verifyWalletHealth(userId = null) {
     const Wallet = require("../models/walletModel");
     const Transaction = require("../models/transactionModel");
+    const WalletDrift = require("../models/walletDriftModel");
 
     const query = userId ? { user: userId } : {};
     const wallets = await Wallet.find(query);
@@ -193,10 +274,28 @@ const audit = {
       ]);
 
       const calculatedBalance = ledgerSum[0]?.total || 0;
-      const drift = Math.abs(wallet.balance - calculatedBalance);
 
-      if (drift > 0.01) {
-        // Allow for minor floating point diffs
+      // Compare in whole kobo. The old check tolerated a 1-kobo difference to
+      // absorb float noise, which meant genuine sub-kobo drift was invisible
+      // and could accumulate silently. All money arithmetic now goes through
+      // utils/money, so any difference at all is a real discrepancy.
+      const walletKobo = money.toKobo(wallet.balance);
+      const ledgerKobo = money.toKobo(calculatedBalance);
+
+      if (walletKobo !== ledgerKobo) {
+        const driftKobo = walletKobo - ledgerKobo;
+
+        // Persist an unresolved drift record so the discrepancy has a lifecycle
+        // (and survives the audit-log retention window) rather than existing
+        // only as a one-off alert email.
+        await WalletDrift.recordDrift({
+          wallet: wallet._id,
+          user: wallet.user,
+          walletBalance: wallet.balance,
+          ledgerBalance: calculatedBalance,
+          driftKobo,
+        });
+
         this.error({
           action: "finance.wallet_drift_detected",
           resource: { type: "wallet", id: wallet._id },
@@ -204,7 +303,8 @@ const audit = {
             userId: wallet.user,
             walletBalance: wallet.balance,
             ledgerBalance: calculatedBalance,
-            drift,
+            drift: money.fromKobo(driftKobo),
+            driftKobo,
           },
         });
       }

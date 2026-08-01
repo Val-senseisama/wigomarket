@@ -5,6 +5,7 @@ const Wallet = require("../../models/walletModel");
 const Transaction = require("../../models/transactionModel");
 const { MakeID } = require("../../Helpers/Helpers");
 const audit = require("../../services/auditService");
+const money = require("../../utils/money");
 
 /**
  * @function requestWithdrawal
@@ -140,10 +141,12 @@ const requestWithdrawal = asyncHandler(async (req, res) => {
         throw new Error("Withdrawal limit exceeded");
       }
 
-      withdrawalFee = Math.max(amount * 0.01, 100);
-      totalDeduction = amount + withdrawalFee;
+      // 1% fee, floored at ₦100 — computed in kobo so the fee and the total
+      // deduction are exact whole-kobo values.
+      withdrawalFee = money.max(money.percentage(amount, 1), 100);
+      totalDeduction = money.add(amount, withdrawalFee);
 
-      if (wallet.balance < totalDeduction) {
+      if (money.lt(wallet.balance, totalDeduction)) {
         audit.error({
           action: "wallet.withdrawal_failed",
           actor: audit.actor(req),

@@ -1,12 +1,35 @@
 const express = require("express");
 const asyncHandler = require("express-async-handler");
+const rateLimit = require("express-rate-limit");
 const { authMiddleware } = require("../middleware/authMiddleware");
-const googleMapsService = require("../services/googleMapsService");
+const mapboxService = require("../services/mapboxService");
 const { ThrowError } = require("../Helpers/Helpers");
 
 const router = express.Router();
 
 // ─── All maps routes require authentication so the API key is never exposed ───
+
+/**
+ * Rate limiter for all maps lookups.
+ * Every route here proxies a billed upstream geo request, so an authenticated
+ * client hammering autocomplete translates directly into spend.
+ * Keyed by user ID so one account cannot exhaust the quota for everyone.
+ * 60 lookups per minute per user — comfortably above type-ahead usage.
+ */
+const mapsLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  keyGenerator: (req) => req.user?._id?.toString() || req.ip,
+  message: {
+    success: false,
+    message: "Too many map lookups. Please slow down and try again shortly.",
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// authMiddleware runs first so the limiter can key on req.user
+router.use(authMiddleware, mapsLimiter);
 
 /**
  * @swagger
@@ -48,7 +71,6 @@ const router = express.Router();
  */
 router.get(
   "/geocode",
-  authMiddleware,
   asyncHandler(async (req, res) => {
     const { address } = req.query;
 
@@ -61,13 +83,13 @@ router.get(
         });
     }
 
-    if (!googleMapsService.isConfigured()) {
+    if (!mapboxService.isConfigured()) {
       return res
         .status(503)
         .json({ success: false, message: "Maps service is not configured" });
     }
 
-    const result = await googleMapsService.geocodeAddress(address);
+    const result = await mapboxService.geocodeAddress(address);
 
     if (!result) {
       return res.status(404).json({
@@ -103,7 +125,6 @@ router.get(
  */
 router.get(
   "/reverse-geocode",
-  authMiddleware,
   asyncHandler(async (req, res) => {
     const { lat, lng } = req.query;
 
@@ -116,13 +137,13 @@ router.get(
         });
     }
 
-    if (!googleMapsService.isConfigured()) {
+    if (!mapboxService.isConfigured()) {
       return res
         .status(503)
         .json({ success: false, message: "Maps service is not configured" });
     }
 
-    const result = await googleMapsService.reverseGeocode(
+    const result = await mapboxService.reverseGeocode(
       parseFloat(lat),
       parseFloat(lng),
     );
@@ -158,11 +179,13 @@ router.get(
  *         required: false
  *         schema:
  *           type: string
- *         description: UUID session token (recommended – groups billing for autocomplete + place detail)
+ *         description: >
+ *           UUID session token. Strongly recommended — Mapbox groups billing for
+ *           autocomplete + place details per session, and the returned placeId can
+ *           only be resolved by /places/details using this same token.
  */
 router.get(
   "/places/autocomplete",
-  authMiddleware,
   asyncHandler(async (req, res) => {
     const { input, sessiontoken } = req.query;
 
@@ -172,13 +195,13 @@ router.get(
         .json({ success: false, message: "input query parameter is required" });
     }
 
-    if (!googleMapsService.isConfigured()) {
+    if (!mapboxService.isConfigured()) {
       return res
         .status(503)
         .json({ success: false, message: "Maps service is not configured" });
     }
 
-    const suggestions = await googleMapsService.getPlaceAutocomplete(
+    const suggestions = await mapboxService.getPlaceAutocomplete(
       input,
       sessiontoken,
     );
@@ -195,7 +218,11 @@ router.get(
  * @swagger
  * /api/maps/places/details:
  *   get:
- *     summary: Resolve a place_id from autocomplete to full coordinates
+ *     summary: Resolve a placeId from autocomplete to full coordinates
+ *     description: >
+ *       Resolves a placeId returned by /places/autocomplete. Mapbox scopes a
+ *       placeId to the session that produced it, so pass the same sessiontoken
+ *       used for the autocomplete call — otherwise the lookup returns 404.
  *     tags: [Maps]
  *     security:
  *       - bearerAuth: []
@@ -205,12 +232,17 @@ router.get(
  *         required: true
  *         schema:
  *           type: string
+ *       - in: query
+ *         name: sessiontoken
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: The same UUID session token passed to /places/autocomplete
  */
 router.get(
   "/places/details",
-  authMiddleware,
   asyncHandler(async (req, res) => {
-    const { placeId } = req.query;
+    const { placeId, sessiontoken } = req.query;
 
     if (!placeId) {
       return res
@@ -221,13 +253,13 @@ router.get(
         });
     }
 
-    if (!googleMapsService.isConfigured()) {
+    if (!mapboxService.isConfigured()) {
       return res
         .status(503)
         .json({ success: false, message: "Maps service is not configured" });
     }
 
-    const result = await googleMapsService.getPlaceDetails(placeId);
+    const result = await mapboxService.getPlaceDetails(placeId, sessiontoken);
 
     if (!result) {
       return res
@@ -244,7 +276,7 @@ router.get(
  * /api/maps/distance:
  *   get:
  *     summary: Get road distance and drive time between two points
- *     description: Uses Google Maps Distance Matrix. Useful for previewing delivery cost before checkout.
+ *     description: Uses the Mapbox Matrix API. Useful for previewing delivery cost before checkout.
  *     tags: [Maps]
  *     security:
  *       - bearerAuth: []
@@ -272,7 +304,6 @@ router.get(
  */
 router.get(
   "/distance",
-  authMiddleware,
   asyncHandler(async (req, res) => {
     const { originLat, originLng, destLat, destLng } = req.query;
 
@@ -283,13 +314,13 @@ router.get(
       });
     }
 
-    if (!googleMapsService.isConfigured()) {
+    if (!mapboxService.isConfigured()) {
       return res
         .status(503)
         .json({ success: false, message: "Maps service is not configured" });
     }
 
-    const result = await googleMapsService.getDistanceMatrix(
+    const result = await mapboxService.getDistanceMatrix(
       { lat: parseFloat(originLat), lng: parseFloat(originLng) },
       { lat: parseFloat(destLat), lng: parseFloat(destLng) },
     );

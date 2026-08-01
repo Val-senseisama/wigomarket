@@ -76,20 +76,23 @@ const appConfig = {
     },
   },
 
-  // Maps Configuration (Google Maps)
+  // Maps Configuration (Mapbox)
   maps: {
-    googleMaps: {
-      apiKey: process.env.GOOGLE_MAPS_API_KEY,
+    mapbox: {
+      accessToken: process.env.MAPBOX_ACCESS_TOKEN,
 
       // Default region bias for Lagos / Nigeria
-      region: "NG",
       language: "en",
       countryRestriction: "ng", // ISO 3166-1 alpha-2
+      profile: "driving", // routing profile for matrix + directions
 
       validate() {
-        if (!this.apiKey || this.apiKey === "YOUR_GOOGLE_MAPS_API_KEY_HERE") {
+        if (
+          !this.accessToken ||
+          this.accessToken === "YOUR_MAPBOX_ACCESS_TOKEN_HERE"
+        ) {
           console.warn(
-            "⚠️  GOOGLE_MAPS_API_KEY not configured. Distance-based delivery fees will use fallback.",
+            "⚠️  MAPBOX_ACCESS_TOKEN not configured. Distance-based delivery fees will use fallback.",
           );
           return false;
         }

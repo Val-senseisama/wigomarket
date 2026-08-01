@@ -52,6 +52,12 @@ const auditLogSchema = new mongoose.Schema(
       enum: ["success", "failed"],
       default: "success",
     },
+
+    // When this entry becomes eligible for automatic deletion.
+    // `null` (or absent) means it is retained indefinitely — MongoDB's TTL
+    // monitor ignores documents whose indexed field is not a Date. Financial
+    // and security entries are written with null; see auditService.
+    expiresAt: { type: Date, default: null },
   },
   {
     timestamps: true,          // createdAt is the authoritative timestamp
@@ -66,7 +72,14 @@ auditLogSchema.index({ "actor.userId": 1, createdAt: -1 });
 auditLogSchema.index({ "resource.type": 1, "resource.id": 1, createdAt: -1 });
 // "All events of this type?"
 auditLogSchema.index({ action: 1, createdAt: -1 });
-// TTL — auto-delete logs older than 90 days
-auditLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 });
+
+// Retention is per-document rather than a blanket age cut-off.
+//
+// The previous index expired EVERY entry 90 days after creation, including
+// wallet debits, payouts and refunds — far short of the multi-year retention
+// financial records require, and it deleted the evidence of any discrepancy
+// that had not yet been investigated. Now each entry carries its own
+// `expiresAt`; entries written with `expiresAt: null` are never collected.
+auditLogSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 module.exports = mongoose.model("AuditLog", auditLogSchema);

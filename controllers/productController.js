@@ -11,6 +11,7 @@ const { Validate } = require("../Helpers/Validate");
 const redisClient = require("../config/redisClient");
 const audit = require("../services/auditService");
 const { ThrowError } = require("../Helpers/Helpers");
+const money = require("../utils/money");
 /**
  * @function createProductCategory
  * @description Create a new product category
@@ -228,9 +229,9 @@ const createProduct = asyncHandler(async (req, res) => {
     validatedColors = colors;
   }
 
-  const sellersPrice = price;
-  const commission   = (sellersPrice * 2) / 100;
-  const listedPrice  = sellersPrice + commission;
+  const sellersPrice = money.round(price);
+  const commission   = money.percentage(sellersPrice, 2);
+  const listedPrice  = money.add(sellersPrice, commission);
 
   try {
     let newProduct = await Product.create({
@@ -309,7 +310,10 @@ const updateProduct = asyncHandler(async (req, res) => {
 
   // Recompute listedPrice when price changes
   if (updateData.price !== undefined) {
-    updateData.listedPrice = updateData.price + (updateData.price * 2) / 100;
+    updateData.listedPrice = money.add(
+      updateData.price,
+      money.percentage(updateData.price, 2),
+    );
   }
 
   if (updateData.title) {

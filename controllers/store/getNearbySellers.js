@@ -28,46 +28,17 @@ const getNearbySellers = asyncHandler(async (req, res) => {
   try {
     // Build aggregation pipeline for nearby sellers
     const pipeline = [
-      // Match active stores
+      // Geospatial search against the `location` 2dsphere index.
+      // $geoNear must be the first stage, returns results already sorted
+      // nearest-first, and reports distance in metres — scaled to km here.
       {
-        $match: {
-          "location.coordinates": { $exists: true }
-        }
-      },
-      // Add distance calculation using haversine formula
-      // GeoJSON location.coordinates = [longitude, latitude]
-      {
-        $addFields: {
-          distance: {
-            $multiply: [
-              6371, // Earth's radius in kilometers
-              {
-                $acos: {
-                  $add: [
-                    {
-                      $multiply: [
-                        { $sin: { $multiply: [{ $divide: [userLat, 180] }, Math.PI] } },
-                        { $sin: { $multiply: [{ $divide: [{ $arrayElemAt: ["$location.coordinates", 1] }, 180] }, Math.PI] } }
-                      ]
-                    },
-                    {
-                      $multiply: [
-                        { $cos: { $multiply: [{ $divide: [userLat, 180] }, Math.PI] } },
-                        { $cos: { $multiply: [{ $divide: [{ $arrayElemAt: ["$location.coordinates", 1] }, 180] }, Math.PI] } },
-                        { $cos: { $multiply: [{ $subtract: [{ $divide: [userLng, 180] }, { $divide: [{ $arrayElemAt: ["$location.coordinates", 0] }, 180] }] }, Math.PI] } }
-                      ]
-                    }
-                  ]
-                }
-              }
-            ]
-          }
-        }
-      },
-      // Filter by radius
-      {
-        $match: {
-          distance: { $lte: radiusNum }
+        $geoNear: {
+          near: { type: "Point", coordinates: [userLng, userLat] },
+          distanceField: "distance",
+          maxDistance: radiusNum * 1000, // km → metres
+          distanceMultiplier: 0.001, // metres → km
+          query: { "location.coordinates": { $exists: true } },
+          spherical: true,
         }
       },
       // Lookup products count
@@ -102,9 +73,7 @@ const getNearbySellers = asyncHandler(async (req, res) => {
           totalRatings: { $size: "$ratings" }
         }
       },
-      // Sort by distance
-      { $sort: { distance: 1 } },
-      // Limit results
+      // $geoNear already returns results sorted nearest-first
       { $limit: limitNum },
       // Project final fields
       {
