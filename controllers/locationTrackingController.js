@@ -8,7 +8,7 @@ const validateMongodbId = require("../utils/validateMongodbId");
 const { Validate } = require("../Helpers/Validate");
 const { ThrowError } = require("../Helpers/Helpers");
 const redisClient = require("../config/redisClient");
-const googleMapsService = require("../services/googleMapsService");
+const mapboxService = require("../services/mapboxService");
 
 /**
  * @function updateLocation
@@ -500,7 +500,7 @@ const updateDeliveryStatus = asyncHandler(async (req, res) => {
   }
 });
 
-// ─── Map Helper Functions (Google Maps) ─────────────────────────────────────
+// ─── Map Helper Functions (Mapbox) ─────────────────────────────────────
 
 /**
  * Reverse-geocode coordinates to a human-readable address.
@@ -508,7 +508,7 @@ const updateDeliveryStatus = asyncHandler(async (req, res) => {
  */
 async function getAddressFromCoordinates(latitude, longitude) {
   try {
-    const result = await googleMapsService.reverseGeocode(
+    const result = await mapboxService.reverseGeocode(
       parseFloat(latitude),
       parseFloat(longitude),
     );
@@ -525,7 +525,7 @@ async function getAddressFromCoordinates(latitude, longitude) {
  */
 async function getCoordinatesFromAddress(address) {
   try {
-    const result = await googleMapsService.geocodeAddress(address);
+    const result = await mapboxService.geocodeAddress(address);
     if (!result) return null;
     return [result.lng, result.lat]; // GeoJSON order: [lng, lat]
   } catch (error) {
@@ -548,7 +548,7 @@ async function getOptimizedRoute(start, waypoints) {
     .slice(0, -1)
     .map((wp) => ({ lat: wp[1], lng: wp[0] }));
 
-  const result = await googleMapsService.getDirections(
+  const result = await mapboxService.getDirections(
     originCoords,
     destCoords,
     midWayCoords,

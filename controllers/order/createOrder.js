@@ -10,7 +10,7 @@ const { validateMongodbId } = require("../../utils/validateMongodbId");
 const { generateOrderNumber } = require("../../utils/generateOrderNumber");
 const appConfig = require("../../config/appConfig");
 const deliveryFeeService = require("../../services/deliveryFeeService");
-const googleMapsService = require("../../services/googleMapsService");
+const mapboxService = require("../../services/mapboxService");
 const audit = require("../../services/auditService");
 const {
   PaymentStatus,
@@ -100,39 +100,33 @@ const createOrder = asyncHandler(async (req, res) => {
     let populatedOrder;
     let totalAmount;
     let deliveryFee = 0;
+    let deliveryMetadata = null;
+    let resolvedDeliveryLocation;
 
-    await session.withTransaction(async () => {
-      // Get user's cart
-      const userCart = await Cart.findOne({ owner: _id })
-        .populate("products.product")
-        .session(session);
+    // ── Delivery pricing & geocoding — deliberately OUTSIDE the transaction ──
+    // session.withTransaction() re-runs its callback whenever MongoDB reports a
+    // transient error, so a billed third-party call placed inside it is paid for
+    // again on every retry. These lookups are read-only, so they run exactly
+    // once here and the transaction below only consumes the results.
+    {
+      const cartForPricing = await Cart.findOne({ owner: _id }).populate(
+        "products.product",
+      );
 
-      if (!userCart || userCart.products.length === 0) {
+      if (!cartForPricing || cartForPricing.products.length === 0) {
         throw new Error("Cart is empty");
       }
 
-      // Check stock availability
-      for (const item of userCart.products) {
-        if (!item.product) {
-          throw new Error(`Product not found in cart (maybe deleted)`);
-        }
-        if (item.product.quantity < item.count) {
-          throw new Error(
-            `Insufficient stock for ${item.product.title}. Available: ${item.product.quantity}, Requested: ${item.count}`,
-          );
-        }
-      }
+      // Holds a resolved Place Details lookup so it is only paid for once,
+      // shared between the fee calculation and the GeoJSON build further down.
+      let placeDetails = null;
 
-      // Calculate delivery fee based on distance
-      let deliveryMetadata = null;
       if (deliveryMethod === DeliveryMethod.DELIVERY_AGENT) {
         try {
           // Get store with both address string and GeoJSON location
           const firstProduct = await Product.findById(
-            userCart.products[0].product._id,
-          )
-            .populate("store", "address location")
-            .session(session);
+            cartForPricing.products[0].product._id,
+          ).populate("store", "address location");
 
           if (!firstProduct || !firstProduct.store) {
             throw new Error("Store information not found");
@@ -157,13 +151,17 @@ const createOrder = asyncHandler(async (req, res) => {
               lng: deliveryLocation.lng,
             };
           } else if (deliveryLocation?.placeId) {
-            const details = await googleMapsService.getPlaceDetails(
+            // Cached on `placeDetails` so the GeoJSON build below can reuse it
+            // instead of paying for a second Place Details lookup.
+            placeDetails = await mapboxService.getPlaceDetails(
               deliveryLocation.placeId,
             );
-            if (details) userLocation = { lat: details.lat, lng: details.lng };
+            if (placeDetails) {
+              userLocation = { lat: placeDetails.lat, lng: placeDetails.lng };
+            }
           }
 
-          // Calculate fee using Google Maps Distance Matrix
+          // Calculate fee using the Mapbox Matrix API
           const feeData = await deliveryFeeService.calculateDeliveryFee(
             storeLocation,
             userLocation,
@@ -202,10 +200,7 @@ const createOrder = asyncHandler(async (req, res) => {
         }
       }
 
-      totalAmount = userCart.cartTotal + deliveryFee;
-
       // Build GeoJSON deliveryLocation from whatever the buyer provided
-      let resolvedDeliveryLocation;
       if (deliveryLocation?.lat && deliveryLocation?.lng) {
         resolvedDeliveryLocation = {
           type: "Point",
@@ -213,11 +208,12 @@ const createOrder = asyncHandler(async (req, res) => {
           formattedAddress:
             deliveryLocation.formattedAddress || deliveryAddress,
         };
-      } else if (deliveryLocation?.placeId && !resolvedDeliveryLocation) {
-        // Try to resolve the placeId one more time if we didn't already do it above
-        const details = await googleMapsService.getPlaceDetails(
-          deliveryLocation.placeId,
-        );
+      } else if (deliveryLocation?.placeId) {
+        // Reuse the lookup from the fee calculation when there was one;
+        // only pay for a fresh call if the fee path never ran (e.g. pickup).
+        const details =
+          placeDetails ||
+          (await mapboxService.getPlaceDetails(deliveryLocation.placeId));
         if (details) {
           resolvedDeliveryLocation = {
             type: "Point",
@@ -226,6 +222,32 @@ const createOrder = asyncHandler(async (req, res) => {
           };
         }
       }
+    }
+
+    await session.withTransaction(async () => {
+      // Re-read the cart inside the transaction: this is the authoritative copy
+      // the order is built from and stock is decremented against.
+      const userCart = await Cart.findOne({ owner: _id })
+        .populate("products.product")
+        .session(session);
+
+      if (!userCart || userCart.products.length === 0) {
+        throw new Error("Cart is empty");
+      }
+
+      // Check stock availability
+      for (const item of userCart.products) {
+        if (!item.product) {
+          throw new Error(`Product not found in cart (maybe deleted)`);
+        }
+        if (item.product.quantity < item.count) {
+          throw new Error(
+            `Insufficient stock for ${item.product.title}. Available: ${item.product.quantity}, Requested: ${item.count}`,
+          );
+        }
+      }
+
+      totalAmount = userCart.cartTotal + deliveryFee;
 
       // Generate the human-friendly sequential order number (e.g. WM1201).
       // Uses the session so the counter rolls back if the transaction aborts.

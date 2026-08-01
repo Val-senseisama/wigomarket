@@ -158,8 +158,10 @@ const options = {
     "./routes/websocketRouter.js",
     "./routes/wishlistRouter.js",
     "./routes/sellerDiscoveryRouter.js",
+    "./routes/mapsRouter.js",
     "./routes/billPaymentRouter.js",
     "./routes/searchRouter.js",
+    "./routes/adminRouter.js",
   ],
 };
 

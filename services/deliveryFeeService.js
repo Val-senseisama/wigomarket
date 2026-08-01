@@ -1,9 +1,10 @@
-const googleMapsService = require("../services/googleMapsService");
+const mapboxService = require("../services/mapboxService");
 const appConfig = require("../config/appConfig");
+const money = require("../utils/money");
 
 /**
  * @class DeliveryFeeService
- * @description Calculate delivery fees based on road distance using Google Maps Distance Matrix API
+ * @description Calculate delivery fees based on road distance using the Mapbox Matrix API
  */
 class DeliveryFeeService {
   constructor() {
@@ -19,10 +20,10 @@ class DeliveryFeeService {
    */
   async calculateDeliveryFee(storeLocation, userLocation) {
     try {
-      // Validate Google Maps is configured
-      if (!googleMapsService.isConfigured()) {
+      // Validate Mapbox is configured
+      if (!mapboxService.isConfigured()) {
         console.warn(
-          "[DeliveryFee] Google Maps not configured, using fallback base fee",
+          "[DeliveryFee] Mapbox not configured, using fallback base fee",
         );
         return this.getFallbackFee();
       }
@@ -39,7 +40,7 @@ class DeliveryFeeService {
       }
 
       // Get road distance via Distance Matrix
-      const matrix = await googleMapsService.getDistanceMatrix(
+      const matrix = await mapboxService.getDistanceMatrix(
         storeCoords,
         userCoords,
       );
@@ -65,7 +66,7 @@ class DeliveryFeeService {
       const estimatedTime = Math.ceil(matrix.durationSeconds / 60); // minutes
 
       return {
-        fee: Math.round(fee),
+        fee: money.round(fee),
         distance: Math.round(distanceKm * 100) / 100,
         estimatedTime,
         distanceText: matrix.distanceText,
@@ -107,7 +108,7 @@ class DeliveryFeeService {
         ? `${location.street || ""}, ${location.city || ""}, ${location.state || ""}, ${location.country || ""}`.trim()
         : String(location);
 
-    const geocoded = await googleMapsService.geocodeAddress(addressStr);
+    const geocoded = await mapboxService.geocodeAddress(addressStr);
     if (!geocoded) return null;
     return { lat: geocoded.lat, lng: geocoded.lng };
   }
@@ -121,11 +122,13 @@ class DeliveryFeeService {
     const { baseFee, distanceRates } = this.deliveryConfig;
 
     if (distanceKm <= distanceRates.baseDistance) {
-      return baseFee;
+      return money.round(baseFee);
     }
 
+    // distanceKm is a measurement, not money, so it multiplies the per-km rate
+    // as a plain factor; the result is normalised to whole kobo.
     const extraDistance = distanceKm - distanceRates.baseDistance;
-    return baseFee + extraDistance * distanceRates.perKm;
+    return money.add(baseFee, money.multiply(distanceRates.perKm, extraDistance));
   }
 
   /**

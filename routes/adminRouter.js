@@ -29,22 +29,322 @@ router.use(authMiddleware, isAdmin);
 
 // ── Dashboard ───────────────────────────────────────────────────────────────
 
-// GET /api/admin/overview — aggregated counts for the admin home screen
+/**
+ * @swagger
+ * /api/admin/overview:
+ *   get:
+ *     summary: Aggregated platform counts for the admin dashboard
+ *     description: Totals for users, stores, orders, wallets and revenue.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Success
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
+ */
 router.get("/overview", admin.getOverview);
 
 // ── User management ───────────────────────────────────────────────────────────
 
+/**
+ * @swagger
+ * /api/admin/users:
+ *   get:
+ *     summary: List users
+ *     description: Paginated, filterable by role, status and free-text search.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: role
+ *         schema: { type: string, enum: [buyer, seller, dispatch, admin] }
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [active, inactive, suspended] }
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *         description: Matches name, email or phone
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1, minimum: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+ *     responses:
+ *       200:
+ *         description: Success
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
+ */
 router.get("/users", admin.listUsers);
+/**
+ * @swagger
+ * /api/admin/users/{id}:
+ *   get:
+ *     summary: Get a single user with related detail
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Success
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
+ *       404:
+ *         description: Not found
+ */
 router.get("/users/:id", admin.getUserDetail);
+/**
+ * @swagger
+ * /api/admin/users/{id}/roles:
+ *   put:
+ *     summary: Replace a user's roles
+ *     description: Overwrites the user's role array. Audited as admin.user_roles_updated.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [roles]
+ *             properties:
+ *               roles:
+ *                 type: array
+ *                 items: { type: string, enum: [buyer, seller, dispatch, admin] }
+ *     responses:
+ *       200:
+ *         description: Success
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
+ *       404:
+ *         description: Not found
+ */
 router.put("/users/:id/roles", admin.updateUserRoles);
+/**
+ * @swagger
+ * /api/admin/users/{id}/status:
+ *   put:
+ *     summary: Activate, deactivate or suspend a user
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [status]
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 enum: [active, inactive, suspended]
+ *               reason:
+ *                 type: string
+ *                 description: Recorded in the audit trail
+ *     responses:
+ *       200:
+ *         description: Success
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
+ *       404:
+ *         description: Not found
+ */
 router.put("/users/:id/status", admin.setUserStatus);
 
 // ── Dispatch (rider) management ────────────────────────────────────────────────
 
+/**
+ * @swagger
+ * /api/admin/dispatch-profiles:
+ *   get:
+ *     summary: List dispatch rider profiles
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [pending, approved, rejected, suspended] }
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1, minimum: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+ *     responses:
+ *       200:
+ *         description: Success
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
+ */
 router.get("/dispatch-profiles", admin.listDispatchProfiles);
+/**
+ * @swagger
+ * /api/admin/dispatch-profiles/{id}/approve:
+ *   put:
+ *     summary: Approve a dispatch profile
+ *     description: Allows the rider to begin accepting deliveries.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Success
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
+ *       404:
+ *         description: Not found
+ */
 router.put("/dispatch-profiles/:id/approve", admin.approveDispatchProfile);
+/**
+ * @swagger
+ * /api/admin/dispatch-profiles/{id}/reject:
+ *   put:
+ *     summary: Reject a dispatch profile
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [reason]
+ *             properties:
+ *               reason:
+ *                 type: string
+ *                 description: Shown to the rider and audited
+ *     responses:
+ *       200:
+ *         description: Success
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
+ *       404:
+ *         description: Not found
+ */
 router.put("/dispatch-profiles/:id/reject", admin.rejectDispatchProfile);
+/**
+ * @swagger
+ * /api/admin/dispatch-profiles/{id}/suspend:
+ *   put:
+ *     summary: Suspend an approved dispatch profile
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [reason]
+ *             properties:
+ *               reason:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Success
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
+ *       404:
+ *         description: Not found
+ */
 router.put("/dispatch-profiles/:id/suspend", admin.suspendDispatchProfile);
+/**
+ * @swagger
+ * /api/admin/dispatch-profiles/{id}/documents/{docType}/verify:
+ *   put:
+ *     summary: Mark a rider's uploaded document verified or unverified
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *       - in: path
+ *         name: docType
+ *         required: true
+ *         schema: { type: string }
+ *         description: Which uploaded document to act on
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               verified:
+ *                 type: boolean
+ *                 default: true
+ *     responses:
+ *       200:
+ *         description: Success
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
+ *       404:
+ *         description: Not found
+ */
 router.put(
   "/dispatch-profiles/:id/documents/:docType/verify",
   admin.verifyDispatchDocument,
@@ -52,7 +352,71 @@ router.put(
 
 // ── Store management ──────────────────────────────────────────────────────────
 
+/**
+ * @swagger
+ * /api/admin/stores:
+ *   get:
+ *     summary: List stores
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema: { type: string }
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1, minimum: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+ *     responses:
+ *       200:
+ *         description: Success
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
+ */
 router.get("/stores", admin.listStores);
+/**
+ * @swagger
+ * /api/admin/stores/{id}/status:
+ *   put:
+ *     summary: Change a store's status
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [status]
+ *             properties:
+ *               status:
+ *                 type: string
+ *               reason:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Success
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
+ *       404:
+ *         description: Not found
+ */
 router.put("/stores/:id/status", admin.setStoreStatus);
 
 // ── Order management ──────────────────────────────────────────────────────────
@@ -142,8 +506,108 @@ router.post("/orders/:id/contact", admin.contactCustomer);
 
 // ── Wallet management ─────────────────────────────────────────────────────────
 
+/**
+ * @swagger
+ * /api/admin/wallets:
+ *   get:
+ *     summary: List wallets, highest balance first
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [active, frozen, closed] }
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1, minimum: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+ *     responses:
+ *       200:
+ *         description: Success
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
+ */
 router.get("/wallets", admin.listWallets);
+/**
+ * @swagger
+ * /api/admin/wallets/{id}/status:
+ *   put:
+ *     summary: Freeze, close or reactivate a wallet
+ *     description: A non-active wallet rejects all debits and credits.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [status]
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 enum: [active, frozen, closed]
+ *               reason:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Success
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
+ *       404:
+ *         description: Not found
+ */
 router.put("/wallets/:id/status", admin.setWalletStatus);
+/**
+ * @swagger
+ * /api/admin/wallets/{id}/limits:
+ *   put:
+ *     summary: Update a wallet's withdrawal limits
+ *     description: Amounts are in NGN. Enforced atomically on every withdrawal.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               dailyWithdrawal:
+ *                 type: number
+ *               monthlyWithdrawal:
+ *                 type: number
+ *               minimumBalance:
+ *                 type: number
+ *     responses:
+ *       200:
+ *         description: Success
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
+ *       404:
+ *         description: Not found
+ */
 router.put("/wallets/:id/limits", admin.updateWalletLimits);
 
 // ── Withdrawals (handlers shared with the wallet flow) ─────────────────────────
@@ -185,6 +649,60 @@ const LEVEL_SETS = {
  *   endDate      — ISO date string, inclusive
  *   page         — page number (default 1)
  *   limit        — results per page (default 50, max 100)
+ */
+/**
+ * @swagger
+ * /api/admin/audit-logs:
+ *   get:
+ *     summary: Query the audit trail
+ *     description: >
+ *       Paginated, filterable audit log. Financial, security and admin actions
+ *       are retained indefinitely; routine operational entries expire after 400
+ *       days. Use requestId to correlate an entry with application logs.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: action
+ *         schema: { type: string }
+ *         description: Exact action name, e.g. wallet.deduct
+ *       - in: query
+ *         name: userId
+ *         schema: { type: string }
+ *         description: Filter by the actor who performed the action
+ *       - in: query
+ *         name: resourceType
+ *         schema: { type: string, enum: [order, product, category, store, user, wallet, payment, transaction, dispatch, rating, wishlist, system] }
+ *       - in: query
+ *         name: resourceId
+ *         schema: { type: string }
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [success, failed] }
+ *       - in: query
+ *         name: requestId
+ *         schema: { type: string }
+ *         description: Correlates with the x-request-id of the originating call
+ *       - in: query
+ *         name: startDate
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: endDate
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 50, maximum: 100 }
+ *     responses:
+ *       200:
+ *         description: Success
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
  */
 router.get(
   "/audit-logs",
@@ -247,6 +765,29 @@ router.get(
  * GET /api/admin/audit-logs/:id
  * Retrieve a single audit log entry.
  */
+/**
+ * @swagger
+ * /api/admin/audit-logs/{id}:
+ *   get:
+ *     summary: Retrieve a single audit log entry
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Success
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
+ *       404:
+ *         description: Log entry not found
+ */
 router.get(
   "/audit-logs/:id",
   asyncHandler(async (req, res) => {
@@ -261,6 +802,23 @@ router.get(
 /**
  * GET /api/admin/audit-logs/summary
  * Aggregated counts by action for the last 30 days — useful for dashboards.
+ */
+/**
+ * @swagger
+ * /api/admin/audit-logs/summary:
+ *   get:
+ *     summary: Aggregated audit counts for the last 30 days
+ *     description: Counts grouped by action, status and resource type. Intended for dashboards.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Success
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
  */
 router.get(
   "/audit-logs/summary",
@@ -305,6 +863,50 @@ router.get(
  *   page, limit
  *
  * Returns 503 if the MongoDB log transport is not active.
+ */
+/**
+ * @swagger
+ * /api/admin/app-logs:
+ *   get:
+ *     summary: Query application logs
+ *     description: >
+ *       Reads the Winston MongoDB transport. Returns 503 when that transport is
+ *       not active.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: level
+ *         schema: { type: string, enum: [error, warn, info, http, debug], default: info }
+ *       - in: query
+ *         name: requestId
+ *         schema: { type: string }
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *         description: Free-text match against the log message
+ *       - in: query
+ *         name: startDate
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: endDate
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 100, maximum: 100 }
+ *     responses:
+ *       200:
+ *         description: Success
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
+ *       503:
+ *         description: MongoDB log transport is not active
  */
 router.get(
   "/app-logs",
@@ -378,6 +980,32 @@ router.get(
 // seen timestamp. This approach works on all MongoDB plans (no change streams
 // required — change streams need a replica set / Atlas).
 
+/**
+ * @swagger
+ * /api/admin/app-logs/tail:
+ *   get:
+ *     summary: Stream application logs (Server-Sent Events)
+ *     description: >
+ *       Long-lived SSE stream that polls MongoDB every 2 seconds for new log
+ *       documents. Responds with text/event-stream, not JSON.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: level
+ *         schema: { type: string, enum: [error, warn, info, http, debug], default: info }
+ *     responses:
+ *       200:
+ *         description: SSE stream of log entries
+ *         content:
+ *           text/event-stream:
+ *             schema: { type: string }
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
+ */
 router.get("/app-logs/tail", (req, res) => {
   // SSE headers
   res.setHeader("Content-Type", "text/event-stream");

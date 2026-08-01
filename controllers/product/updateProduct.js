@@ -5,6 +5,7 @@ const validateMongodbId = require("../../utils/validateMongodbId");
 const { Validate } = require("../../Helpers/Validate");
 const { ThrowError } = require("../../Helpers/Helpers");
 const audit = require("../../services/auditService");
+const money = require("../../utils/money");
 
 /**
  * @function updateProduct
@@ -80,8 +81,8 @@ const updateProduct = asyncHandler(async (req, res) => {
 
   // Recompute listedPrice whenever price changes (seller price + 2% commission)
   if (updateData.price !== undefined) {
-    const commission = (updateData.price * 2) / 100;
-    updateData.listedPrice = updateData.price + commission;
+    const commission = money.percentage(updateData.price, 2);
+    updateData.listedPrice = money.add(updateData.price, commission);
   }
 
   if (updateData.title) {

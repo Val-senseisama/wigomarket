@@ -1,7 +1,31 @@
 jest.mock("../controllers/emailController", () => jest.fn().mockResolvedValue({}));
-jest.mock("../services/googleMapsService", () => ({
-  getDistanceAndDuration: jest.fn().mockResolvedValue({ distance: 5, duration: 15 }),
-  geocodeAddress: jest.fn().mockResolvedValue({ lat: 6.5244, lng: 3.3792 }),
+jest.mock("../services/mapboxService", () => ({
+  isConfigured: jest.fn().mockReturnValue(true),
+  geocodeAddress: jest.fn().mockResolvedValue({
+    lat: 6.5244,
+    lng: 3.3792,
+    formattedAddress: "Lagos, Nigeria",
+    placeId: "test-place-id",
+  }),
+  reverseGeocode: jest.fn().mockResolvedValue({
+    formattedAddress: "Lagos, Nigeria",
+    components: {},
+    placeId: "test-place-id",
+  }),
+  getPlaceAutocomplete: jest.fn().mockResolvedValue([]),
+  getPlaceDetails: jest.fn().mockResolvedValue({
+    lat: 6.5244,
+    lng: 3.3792,
+    formattedAddress: "Lagos, Nigeria",
+    placeId: "test-place-id",
+  }),
+  getDistanceMatrix: jest.fn().mockResolvedValue({
+    distanceMeters: 5000,
+    durationSeconds: 900,
+    distanceText: "5.0 km",
+    durationText: "15 mins",
+  }),
+  getDirections: jest.fn().mockResolvedValue(null),
 }));
 jest.mock("resend", () => ({
   Resend: jest.fn().mockImplementation(() => ({

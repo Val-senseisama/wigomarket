@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const money = require("../utils/money");
 
 // Wallet schema for users (sellers, dispatch riders)
 const walletSchema = new mongoose.Schema(
@@ -228,9 +229,12 @@ walletSchema.methods.creditEarning = async function (
   }
   const opts = session ? { session } : {};
 
-  const increments = { balance: amount };
+  // Normalise to whole kobo so repeated credits cannot accumulate float error
+  const creditAmount = money.round(amount);
+
+  const increments = { balance: creditAmount };
   if (isEarning) {
-    increments["metadata.totalEarnings"] = amount;
+    increments["metadata.totalEarnings"] = creditAmount;
   }
 
   const updated = await this.constructor.findOneAndUpdate(
@@ -243,12 +247,21 @@ walletSchema.methods.creditEarning = async function (
   );
   if (!updated) throw new Error("Wallet not found or is not active");
 
-  // Audit the credit action
-  require("../services/auditService").log({
-    action: "wallet.credit",
-    resource: { type: "wallet", id: this._id },
-    metadata: { amount, isEarning, balance: updated.balance },
-  });
+  // Audit inside the same transaction as the balance change, so the record of
+  // money moving cannot be lost if the process dies before the buffer flushes.
+  await require("../services/auditService").logWithSession(
+    {
+      action: "wallet.credit",
+      resource: { type: "wallet", id: this._id },
+      metadata: {
+        amount: creditAmount,
+        isEarning,
+        balance: updated.balance,
+        balanceKobo: money.toKobo(updated.balance),
+      },
+    },
+    session,
+  );
 
   this.balance = updated.balance;
   return updated.balance;
@@ -283,10 +296,16 @@ walletSchema.methods.deductFunds = async function (
   const opts = session ? { session } : {};
   const now = new Date();
 
+  // Declared at method scope, not inside the withdrawal branch below: the
+  // withdrawalFilter built further down references both unconditionally, so
+  // scoping them to the branch made every non-withdrawal deduction (refunds,
+  // reversals) throw "ReferenceError: today is not defined" before it ever
+  // reached the database.
+  const today = now.toISOString().slice(0, 10);
+  const currentMonth = now.toISOString().slice(0, 7);
+
   let update;
   if (transactionType === "withdrawal") {
-    const today = now.toISOString().slice(0, 10);
-    const currentMonth = now.toISOString().slice(0, 7);
     // Aggregation pipeline handles conditional daily/monthly resets atomically
     update = [
       {
@@ -407,6 +426,8 @@ walletSchema.methods.deductFunds = async function (
   if (!updated) {
     const errorMsg =
       "Insufficient balance, withdrawal limit exceeded, or wallet inactive";
+    // Buffered rather than session-bound: the transaction is about to abort, so
+    // a session-bound write would roll back and erase the failure record.
     require("../services/auditService").error({
       action: "wallet.deduction_failed",
       resource: { type: "wallet", id: this._id },
@@ -415,12 +436,20 @@ walletSchema.methods.deductFunds = async function (
     throw new Error(errorMsg);
   }
 
-  // Audit the deduction
-  require("../services/auditService").log({
-    action: "wallet.deduct",
-    resource: { type: "wallet", id: this._id },
-    metadata: { amount, type: transactionType, balance: updated.balance },
-  });
+  // Audit inside the same transaction as the balance change — see creditEarning
+  await require("../services/auditService").logWithSession(
+    {
+      action: "wallet.deduct",
+      resource: { type: "wallet", id: this._id },
+      metadata: {
+        amount,
+        type: transactionType,
+        balance: updated.balance,
+        balanceKobo: money.toKobo(updated.balance),
+      },
+    },
+    session,
+  );
 
   this.balance = updated.balance;
   return updated;
