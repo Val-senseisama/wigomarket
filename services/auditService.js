@@ -4,10 +4,12 @@
  *
  * Entries accumulate in an in-memory buffer. The buffer flushes automatically
  * when it hits BATCH_SIZE (10) or after FLUSH_INTERVAL_MS (30 s) — whichever
- * comes first. A process-exit handler attempts a final synchronous-style flush
- * so no entries are lost on graceful shutdown.
+ * comes first. `app.js` awaits a final `flush()` during graceful shutdown, so
+ * no entries are lost when the platform stops the process.
  *
- * Failures are logged to console.error and never propagate to callers.
+ * Failures are logged to console.error and never propagate to callers. A batch
+ * that could not be written because the database was unreachable goes back on
+ * the buffer to be retried by the next flush.
  *
  * Usage:
  *   const audit = require('../../services/auditService');
@@ -20,12 +22,18 @@
  *   });
  */
 
+const mongoose = require("mongoose");
 const AuditLog = require("../models/auditLogModel");
 const { notifyAdmins } = require("./alertService");
 const money = require("../utils/money");
 
 const BATCH_SIZE = 10;
 const FLUSH_INTERVAL_MS = 30_000; // 30 seconds
+
+// Ceiling on entries held in memory while the database is unreachable. Past
+// this the oldest entries are dropped (loudly) rather than growing the buffer
+// without bound through a long outage.
+const BUFFER_LIMIT = 1000;
 
 let buffer = [];
 let flushTimer = null;
@@ -71,6 +79,55 @@ const criticalActions = [
 
 // ── Core flush ────────────────────────────────────────────────────────────────
 
+/**
+ * Put a batch back on the buffer after a failed write, newest-last so ordering
+ * is preserved. Drops the oldest entries if that would exceed BUFFER_LIMIT.
+ */
+function requeue(batch) {
+  buffer = batch.concat(buffer);
+
+  if (buffer.length > BUFFER_LIMIT) {
+    const dropped = buffer.length - BUFFER_LIMIT;
+    buffer = buffer.slice(dropped);
+    console.error(
+      `[Audit] buffer over ${BUFFER_LIMIT} entries — dropped ${dropped} oldest`,
+    );
+  }
+}
+
+/**
+ * Cast a buffered entry to a plain document via the schema.
+ *
+ * Model.insertMany() would normally do the casting, defaults and timestamps for
+ * us, but we deliberately do not use it — see flush(). Returns null (after
+ * logging) for an entry the schema rejects, matching the `ordered: false`
+ * behaviour of skipping bad documents rather than failing the whole batch.
+ */
+function toDocument(entry) {
+  try {
+    const doc = new AuditLog(entry);
+    // insertMany applies `timestamps: true`; the native driver does not.
+    doc.initializeTimestamps();
+
+    const invalid = doc.validateSync();
+    if (invalid) {
+      console.error(
+        `[Audit] dropping invalid entry (${entry?.action}):`,
+        invalid.message,
+      );
+      return null;
+    }
+
+    return doc.toObject({ depopulate: true });
+  } catch (err) {
+    console.error(
+      `[Audit] dropping uncastable entry (${entry?.action}):`,
+      err.message,
+    );
+    return null;
+  }
+}
+
 async function flush() {
   if (buffer.length === 0) return;
 
@@ -79,14 +136,40 @@ async function flush() {
   const batch = buffer;
   buffer = [];
 
+  // Nothing can be written without a live connection, and attempting it is not
+  // harmless (see below) — hold the batch for the next flush instead.
+  if (mongoose.connection.readyState !== 1) {
+    requeue(batch);
+    return;
+  }
+
+  const documents = batch.map(toDocument).filter(Boolean);
+  if (documents.length === 0) return;
+
   try {
-    await AuditLog.insertMany(batch, { ordered: false });
+    // Written through the native driver rather than AuditLog.insertMany().
+    //
+    // Mongoose 7.2's insertMany assumes any rejection from the driver is a bulk
+    // write error and reads `error.writeErrors.length` on it. For a connection
+    // error — pool closed during shutdown, failover, timeout — that property is
+    // absent, so its own error handler throws a TypeError *before* invoking its
+    // callback. The promise insertMany returned then never settles: the await
+    // below would hang forever, this catch would never run, and the batch would
+    // vanish without a trace. Casting above, then inserting here, keeps the
+    // schema behaviour while avoiding that code path entirely.
+    await AuditLog.collection.insertMany(documents, { ordered: false });
   } catch (err) {
-    // ordered: false means partial inserts still succeed; we only log the error.
+    // ordered: false means the valid documents in the batch were still written;
+    // only the rejected ones are lost, and the driver reports those.
+    const failed = err.writeErrors?.length ?? documents.length;
     console.error(
-      `[Audit] insertMany failed (${batch.length} entries):`,
+      `[Audit] insert failed (${failed}/${documents.length} entries):`,
       err.message,
     );
+
+    // A batch the server actively rejected will be rejected again on retry, so
+    // only connectivity failures go back on the buffer.
+    if (mongoose.connection.readyState !== 1) requeue(batch);
   }
 }
 
@@ -104,21 +187,24 @@ function scheduleFlush() {
 
 // ── Graceful shutdown ─────────────────────────────────────────────────────────
 
-function onExit() {
-  if (buffer.length === 0) return;
-  // Best-effort synchronous-style drain on exit — insertMany is async so we
-  // call it and let the event loop handle it before the process fully closes.
-  flush().catch(() => {});
-}
-
-process.once("exit", onExit);
-process.once("SIGINT", () => {
-  onExit();
-  process.exit(0);
-});
-process.once("SIGTERM", () => {
-  onExit();
-  process.exit(0);
+// Draining the buffer is app.js's job: its gracefulShutdown awaits flush()
+// before disconnecting the database.
+//
+// This service used to handle SIGINT/SIGTERM itself, calling flush() and then
+// process.exit(0). Both were ineffective and the second was harmful. flush() is
+// async, so exiting on the next line abandoned it — nothing was ever drained.
+// Worse, these handlers were registered at require time, ahead of app.js's own,
+// so on the SIGTERM the platform sends to stop a dyno this exit(0) fired first
+// and cut short gracefulShutdown: in-flight requests, the WebSocket server, the
+// payment and task queues and the database connection all went down uncleanly.
+//
+// 'exit' cannot run async work at all, so it only reports what is being lost.
+process.once("exit", () => {
+  if (buffer.length > 0) {
+    console.error(
+      `[Audit] process exiting with ${buffer.length} unflushed entries`,
+    );
+  }
 });
 
 // ── Public API ────────────────────────────────────────────────────────────────

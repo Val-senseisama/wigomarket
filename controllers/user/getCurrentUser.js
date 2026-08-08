@@ -54,6 +54,18 @@ const getCurrentUser = asyncHandler(async (req, res) => {
         user: user._id,
       }).select("vehicleInfo availability rating earnings status isActive");
       populatedUser.dispatchProfile = dispatchProfile;
+
+      // Next of kin and mode of transport are rider-only fields the "Edit
+      // profile" screen renders and PUT /api/delivery-agent/account writes back.
+      // Mongoose minimizes empty nested objects, so `nextOfKin` is absent
+      // entirely on a rider who has not filled it in — the form then has no
+      // shape to bind to. Emit the full shape with nulls instead so the screen
+      // can always show the user what they are editing.
+      populatedUser.nextOfKin = {
+        name: user.nextOfKin?.name ?? null,
+        mobile: user.nextOfKin?.mobile ?? null,
+      };
+      populatedUser.modeOfTransport = user.modeOfTransport ?? null;
     }
 
     // Wallet setup state, so the dashboard and the PIN navigation flow can

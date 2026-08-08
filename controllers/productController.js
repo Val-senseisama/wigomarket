@@ -12,39 +12,98 @@ const redisClient = require("../config/redisClient");
 const audit = require("../services/auditService");
 const { ThrowError } = require("../Helpers/Helpers");
 const money = require("../utils/money");
+const {
+  validateSpecifications,
+  toSpecificationPairs,
+  describeSchema,
+  describeAllSchemas,
+  SPEC_SCHEMA_KEYS,
+} = require("../utils/productSpecs");
+const { validateVariants, listedPriceFor } = require("../utils/productVariants");
+/**
+ * Resolve and validate a `parent` category id from a request body.
+ * @returns {{ error?: string, parent?: (string|null) }}
+ */
+const resolveParent = async (parent) => {
+  if (parent === undefined) return { parent: undefined };
+  if (parent === null || parent === "") return { parent: null };
+
+  if (!mongoose.isValidObjectId(parent)) {
+    return { error: "parent must be a valid category id, or null for a top-level category" };
+  }
+  const parentDoc = await Category.findById(parent).select("parent").lean();
+  if (!parentDoc) {
+    return { error: "Parent category not found" };
+  }
+  // Two levels only — the picker renders a category and its children, nothing
+  // deeper, and a deeper tree would silently not show up in the UI.
+  if (parentDoc.parent) {
+    return { error: "Categories are only two levels deep — the chosen parent is itself a subcategory" };
+  }
+  return { parent };
+};
+
+const validateSpecSchemaKey = (specSchema) => {
+  if (specSchema === undefined) return { specSchema: undefined };
+  if (specSchema === null || specSchema === "") return { specSchema: null };
+  if (!SPEC_SCHEMA_KEYS.includes(specSchema)) {
+    return { error: `specSchema must be one of: ${SPEC_SCHEMA_KEYS.join(", ")}, or null` };
+  }
+  return { specSchema };
+};
+
 /**
  * @function createProductCategory
- * @description Create a new product category
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- * @param {string} req.body.name - Name of the category (required)
- * @returns {Object} - Created category information
- * @throws {Error} - Throws error if category already exists or validation fails
+ * @description Create a product category. Categories are two levels deep: pass
+ *   `parent` to create a subcategory, omit it for a top-level one.
+ * @param {string} req.body.name - Name of the category (required, globally unique)
+ * @param {string} [req.body.parent] - Parent category id; omit/null for top-level
+ * @param {string} [req.body.specSchema] - "phone" | "computer" | null. Inherited by
+ *   subcategories that do not set their own, so tagging the parent is usually enough.
+ * @param {string} [req.body.image] - Cloudinary URL
+ * @returns {Object} - Created category
  */
 const createProductCategory = asyncHandler(async (req, res) => {
-  const name = req.body.name;
+  const { name, image } = req.body;
   if (!Validate.string(name)) {
     ThrowError("Invalid Name");
   }
-  const findCategory = await Category.findOne({ name: name });
-  if (!findCategory) {
-    // Create new Store
-    const newCategory = await Category.create({
-      name: name,
-    });
-    audit.log({
-      action: "product.category_created",
-      actor: audit.actor(req),
-      resource: { type: "category", id: newCategory._id, displayName: name },
-    });
-    res.json(newCategory);
-  } else {
-    res.json({
-      msg: "Category already exists",
+
+  const parentResult = await resolveParent(req.body.parent);
+  if (parentResult.error) return invalid(res, parentResult.error);
+
+  const schemaResult = validateSpecSchemaKey(req.body.specSchema);
+  if (schemaResult.error) return invalid(res, schemaResult.error);
+
+  const findCategory = await Category.findOne({ name });
+  if (findCategory) {
+    return res.status(409).json({
       success: false,
+      message: "Category already exists",
     });
-    throw new Error("Category already exists");
   }
+
+  const newCategory = await Category.create({
+    name,
+    ...(image !== undefined && { image }),
+    ...(parentResult.parent !== undefined && { parent: parentResult.parent }),
+    ...(schemaResult.specSchema !== undefined && { specSchema: schemaResult.specSchema }),
+  });
+
+  audit.log({
+    action: "product.category_created",
+    actor: audit.actor(req),
+    resource: { type: "category", id: newCategory._id, displayName: name },
+    changes: {
+      after: {
+        name,
+        parent: newCategory.parent,
+        specSchema: newCategory.specSchema,
+      },
+    },
+  });
+
+  res.status(201).json({ success: true, data: newCategory });
 });
 /**
  * @function deleteProductCategory
@@ -55,28 +114,73 @@ const createProductCategory = asyncHandler(async (req, res) => {
  * @returns {Object} - Deletion status message
  * @throws {Error} - Throws error if category ID is invalid
  */
+/**
+ * @function updateProductCategory
+ * @description Partial update of a category. Only the supplied fields change.
+ * @param {string} req.body.id - Category ID (required)
+ * @param {string} [req.body.name]
+ * @param {string} [req.body.image]
+ * @param {string} [req.body.parent] - null to promote a subcategory to top level
+ * @param {string} [req.body.specSchema] - "phone" | "computer" | null
+ */
 const updateProductCategory = asyncHandler(async (req, res) => {
-  const { id, name } = req.body;
+  const { id, name, image } = req.body;
   validateMongodbId(id);
-  if (!Validate.string(name)) {
+
+  if (name !== undefined && !Validate.string(name)) {
     ThrowError("Invalid Name");
   }
-  try {
-    if (name) {
-      req.body.slug = slugify(name);
-    }
-    const updatedCategory = await Category.findByIdAndUpdate(id, name, {
-      new: true,
-    });
-    audit.log({
-      action: "product.category_updated",
-      actor: audit.actor(req),
-      resource: { type: "category", id: id, displayName: name },
-    });
-    res.json(updatedCategory);
-  } catch (error) {
-    throw new Error(error);
+
+  const parentResult = await resolveParent(req.body.parent);
+  if (parentResult.error) return invalid(res, parentResult.error);
+
+  const schemaResult = validateSpecSchemaKey(req.body.specSchema);
+  if (schemaResult.error) return invalid(res, schemaResult.error);
+
+  if (parentResult.parent && String(parentResult.parent) === String(id)) {
+    return invalid(res, "A category cannot be its own parent");
   }
+
+  // Demoting a category that already has children would create a third level.
+  if (parentResult.parent) {
+    const hasChildren = await Category.exists({ parent: id });
+    if (hasChildren) {
+      return invalid(
+        res,
+        "This category has subcategories, so it cannot itself become a subcategory — categories are only two levels deep",
+      );
+    }
+  }
+
+  // Build the update explicitly. The previous version passed `name` (a string)
+  // as the whole update document, so no field was ever actually written.
+  const updates = {};
+  if (name !== undefined) updates.name = name;
+  if (image !== undefined) updates.image = image;
+  if (parentResult.parent !== undefined) updates.parent = parentResult.parent;
+  if (schemaResult.specSchema !== undefined) updates.specSchema = schemaResult.specSchema;
+
+  if (Object.keys(updates).length === 0) {
+    return invalid(res, "Provide at least one field to update (name, image, parent, specSchema)");
+  }
+
+  const updatedCategory = await Category.findByIdAndUpdate(id, updates, {
+    new: true,
+    runValidators: true,
+  });
+
+  if (!updatedCategory) {
+    return res.status(404).json({ success: false, message: "Category not found" });
+  }
+
+  audit.log({
+    action: "product.category_updated",
+    actor: audit.actor(req),
+    resource: { type: "category", id, displayName: updatedCategory.name },
+    changes: { after: updates },
+  });
+
+  res.json({ success: true, data: updatedCategory });
 });
 
 const getProductsByCategory = asyncHandler(async (req, res) => {
@@ -137,132 +241,378 @@ const deleteProductCategory = asyncHandler(async (req, res) => {
  * @throws {Error} - Throws error if categories retrieval fails
  */
 const getProductCategories = asyncHandler(async (req, res) => {
-  try {
-    const category = await Category.find();
-    if (!category) {
-      return res.status(404).json({ message: "Category not found" });
-    }
+  const categories = await Category.find().lean();
 
-    res.json(category);
-  } catch (error) {
-    throw new Error(error);
+  // Flat list stays the default so existing clients are unaffected.
+  const wantsTree = ["true", "1", "yes"].includes(
+    String(req.query.tree || "").toLowerCase(),
+  );
+
+  if (!wantsTree) {
+    return res.json(categories);
   }
+
+  // Nested shape for the add-product category picker. `specSchema` is resolved
+  // here — a subcategory inherits its parent's — so the client can decide
+  // whether to show the specification step from the picked category alone,
+  // without a second lookup.
+  const byParent = new Map();
+  const roots = [];
+
+  for (const category of categories) {
+    if (category.parent) {
+      const key = String(category.parent);
+      if (!byParent.has(key)) byParent.set(key, []);
+      byParent.get(key).push(category);
+    } else {
+      roots.push(category);
+    }
+  }
+
+  const byName = (a, b) => a.name.localeCompare(b.name);
+
+  const tree = roots.sort(byName).map((root) => ({
+    _id: root._id,
+    name: root.name,
+    image: root.image,
+    specSchema: root.specSchema || null,
+    children: (byParent.get(String(root._id)) || []).sort(byName).map((child) => ({
+      _id: child._id,
+      name: child.name,
+      image: child.image,
+      // Inherited when the child does not declare its own.
+      specSchema: child.specSchema || root.specSchema || null,
+      children: [],
+    })),
+  }));
+
+  // A subcategory whose parent was deleted would otherwise vanish from the
+  // picker entirely, making its products uneditable.
+  const rootIds = new Set(roots.map((r) => String(r._id)));
+  const orphans = [];
+  for (const [parentId, children] of byParent) {
+    if (!rootIds.has(parentId)) orphans.push(...children);
+  }
+
+  res.json({
+    success: true,
+    data: {
+      categories: tree,
+      ...(orphans.length && {
+        orphaned: orphans.map((c) => ({
+          _id: c._id,
+          name: c.name,
+          parent: c.parent,
+          specSchema: c.specSchema || null,
+        })),
+      }),
+    },
+  });
 });
+
+/**
+ * @function getSpecSchemas
+ * @description The category-specific specification field sets — labels,
+ *   placeholders, whether each field is required, and the allowed values for
+ *   dropdowns. The add-product specification step (3/3) renders itself from
+ *   this, so a new RAM size or warranty term ships without an app release.
+ *
+ *   Pass `?category=<id>` to get just the schema that applies to one category
+ *   (inheriting from its parent), or nothing to get all of them.
+ */
+const getSpecSchemas = asyncHandler(async (req, res) => {
+  const { category } = req.query;
+
+  if (category) {
+    validateMongodbId(category);
+    const categoryDoc = await Category.findById(category).lean();
+    if (!categoryDoc) {
+      return res.status(404).json({ success: false, message: "Category not found" });
+    }
+    const key = await Category.resolveSpecSchema(categoryDoc);
+    return res.json({
+      success: true,
+      data: {
+        category: { _id: categoryDoc._id, name: categoryDoc.name },
+        // null means this category has no specification step — skip straight
+        // from images to publishing.
+        specSchema: key ? describeSchema(key) : null,
+      },
+    });
+  }
+
+  res.json({ success: true, data: { specSchemas: describeAllSchemas() } });
+});
+/** 400 with a list of field errors, matching the add-product form's shape. */
+const invalid = (res, message, errors) =>
+  res.status(400).json({ success: false, message, ...(errors && { errors }) });
+
+/**
+ * Validate the 1-5 Cloudinary image URLs from step 2 of the add-product flow.
+ * images[0] is the main display image.
+ * @returns {{ error?: string, invalidUrls?: string[], images?: string[] }}
+ */
+const validateImages = (images) => {
+  if (!Array.isArray(images)) {
+    return { error: "images must be an array of Cloudinary URLs" };
+  }
+  if (images.length < 1) {
+    return { error: "At least one product image is required — the first is used as the main display image" };
+  }
+  if (images.length > 5) {
+    return { error: "A maximum of 5 product images are allowed" };
+  }
+  const bad = images.filter((u) => !Validate.cloudinaryUrl(u));
+  if (bad.length > 0) {
+    return {
+      error:
+        "All images must be valid Cloudinary URLs. Upload via POST /api/upload/signature (folder: products).",
+      invalidUrls: bad,
+    };
+  }
+  return { images };
+};
+
 /**
  * @function createProduct
- * @description Create a new product
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- * @param {string} req.body.title - Product title (required)
- * @param {number} req.body.price - Product price (required)
- * @param {number} req.body.quantity - Product quantity (required)
- * @param {string} req.body.category - Category ID (required)
- * @param {string} req.body.brand - Product brand (required)
- * @param {string} req.body.description - Product description (required)
- * @returns {Object} - Created product information with store details
- * @throws {Error} - Throws error if validation fails or creation fails
+ * @description Create a product for the authenticated seller's store. Covers both
+ *   branches of the add-product chooser:
+ *
+ *     productType "single"    one version — price, quantity and an optional SKU
+ *                             live on the product itself.
+ *     productType "variable"  several versions — `optionTypes` declares the axes
+ *                             (Size, Color, …) and `variants` carries a price,
+ *                             stock, SKU and image per version. Top-level price
+ *                             and quantity are derived from the variants, so the
+ *                             rest of the system needs no special handling.
+ *
+ *   Product images and video must be Cloudinary URLs — upload them via
+ *   POST /api/upload/signature first.
+ *
+ *   When the chosen category (or its parent) declares a `specSchema`, the
+ *   category-specific specification step applies and `specifications` is
+ *   validated against it — see utils/productSpecs and
+ *   GET /api/product/spec-schemas.
+ *
+ * @param {string}   req.body.title          - Product name (required)
+ * @param {string}   req.body.category       - Category ID (required)
+ * @param {string}   req.body.description    - Product description (required)
+ * @param {string[]} req.body.images         - 1-5 Cloudinary URLs; [0] is the main image (required)
+ * @param {string}   [req.body.productType]  - "single" (default) | "variable"
+ * @param {number}   [req.body.price]        - Selling price — required for single
+ * @param {number}   [req.body.quantity]     - Stock quantity — required for single
+ * @param {string}   [req.body.sku]          - Stock keeping unit, unique within the store
+ * @param {Array}    [req.body.optionTypes]  - Required for variable
+ * @param {Array}    [req.body.variants]     - Required for variable
+ * @param {string}   [req.body.video]        - Optional Cloudinary video URL
+ * @param {Object}   [req.body.specifications] - Keyed spec object for spec'd categories
+ * @param {string}   [req.body.brand]        - Optional brand name
  */
 const createProduct = asyncHandler(async (req, res) => {
   const {
-    title, price, quantity, category, brand, description,
-    images, specifications, sizes, colors,
+    title, price, quantity, category, brand, description, sku,
+    images, video, specifications, sizes, colors,
+    optionTypes, variants,
   } = req.body;
+
+  const productType = req.body.productType || "single";
+  if (!["single", "variable"].includes(productType)) {
+    return invalid(res, 'productType must be either "single" or "variable"');
+  }
 
   validateMongodbId(category);
 
-  if (!Validate.string(title))                     ThrowError("Invalid Title");
-  if (!Validate.integer(price) || price <= 0)      ThrowError("Invalid Price");
-  if (!Validate.integer(quantity) || quantity < 0) ThrowError("Invalid Quantity");
-  if (!Validate.string(brand))                     ThrowError("Invalid Brand");
-  if (!Validate.string(description))               ThrowError("Invalid Description");
+  if (!Validate.string(title))       ThrowError("Invalid Title");
+  if (!Validate.string(description)) ThrowError("Invalid Description");
+  // brand is optional — the add-product form does not collect it.
+  if (brand !== undefined && !Validate.string(brand)) ThrowError("Invalid Brand");
 
-  // ── Images ──────────────────────────────────────────────────────────────
-  let validatedImages = [];
-  if (images !== undefined) {
-    if (!Array.isArray(images)) {
-      return res.status(400).json({ success: false, message: "images must be an array of Cloudinary URLs" });
+  // ── Category & its specification schema ──────────────────────────────────
+  const categoryDoc = await Category.findById(category).lean();
+  if (!categoryDoc) {
+    return res.status(404).json({ success: false, message: "Category not found" });
+  }
+  const specSchemaKey = await Category.resolveSpecSchema(categoryDoc);
+
+  // ── Images (required — step 2 of the flow) ───────────────────────────────
+  const imageResult = validateImages(images);
+  if (imageResult.error) {
+    return invalid(res, imageResult.error, imageResult.invalidUrls);
+  }
+  const validatedImages = imageResult.images;
+
+  // ── Optional product video ───────────────────────────────────────────────
+  let validatedVideo = null;
+  if (video !== undefined && video !== null && String(video).trim() !== "") {
+    if (!Validate.cloudinaryUrl(video)) {
+      return invalid(
+        res,
+        "video must be a valid Cloudinary URL. Upload via POST /api/upload/signature (folder: products).",
+      );
     }
-    if (images.length > 5) {
-      return res.status(400).json({ success: false, message: "A maximum of 5 product images are allowed" });
-    }
-    const bad = images.filter((u) => !Validate.cloudinaryUrl(u));
-    if (bad.length > 0) {
-      return res.status(400).json({ success: false, message: "All images must be valid Cloudinary URLs. Upload via POST /api/upload/signature (folder: products).", invalidUrls: bad });
-    }
-    validatedImages = images;
+    validatedVideo = String(video).trim();
   }
 
-  // ── Specifications ───────────────────────────────────────────────────────
+  // ── Category-specific specifications ─────────────────────────────────────
   let validatedSpecs = [];
-  if (specifications !== undefined) {
+  if (specSchemaKey) {
+    const { errors, values } = validateSpecifications(specSchemaKey, specifications ?? {});
+    if (errors.length) {
+      return invalid(
+        res,
+        `This category requires ${specSchemaKey} specifications. Fetch the field list from GET /api/product/spec-schemas.`,
+        errors,
+      );
+    }
+    validatedSpecs = toSpecificationPairs(specSchemaKey, values);
+  } else if (specifications !== undefined) {
+    // Categories without a schema keep the free-form { key, value } list.
     if (!Array.isArray(specifications)) {
-      return res.status(400).json({ success: false, message: "specifications must be an array of { key, value } objects" });
+      return invalid(
+        res,
+        "This category has no specification schema, so specifications must be an array of { key, value } objects",
+      );
     }
     for (const s of specifications) {
       if (!s?.key || !s?.value || typeof s.key !== "string" || typeof s.value !== "string") {
-        return res.status(400).json({ success: false, message: "Each specification must have a string key and a string value" });
+        return invalid(res, "Each specification must have a string key and a string value");
       }
     }
     validatedSpecs = specifications;
   }
 
-  // ── Sizes ────────────────────────────────────────────────────────────────
+  // ── Legacy free-form sizes / colours (kept for existing clients) ─────────
   let validatedSizes = [];
   if (sizes !== undefined) {
     if (!Array.isArray(sizes) || !sizes.every((s) => typeof s === "string")) {
-      return res.status(400).json({ success: false, message: "sizes must be an array of strings" });
+      return invalid(res, "sizes must be an array of strings");
     }
     validatedSizes = sizes;
   }
 
-  // ── Colors ───────────────────────────────────────────────────────────────
   let validatedColors = [];
   if (colors !== undefined) {
     if (!Array.isArray(colors)) {
-      return res.status(400).json({ success: false, message: "colors must be an array of { name, hex? } objects" });
+      return invalid(res, "colors must be an array of { name, hex? } objects");
     }
     for (const c of colors) {
       if (!c?.name || typeof c.name !== "string") {
-        return res.status(400).json({ success: false, message: "Each color must have a string name field" });
+        return invalid(res, "Each color must have a string name field");
       }
     }
     validatedColors = colors;
   }
 
-  const sellersPrice = money.round(price);
-  const commission   = money.percentage(sellersPrice, 2);
-  const listedPrice  = money.add(sellersPrice, commission);
+  // ── Pricing & stock: single vs variable ──────────────────────────────────
+  let pricing;
+  let validatedOptionTypes = [];
+  let validatedVariants = [];
+
+  if (productType === "variable") {
+    if (price !== undefined || quantity !== undefined) {
+      return invalid(
+        res,
+        "A multiple-version product is priced and stocked per variant — omit the top-level price and quantity. They are derived from the variants.",
+      );
+    }
+
+    const result = validateVariants({ optionTypes, variants });
+    if (result.errors.length) {
+      return invalid(res, "Invalid product versions", result.errors);
+    }
+
+    validatedOptionTypes = result.optionTypes;
+    validatedVariants = result.variants;
+    pricing = result.derived;
+  } else {
+    if (!Validate.integer(price) || price <= 0)      ThrowError("Invalid Price");
+    if (!Validate.integer(quantity) || quantity < 0) ThrowError("Invalid Quantity");
+    if (optionTypes !== undefined || variants !== undefined) {
+      return invalid(
+        res,
+        'optionTypes and variants only apply to a multiple-version product — set productType to "variable" to use them.',
+      );
+    }
+
+    const sellersPrice = money.round(price);
+    pricing = {
+      price: sellersPrice,
+      listedPrice: listedPriceFor(sellersPrice),
+      quantity,
+    };
+  }
+
+  // ── SKU uniqueness within the store ──────────────────────────────────────
+  let validatedSku;
+  if (sku !== undefined && sku !== null && String(sku).trim() !== "") {
+    validatedSku = String(sku).trim();
+    const clash = await Product.exists({ store: req.store, sku: validatedSku });
+    if (clash) {
+      return invalid(res, `SKU '${validatedSku}' is already used by another product in your store`);
+    }
+  }
 
   try {
     let newProduct = await Product.create({
       title,
       slug:           slugify(title),
-      price:          sellersPrice,
-      listedPrice,
-      quantity,
+      productType,
+      ...(validatedSku && { sku: validatedSku }),
+      price:          pricing.price,
+      listedPrice:    pricing.listedPrice,
+      quantity:       pricing.quantity,
       category,
-      brand,
+      ...(brand !== undefined && { brand }),
       description,
       images:         validatedImages,
+      video:          validatedVideo,
       specifications: validatedSpecs,
       sizes:          validatedSizes,
       colors:         validatedColors,
+      optionTypes:    validatedOptionTypes,
+      variants:       validatedVariants,
       store:          req.store,
     });
     newProduct = await newProduct.populate([
       { path: "store",    select: "name image" },
-      { path: "category", select: "name" },
+      { path: "category", select: "name parent specSchema" },
     ]);
 
     audit.log({
       action: "product.created",
       actor: audit.actor(req),
       resource: { type: "product", id: newProduct._id, displayName: title },
-      changes: { after: { title, price: sellersPrice, listedPrice, quantity, category, brand, imageCount: validatedImages.length } },
+      changes: {
+        after: {
+          title,
+          productType,
+          sku: validatedSku,
+          price: pricing.price,
+          listedPrice: pricing.listedPrice,
+          quantity: pricing.quantity,
+          category,
+          brand,
+          imageCount: validatedImages.length,
+          hasVideo: Boolean(validatedVideo),
+          variantCount: validatedVariants.length,
+          specSchema: specSchemaKey,
+        },
+      },
     });
 
-    res.status(201).json({ success: true, data: newProduct });
+    res.status(201).json({
+      success: true,
+      data: newProduct,
+      // Echo which specification form applied, so a client that skipped step 3
+      // can tell whether it should have been shown.
+      specSchema: specSchemaKey ? describeSchema(specSchemaKey).key : null,
+    });
   } catch (error) {
+    // The partial unique index on { store, sku } is the last line of defence
+    // against two concurrent creates claiming the same SKU.
+    if (error?.code === 11000 && error?.keyPattern?.sku) {
+      return invalid(res, `SKU '${validatedSku}' is already used by another product in your store`);
+    }
     throw new Error(error);
   }
 });
@@ -1059,6 +1409,7 @@ module.exports = {
   getProductsByCategory,
   deleteProductCategory,
   getProductCategories,
+  getSpecSchemas,
   getProducts,
   getPersonalizedSuggestions,
   getTrendingProducts,

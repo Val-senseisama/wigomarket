@@ -1036,6 +1036,12 @@ router.get("/get-cart", authMiddleware, getUserCart);
  *       Returns the user plus role-derived data. For dispatch users,
  *       `data.user.dispatchProfile` is null until a profile is created.
  *
+ *       **Rider profile fields.** For dispatch users, `data.user.nextOfKin` and
+ *       `data.user.modeOfTransport` are always present so the rider "Edit
+ *       profile" screen can bind to them — `{ name: null, mobile: null }` and
+ *       `null` respectively when not yet filled in. Both are written back via
+ *       `PUT /api/delivery-agent/account`. They are omitted for non-riders.
+ *
  *       **Wallet setup flags.** `data.user.hasWallet` and
  *       `data.user.hasWithdrawalPin` let the client drive the wallet/PIN
  *       navigation flow without a separate GET /wallet call. Both are derived
@@ -1114,6 +1120,26 @@ router.get("/get-cart", authMiddleware, getUserCart);
  *                         dispatchProfile:
  *                           type: object
  *                           description: Dispatch profile (if user is dispatch)
+ *                         nextOfKin:
+ *                           type: object
+ *                           nullable: true
+ *                           description: >
+ *                             Rider next of kin (dispatch users only). Always
+ *                             present for riders; fields are null until set.
+ *                           properties:
+ *                             name:
+ *                               type: string
+ *                               nullable: true
+ *                               example: "Chidi Okafor"
+ *                             mobile:
+ *                               type: string
+ *                               nullable: true
+ *                               example: "2348012345678"
+ *                         modeOfTransport:
+ *                           type: string
+ *                           nullable: true
+ *                           description: Rider's vehicle type (dispatch users only)
+ *                           enum: [bike, motorcycle, car, van, truck, bicycle, feet, bus]
  *                     roles:
  *                       type: array
  *                       items:

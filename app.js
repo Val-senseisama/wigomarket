@@ -32,6 +32,8 @@ const LocationWebSocketServer = require("./websocket/locationWebSocket");
 const { startCron } = require("./services/pendingPaymentCron");
 const paymentQueue = require("./services/paymentQueue");
 const taskQueue = require("./services/taskQueue");
+const audit = require("./services/auditService");
+const redisClient = require("./config/redisClient");
 
 // ── Attach global uncaughtException / unhandledRejection handlers ─────────────
 // Must be called before any async work starts so nothing slips through.
@@ -161,6 +163,15 @@ const gracefulShutdown = async (signal) => {
 
     await taskQueue.close();
     logger.info("Task queue closed");
+
+    // After the queues, which run on top of it.
+    await redisClient.quit().catch(() => redisClient.disconnect());
+    logger.info("Redis connection closed");
+
+    // Drain buffered audit entries while the connection is still open — after
+    // dbDisconnect() they cannot be written and would be lost.
+    await audit.flush();
+    logger.info("Audit buffer flushed");
 
     await dbDisconnect();
     logger.info("Database disconnected — process exiting cleanly");

@@ -104,6 +104,25 @@ const normalizeStatus = (value) => {
   return LEGACY_MAP[value] || STATUS.PENDING;
 };
 
+/**
+ * Every stored value that normalises to `canonical` — the canonical token plus
+ * any legacy spellings still sitting in old documents.
+ *
+ * Aggregation pipelines cannot call normalizeStatus(), so a `$in` against this
+ * list is how they stay consistent with the rest of the state machine. Without
+ * it, analytics silently under-count orders written before the state machine
+ * existed.
+ *
+ * @param {string} canonical - a value from STATUS
+ * @returns {string[]}
+ */
+const statusMatchValues = (canonical) => [
+  canonical,
+  ...Object.keys(LEGACY_MAP).filter(
+    (legacy) => LEGACY_MAP[legacy] === canonical && legacy !== canonical,
+  ),
+];
+
 const statusLabel = (value) => STATUS_LABELS[normalizeStatus(value)] || "Pending";
 
 const isTerminal = (value) => TERMINAL_STATUSES.includes(normalizeStatus(value));
@@ -167,6 +186,7 @@ module.exports = {
   TERMINAL_STATUSES,
   ACTIVE_STATUSES,
   normalizeStatus,
+  statusMatchValues,
   statusLabel,
   isTerminal,
   isValidStatus,

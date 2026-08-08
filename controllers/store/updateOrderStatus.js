@@ -16,11 +16,19 @@ const {
  * @access Seller (isSeller sets req.store)
  * @param {string} req.params.id  - Order ID
  * @param {string} req.body.status - Target canonical status
- * @param {string} [req.body.reason] - Optional reason (recorded in audit log)
+ * @param {string} [req.body.reason] - Optional free-text note, recorded in the
+ *   audit log only. The dashboard's status buttons have no reason field, so they
+ *   omit it; it exists for flows that do capture one (e.g. an admin cancelling on
+ *   a customer's behalf). Blank/whitespace values are dropped rather than
+ *   written, so an audit entry never carries an empty reason.
  */
 const updateOrderStatus = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { status, reason } = req.body;
+  const { status } = req.body;
+  const reason =
+    typeof req.body.reason === "string" && req.body.reason.trim()
+      ? req.body.reason.trim()
+      : undefined;
 
   validateMongodbId(id);
 

@@ -3,11 +3,6 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/userModel');
 const { createRedisConnection } = require('../config/redisClient');
 
-// Dedicated subscriber connection — must be separate from the shared client
-// because a client in subscribe mode cannot send regular Redis commands.
-const redisClient = createRedisConnection();
-
-
 class LocationWebSocketServer {
   constructor(server) {
     this.wss = new WebSocket.Server({ 
@@ -93,8 +88,17 @@ class LocationWebSocketServer {
   }
 
   setupRedisSubscription() {
+    // Dedicated subscriber connection — must be separate from the shared client
+    // because a client in subscribe mode cannot send regular Redis commands.
+    //
+    // Opened here rather than at module scope: this file is required by app.js,
+    // so a module-level connection was established merely by importing the app,
+    // even when no WebSocket server was ever constructed. close() then had
+    // nothing to close it through, and the open socket kept the process alive.
+    this.redis = createRedisConnection();
+
     // Subscribe to location updates from Redis
-    redisClient.subscribe('location_updates', (err) => {
+    this.redis.subscribe('location_updates', (err) => {
       if (err) {
         console.log('Redis subscription error:', err.message);
       } else {
@@ -103,7 +107,7 @@ class LocationWebSocketServer {
     });
 
     // Handle incoming location updates
-    redisClient.on('message', (channel, message) => {
+    this.redis.on('message', (channel, message) => {
       if (channel === 'location_updates') {
         try {
           const locationData = JSON.parse(message);
@@ -258,7 +262,7 @@ class LocationWebSocketServer {
   // Close WebSocket server
   close() {
     this.wss.close();
-    redisClient.disconnect();
+    this.redis?.disconnect();
   }
 }
 
