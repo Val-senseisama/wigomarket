@@ -795,7 +795,20 @@ router.post("/profile", authMiddleware, isDispatch, createDispatchProfile);
  * /api/delivery-agent/delivery-agent/profile:
  *   get:
  *     summary: Get dispatch profile
- *     description: Get current user's dispatch profile
+ *     description: |
+ *       Get current user's dispatch profile, including the `setupLevel` /
+ *       `setupSteps` onboarding checklist.
+ *
+ *       `data.user` carries the rider's personal fields, including `nextOfKin`
+ *       and `modeOfTransport`, which are edited via
+ *       `PUT /api/delivery-agent/account`. `nextOfKin` is always present with
+ *       both keys — `{ name: null, mobile: null }` until filled in — so the edit
+ *       screen always has a shape to bind to.
+ *
+ *       **Caching.** The response is cached for 60 seconds per rider. Every
+ *       write path that changes it (profile, availability, documents, payment
+ *       info, rider account, and admin approve/reject/suspend/verify) clears the
+ *       cache, so a successful update is visible on the very next GET.
  *     tags: [Delivery Agent]
  *     security:
  *       - bearerAuth: []
@@ -810,7 +823,47 @@ router.post("/profile", authMiddleware, isDispatch, createDispatchProfile);
  *                 success:
  *                   type: boolean
  *                 data:
- *                   $ref: '#/components/schemas/DispatchProfile'
+ *                   allOf:
+ *                     - $ref: '#/components/schemas/DispatchProfile'
+ *                     - type: object
+ *                       properties:
+ *                         user:
+ *                           type: object
+ *                           properties:
+ *                             firstname:
+ *                               type: string
+ *                             lastname:
+ *                               type: string
+ *                             fullName:
+ *                               type: string
+ *                             email:
+ *                               type: string
+ *                             mobile:
+ *                               type: string
+ *                             image:
+ *                               type: string
+ *                             state:
+ *                               type: string
+ *                             city:
+ *                               type: string
+ *                             residentialAddress:
+ *                               type: string
+ *                             nextOfKin:
+ *                               type: object
+ *                               description: >
+ *                                 Always present; fields are null until set.
+ *                               properties:
+ *                                 name:
+ *                                   type: string
+ *                                   nullable: true
+ *                                   example: "Chidi Okafor"
+ *                                 mobile:
+ *                                   type: string
+ *                                   nullable: true
+ *                                   example: "2348012345678"
+ *                             modeOfTransport:
+ *                               type: string
+ *                               nullable: true
  *       404:
  *         description: Dispatch profile not found
  */
@@ -821,7 +874,31 @@ router.get("/profile", authMiddleware, isDispatch, getDispatchProfile);
  * /api/delivery-agent/delivery-agent/profile:
  *   put:
  *     summary: Update dispatch profile
- *     description: Update current user's dispatch profile
+ *     description: |
+ *       Partial update of the current user's dispatch profile.
+ *
+ *       **Only the keys you send are written.** Nested objects are merged
+ *       per-leaf, not replaced — sending `{"vehicleInfo":{"type":"bicycle"}}`
+ *       changes the type and leaves make/model/year/plateNumber/color as they
+ *       were, and sending `{"documents":{"nin":{"number":"…"}}}` leaves the
+ *       driver-licence and vehicle-registration documents untouched.
+ *
+ *       Editable fields are `vehicleInfo` (type, make, model, year, plateNumber,
+ *       color), `availability` (status, workingDays), `documents`
+ *       (driverLicense/vehicleRegistration: number, expiryDate, image; nin:
+ *       number, image) and `coverageAreas` (replaced wholesale). Any other key —
+ *       `status`, `isActive`, `earnings`, `rating`, `user` — is ignored;
+ *       approval is an admin action. A request containing no editable field
+ *       returns 400.
+ *
+ *       Replacing a document `image` resets that document's `verified` flag to
+ *       false, since the new image has not been reviewed yet.
+ *
+ *       `vehicleInfo.type` accepts the UI labels (feet, bicycle, car, motor
+ *       bike, bus) and is normalised before saving.
+ *
+ *       The GET /profile cache is cleared on success, so the update is visible
+ *       on the next read.
  *     tags: [Delivery Agent]
  *     security:
  *       - bearerAuth: []
@@ -834,16 +911,68 @@ router.get("/profile", authMiddleware, isDispatch, getDispatchProfile);
  *             properties:
  *               vehicleInfo:
  *                 type: object
+ *                 properties:
+ *                   type:
+ *                     type: string
+ *                     enum: [feet, bicycle, car, motor bike, bus]
+ *                   make:
+ *                     type: string
+ *                   model:
+ *                     type: string
+ *                   year:
+ *                     type: integer
+ *                   plateNumber:
+ *                     type: string
+ *                   color:
+ *                     type: string
+ *               availability:
+ *                 type: object
+ *                 properties:
+ *                   status:
+ *                     type: string
+ *                     enum: [online, offline, busy, unavailable]
+ *                   workingDays:
+ *                     type: array
+ *                     items:
+ *                       type: string
  *               coverageAreas:
  *                 type: array
+ *                 description: Replaced wholesale — send the full list.
  *                 items:
- *                   type: string
+ *                   type: object
  *               documents:
  *                 type: object
- *               workingDays:
- *                 type: array
- *                 items:
- *                   type: string
+ *                 properties:
+ *                   driverLicense:
+ *                     type: object
+ *                     properties:
+ *                       number:
+ *                         type: string
+ *                       expiryDate:
+ *                         type: string
+ *                         format: date
+ *                       image:
+ *                         type: string
+ *                         format: uri
+ *                   vehicleRegistration:
+ *                     type: object
+ *                     properties:
+ *                       number:
+ *                         type: string
+ *                       expiryDate:
+ *                         type: string
+ *                         format: date
+ *                       image:
+ *                         type: string
+ *                         format: uri
+ *                   nin:
+ *                     type: object
+ *                     properties:
+ *                       number:
+ *                         type: string
+ *                       image:
+ *                         type: string
+ *                         format: uri
  *     responses:
  *       200:
  *         description: Dispatch profile updated successfully
@@ -858,6 +987,10 @@ router.get("/profile", authMiddleware, isDispatch, getDispatchProfile);
  *                   type: string
  *                 data:
  *                   $ref: '#/components/schemas/DispatchProfile'
+ *       400:
+ *         description: Invalid vehicleInfo.type, or no editable field supplied
+ *       403:
+ *         description: Access denied - delivery agent only
  *       404:
  *         description: Dispatch profile not found
  */
@@ -909,11 +1042,19 @@ router.put("/profile", authMiddleware, isDispatch, updateDispatchProfile);
  *                 type: string
  *               nextOfKin:
  *                 type: object
+ *                 description: >
+ *                   Merged per-field — sending only `name` leaves `mobile`
+ *                   alone. Neither field may be blank; `""` is rejected with
+ *                   400 rather than stored. `mobile` is normalised to
+ *                   234XXXXXXXXXX. Always returned with both keys present
+ *                   (null until set).
  *                 properties:
  *                   name:
  *                     type: string
+ *                     example: "Chidi Okafor"
  *                   mobile:
  *                     type: string
+ *                     example: "08012345678"
  *               password:
  *                 type: string
  *                 description: New password (min 6 chars). Requires currentPassword.
@@ -924,7 +1065,9 @@ router.put("/profile", authMiddleware, isDispatch, updateDispatchProfile);
  *       200:
  *         description: Account updated successfully
  *       400:
- *         description: Validation error (invalid image, wrong current password, duplicate mobile)
+ *         description: >
+ *           Validation error (invalid image, wrong current password, duplicate
+ *           mobile, blank nextOfKin.name / nextOfKin.mobile)
  *       403:
  *         description: Access denied - delivery agent only
  *       404:

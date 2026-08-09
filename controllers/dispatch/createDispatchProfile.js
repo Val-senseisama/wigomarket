@@ -6,6 +6,7 @@ const {
   NON_MOTORISED_TYPES,
   normalizeVehicleType,
 } = require("../../utils/vehicleType");
+const { invalidateDispatchProfile } = require("../../utils/dispatchProfileCache");
 
 /**
  * @function createDispatchProfile
@@ -128,6 +129,10 @@ const createDispatchProfile = asyncHandler(async (req, res) => {
       },
       status: "pending",
     });
+
+    // A profile deleted and re-created inside the same 60 s window would
+    // otherwise be read back as the old one.
+    await invalidateDispatchProfile(_id);
 
     res.status(201).json({
       success: true,

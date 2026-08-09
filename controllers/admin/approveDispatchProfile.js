@@ -2,6 +2,7 @@ const asyncHandler = require("express-async-handler");
 const DispatchProfile = require("../../models/dispatchProfileModel");
 const audit = require("../../services/auditService");
 const validateMongodbId = require("../../utils/validateMongodbId");
+const { invalidateDispatchProfile } = require("../../utils/dispatchProfileCache");
 
 /**
  * @function approveDispatchProfile
@@ -30,6 +31,9 @@ const approveDispatchProfile = asyncHandler(async (req, res) => {
   profile.status = "approved";
   profile.isActive = true;
   await profile.save();
+
+  // The rider reads this back from the 60 s GET /profile cache.
+  await invalidateDispatchProfile(profile.user);
 
   audit.log({
     action: "admin.dispatch.approved",

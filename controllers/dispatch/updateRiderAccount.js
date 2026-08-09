@@ -2,6 +2,7 @@ const asyncHandler = require("express-async-handler");
 const User = require("../../models/userModel");
 const Validate = require("../../Helpers/Validate");
 const audit = require("../../services/auditService");
+const { invalidateDispatchProfile } = require("../../utils/dispatchProfileCache");
 
 /**
  * @function updateRiderAccount
@@ -64,9 +65,36 @@ const updateRiderAccount = asyncHandler(async (req, res) => {
   if (residentialAddress !== undefined) updates.residentialAddress = residentialAddress;
   if (state !== undefined) updates.state = state;
   if (city !== undefined) updates.city = city;
+  // Next of kin. Dot notation so sending only `name` does not blank `mobile`.
+  // Both fields are rejected when blank rather than stored as "" — an empty
+  // string reads back from GET /me as a filled-in-but-empty contact, which is
+  // indistinguishable from a save that silently did nothing.
   if (nextOfKin !== undefined) {
-    if (nextOfKin?.name !== undefined) updates["nextOfKin.name"] = nextOfKin.name;
-    if (nextOfKin?.mobile !== undefined) updates["nextOfKin.mobile"] = nextOfKin.mobile;
+    if (nextOfKin === null || typeof nextOfKin !== "object") {
+      return res.status(400).json({
+        success: false,
+        message: "nextOfKin must be an object: { name, mobile }",
+      });
+    }
+    if (nextOfKin.name !== undefined) {
+      if (!Validate.string(nextOfKin.name)) {
+        return res.status(400).json({
+          success: false,
+          message: "nextOfKin.name must be a non-empty string",
+        });
+      }
+      updates["nextOfKin.name"] = nextOfKin.name.trim();
+    }
+    if (nextOfKin.mobile !== undefined) {
+      if (!Validate.string(nextOfKin.mobile)) {
+        return res.status(400).json({
+          success: false,
+          message: "nextOfKin.mobile must be a non-empty string",
+        });
+      }
+      // Stored in the same 234XXXXXXXXXX form as the rider's own mobile.
+      updates["nextOfKin.mobile"] = Validate.formatPhone(nextOfKin.mobile);
+    }
   }
 
   if (mobile !== undefined) {
@@ -124,6 +152,9 @@ const updateRiderAccount = asyncHandler(async (req, res) => {
       changes: { after: { passwordChanged: true } },
     });
 
+    // GET /profile embeds the populated User document behind a 60 s cache.
+    await invalidateDispatchProfile(_id);
+
     return res.json({
       success: true,
       message: "Profile and password updated successfully.",
@@ -144,6 +175,8 @@ const updateRiderAccount = asyncHandler(async (req, res) => {
     changes: { after: { passwordChanged: false } },
   });
 
+  await invalidateDispatchProfile(_id);
+
   res.json({
     success: true,
     message: "Profile updated successfully.",
@@ -163,7 +196,13 @@ function serialize(user) {
     residentialAddress: user.residentialAddress,
     state: user.state,
     city: user.city,
-    nextOfKin: user.nextOfKin,
+    // Mongoose minimizes an all-empty nested object away entirely, so an
+    // unfilled nextOfKin would come back missing rather than as a shape the
+    // edit form can bind to. Match GET /api/user/me and always emit both keys.
+    nextOfKin: {
+      name: user.nextOfKin?.name ?? null,
+      mobile: user.nextOfKin?.mobile ?? null,
+    },
     role: user.role,
     activeRole: user.activeRole,
   };

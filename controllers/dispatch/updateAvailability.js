@@ -5,6 +5,7 @@ const User = require("../../models/userModel");
 const validateMongodbId = require("../../utils/validateMongodbId");
 const { Validate } = require("../../Helpers/Validate");
 const { ThrowError } = require("../../Helpers/Helpers");
+const { invalidateDispatchProfile } = require("../../utils/dispatchProfileCache");
 
 /**
  * @function updateAvailability
@@ -51,6 +52,9 @@ const updateAvailability = asyncHandler(async (req, res) => {
         message: "Dispatch profile not found"
       });
     }
+
+    // GET /profile serves availability from a 60 s cache.
+    await invalidateDispatchProfile(_id);
 
     res.json({
       success: true,
