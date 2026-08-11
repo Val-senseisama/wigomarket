@@ -2,6 +2,7 @@ const asyncHandler = require("express-async-handler");
 const DispatchProfile = require("../../models/dispatchProfileModel");
 const { normalizeVehicleType, UI_VEHICLE_TYPES } = require("../../utils/vehicleType");
 const { invalidateDispatchProfile } = require("../../utils/dispatchProfileCache");
+const { normalizeWorkingDays } = require("../../utils/workingDays");
 
 /**
  * Fields an agent is allowed to edit on their own dispatch profile.
@@ -87,6 +88,24 @@ const updateDispatchProfile = asyncHandler(async (req, res) => {
 
   for (const key of EDITABLE_ARRAYS) {
     if (req.body[key] !== undefined) updates[key] = req.body[key];
+  }
+
+  // `workingDays` is stored at availability.workingDays, but POST /profile and
+  // the API docs both take it as a top-level key, so the app sends it that way
+  // on update too. Mongoose strict mode used to drop the unknown top-level path
+  // without a word: the schedule silently never changed and the response echoed
+  // the stored days back, which reads as "the API reduced my days". Accept both
+  // shapes; the nested form wins if somebody sends both.
+  if (req.body.workingDays !== undefined && updates["availability.workingDays"] === undefined) {
+    updates["availability.workingDays"] = req.body.workingDays;
+  }
+
+  if (updates["availability.workingDays"] !== undefined) {
+    const result = normalizeWorkingDays(updates["availability.workingDays"]);
+    if (result.error) {
+      return res.status(400).json({ success: false, message: result.error });
+    }
+    updates["availability.workingDays"] = result.days;
   }
 
   // Normalise the vehicle type (e.g. "motor bike" → "motorcycle") if supplied.

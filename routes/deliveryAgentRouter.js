@@ -891,6 +891,13 @@ router.get("/profile", authMiddleware, isDispatch, getDispatchProfile);
  *       approval is an admin action. A request containing no editable field
  *       returns 400.
  *
+ *       **`workingDays`** may be sent either top-level (the same shape
+ *       `POST /profile` takes) or nested as `availability.workingDays` — both
+ *       work and mean the same thing. Send the complete list; it replaces the
+ *       stored schedule. Any number of days from 1 to 7 is allowed — there is
+ *       no cap. Day names are case-insensitive and duplicates are dropped; an
+ *       unrecognised day returns 400 rather than being silently discarded.
+ *
  *       Replacing a document `image` resets that document's `verified` flag to
  *       false, since the new image has not been reviewed yet.
  *
@@ -925,6 +932,16 @@ router.get("/profile", authMiddleware, isDispatch, getDispatchProfile);
  *                     type: string
  *                   color:
  *                     type: string
+ *               workingDays:
+ *                 type: array
+ *                 description: >
+ *                   Days the agent works. Replaces the stored schedule — send
+ *                   the full list. 1–7 days, case-insensitive, duplicates
+ *                   dropped. Equivalent to `availability.workingDays`.
+ *                 items:
+ *                   type: string
+ *                   enum: [monday, tuesday, wednesday, thursday, friday, saturday, sunday]
+ *                 example: [monday, tuesday, wednesday, thursday, friday, saturday]
  *               availability:
  *                 type: object
  *                 properties:
@@ -933,8 +950,10 @@ router.get("/profile", authMiddleware, isDispatch, getDispatchProfile);
  *                     enum: [online, offline, busy, unavailable]
  *                   workingDays:
  *                     type: array
+ *                     description: Same field as the top-level `workingDays`.
  *                     items:
  *                       type: string
+ *                       enum: [monday, tuesday, wednesday, thursday, friday, saturday, sunday]
  *               coverageAreas:
  *                 type: array
  *                 description: Replaced wholesale — send the full list.
@@ -988,7 +1007,9 @@ router.get("/profile", authMiddleware, isDispatch, getDispatchProfile);
  *                 data:
  *                   $ref: '#/components/schemas/DispatchProfile'
  *       400:
- *         description: Invalid vehicleInfo.type, or no editable field supplied
+ *         description: >
+ *           Invalid vehicleInfo.type, invalid or empty workingDays, or no
+ *           editable field supplied
  *       403:
  *         description: Access denied - delivery agent only
  *       404:

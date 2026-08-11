@@ -7,6 +7,7 @@ const {
   normalizeVehicleType,
 } = require("../../utils/vehicleType");
 const { invalidateDispatchProfile } = require("../../utils/dispatchProfileCache");
+const { normalizeWorkingDays } = require("../../utils/workingDays");
 
 /**
  * @function createDispatchProfile
@@ -72,6 +73,18 @@ const createDispatchProfile = asyncHandler(async (req, res) => {
     if (!Validate.string(color))       return res.status(400).json({ success: false, message: "vehicleInfo.color is required" });
   }
 
+  // ── workingDays — optional, defaults to Mon–Fri ───────────────────────────
+  // Validated here so a bad day name returns a clear 400 rather than a raw
+  // mongoose enum ValidationError from the create below.
+  let validatedWorkingDays;
+  if (workingDays !== undefined) {
+    const result = normalizeWorkingDays(workingDays);
+    if (result.error) {
+      return res.status(400).json({ success: false, message: result.error });
+    }
+    validatedWorkingDays = result.days;
+  }
+
   // ── Documents — optional at creation, validated if provided ──────────────
   let validatedDocuments = {};
   if (documents) {
@@ -125,7 +138,7 @@ const createDispatchProfile = asyncHandler(async (req, res) => {
       coverageAreas: coverageAreas || [],
       documents: validatedDocuments,
       availability: {
-        workingDays: workingDays || ["monday", "tuesday", "wednesday", "thursday", "friday"],
+        workingDays: validatedWorkingDays || ["monday", "tuesday", "wednesday", "thursday", "friday"],
       },
       status: "pending",
     });
