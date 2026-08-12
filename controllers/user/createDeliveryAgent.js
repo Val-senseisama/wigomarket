@@ -17,6 +17,7 @@ const { ThrowError, MakeID } = require("../../Helpers/Helpers");
 const { welcome, verificationCodeTemplate } = require("../../templates/Emails");
 const audit = require("../../services/auditService");
 const { normalizeVehicleType, UI_VEHICLE_TYPES } = require("../../utils/vehicleType");
+const { serializeNextOfKin } = require("../../utils/nextOfKin");
 
 /**
  * @function createDeliveryAgent
@@ -70,8 +71,16 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
       ThrowError("Invalid Password");
     }
 
-    // Validate delivery agent specific fields
-    if (!nextOfKin || !nextOfKin.name || !nextOfKin.mobile) {
+    // Validate delivery agent specific fields. Validate.string rather than a
+    // truthiness check so a whitespace-only name or mobile is rejected here
+    // instead of being stored and reading back as a filled-in-but-empty
+    // contact on GET /api/user/me.
+    if (
+      !nextOfKin ||
+      typeof nextOfKin !== "object" ||
+      !Validate.string(nextOfKin.name) ||
+      !Validate.string(nextOfKin.mobile)
+    ) {
       ThrowError("Next of kin information is required for delivery agents");
     }
 
@@ -111,8 +120,10 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
         activeRole: "dispatch",
         gender: gender,
         nextOfKin: {
-          name: nextOfKin.name,
-          mobile: nextOfKin.mobile,
+          name: nextOfKin.name.trim(),
+          // Same 234XXXXXXXXXX form as the rider's own mobile, matching what
+          // PUT /api/delivery-agent/account writes.
+          mobile: Validate.formatPhone(nextOfKin.mobile),
         },
         modeOfTransport: modeOfTransport,
         ...(image !== undefined && { image }),
@@ -167,7 +178,7 @@ const createDeliveryAgent = asyncHandler(async (req, res) => {
             activeRole: createUser.activeRole,
             gender: createUser.gender,
             status: createUser.status,
-            nextOfKin: createUser.nextOfKin,
+            nextOfKin: serializeNextOfKin(createUser.nextOfKin),
             modeOfTransport: createUser.modeOfTransport,
           },
           verificationCode: code, // For testing purposes — remove in production

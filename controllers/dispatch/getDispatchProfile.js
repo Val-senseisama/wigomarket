@@ -1,6 +1,7 @@
 const asyncHandler = require("express-async-handler");
 const DispatchProfile = require("../../models/dispatchProfileModel");
 const redisClient = require("../../config/redisClient");
+const { serializeNextOfKin } = require("../../utils/nextOfKin");
 
 // 60 seconds. Every write path that changes this payload calls
 // invalidateDispatchProfile (utils/dispatchProfileCache), so a successful
@@ -43,15 +44,10 @@ const getDispatchProfile = asyncHandler(async (req, res) => {
 
   const dispatchProfile = doc.toJSON();
 
-  // Mongoose minimizes an all-empty nested object away, so a rider who has not
-  // filled in their next of kin gets no `nextOfKin` key at all and the edit
-  // screen has no shape to bind to. Emit the full shape with nulls, matching
-  // GET /api/user/me.
+  // Always emit the full nextOfKin shape, with "not set" as null for both an
+  // absent subdocument and a blank stored string. See utils/nextOfKin.
   if (dispatchProfile.user) {
-    dispatchProfile.user.nextOfKin = {
-      name: dispatchProfile.user.nextOfKin?.name ?? null,
-      mobile: dispatchProfile.user.nextOfKin?.mobile ?? null,
-    };
+    dispatchProfile.user.nextOfKin = serializeNextOfKin(dispatchProfile.user.nextOfKin);
     dispatchProfile.user.modeOfTransport =
       dispatchProfile.user.modeOfTransport ?? null;
   }

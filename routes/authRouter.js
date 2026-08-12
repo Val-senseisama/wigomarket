@@ -418,7 +418,9 @@ router.post("/register/seller", createSeller);
  *                 example: "Lagos State"
  *               nextOfKin:
  *                 type: object
- *                 description: Emergency contact — required for delivery agents
+ *                 description: >
+ *                   Emergency contact — required for delivery agents. Neither
+ *                   field may be blank or whitespace-only.
  *                 required:
  *                   - name
  *                   - mobile
@@ -429,7 +431,9 @@ router.post("/register/seller", createSeller);
  *                     example: "Sarah Johnson"
  *                   mobile:
  *                     type: string
- *                     description: Next of kin's mobile number
+ *                     description: >
+ *                       Next of kin's mobile number. Stored normalised to
+ *                       234XXXXXXXXXX, as the rider's own mobile is.
  *                     example: "+2348098765432"
  *               modeOfTransport:
  *                 type: string
@@ -490,13 +494,19 @@ router.post("/register/seller", createSeller);
  *                           example: "pending"
  *                         nextOfKin:
  *                           type: object
+ *                           description: >
+ *                             Both keys always present; a field is null rather
+ *                             than an empty string when not set.
  *                           properties:
  *                             name:
  *                               type: string
+ *                               nullable: true
  *                               example: "Sarah Johnson"
  *                             mobile:
  *                               type: string
- *                               example: "+2348098765432"
+ *                               nullable: true
+ *                               description: Normalised to 234XXXXXXXXXX.
+ *                               example: "2348098765432"
  *                         modeOfTransport:
  *                           type: string
  *                           example: "motorcycle"
@@ -1041,6 +1051,10 @@ router.get("/get-cart", authMiddleware, getUserCart);
  *       profile" screen can bind to them — `{ name: null, mobile: null }` and
  *       `null` respectively when not yet filled in. Both are written back via
  *       `PUT /api/delivery-agent/account`. They are omitted for non-riders.
+ *
+ *       `nextOfKin.name` / `nextOfKin.mobile` are never returned as empty
+ *       strings: "not set" is always `null`, including for older riders whose
+ *       record holds a blank value. Clients need only check for `null`.
  *
  *       **Wallet setup flags.** `data.user.hasWallet` and
  *       `data.user.hasWithdrawalPin` let the client drive the wallet/PIN

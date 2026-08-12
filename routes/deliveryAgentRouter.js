@@ -803,7 +803,8 @@ router.post("/profile", authMiddleware, isDispatch, createDispatchProfile);
  *       and `modeOfTransport`, which are edited via
  *       `PUT /api/delivery-agent/account`. `nextOfKin` is always present with
  *       both keys — `{ name: null, mobile: null }` until filled in — so the edit
- *       screen always has a shape to bind to.
+ *       screen always has a shape to bind to. A field is never returned as an
+ *       empty string: "not set" is always `null`.
  *
  *       **Caching.** The response is cached for 60 seconds per rider. Every
  *       write path that changes it (profile, availability, documents, payment
@@ -1067,8 +1068,8 @@ router.put("/profile", authMiddleware, isDispatch, updateDispatchProfile);
  *                   Merged per-field — sending only `name` leaves `mobile`
  *                   alone. Neither field may be blank; `""` is rejected with
  *                   400 rather than stored. `mobile` is normalised to
- *                   234XXXXXXXXXX. Always returned with both keys present
- *                   (null until set).
+ *                   234XXXXXXXXXX. Always returned with both keys present, and
+ *                   never as an empty string — "not set" is always null.
  *                 properties:
  *                   name:
  *                     type: string

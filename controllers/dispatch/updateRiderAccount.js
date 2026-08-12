@@ -3,6 +3,7 @@ const User = require("../../models/userModel");
 const Validate = require("../../Helpers/Validate");
 const audit = require("../../services/auditService");
 const { invalidateDispatchProfile } = require("../../utils/dispatchProfileCache");
+const { serializeNextOfKin } = require("../../utils/nextOfKin");
 
 /**
  * @function updateRiderAccount
@@ -196,13 +197,9 @@ function serialize(user) {
     residentialAddress: user.residentialAddress,
     state: user.state,
     city: user.city,
-    // Mongoose minimizes an all-empty nested object away entirely, so an
-    // unfilled nextOfKin would come back missing rather than as a shape the
-    // edit form can bind to. Match GET /api/user/me and always emit both keys.
-    nextOfKin: {
-      name: user.nextOfKin?.name ?? null,
-      mobile: user.nextOfKin?.mobile ?? null,
-    },
+    // Match GET /api/user/me: both keys always present, null for anything not
+    // actually set (missing subdocument or a blank stored string).
+    nextOfKin: serializeNextOfKin(user.nextOfKin),
     role: user.role,
     activeRole: user.activeRole,
   };
