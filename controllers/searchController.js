@@ -153,6 +153,7 @@ function buildAtlasProductPipeline(query, skip, limit, filters) {
     {
       $match: {
         quantity: { $gt: 0 },
+        status: { $ne: "hidden" },
         ...(brandRegex && { brand: brandRegex }),
       },
     },
@@ -234,6 +235,7 @@ function buildAtlasCountPipeline(query, filters) {
     {
       $match: {
         quantity: { $gt: 0 },
+        status: { $ne: "hidden" },
         ...(brandRegex && { brand: brandRegex }),
       },
     },
@@ -368,6 +370,8 @@ const globalSearch = asyncHandler(async (req, res) => {
 
     const productFilter = {
       quantity: { $gt: 0 },
+      // Hidden products are off the storefront and out of search.
+      status: { $ne: "hidden" },
       $or: [
         { title: regex },
         { description: regex },
@@ -511,7 +515,7 @@ const getSuggestions = asyncHandler(async (req, res) => {
             },
           },
         },
-        { $match: { quantity: { $gt: 0 } } },
+        { $match: { quantity: { $gt: 0 }, status: { $ne: "hidden" } } },
         { $limit: 5 },
         { $project: { title: 1 } },
       ]),
@@ -536,7 +540,7 @@ const getSuggestions = asyncHandler(async (req, res) => {
     // "pho" → "smartphone", "samsung phone", etc.
     const regex = buildContainsRegex(query);
     [productTitles, storeNames] = await Promise.all([
-      Product.find({ title: regex, quantity: { $gt: 0 } })
+      Product.find({ title: regex, quantity: { $gt: 0 }, status: { $ne: "hidden" } })
         .select("title")
         .limit(5)
         .lean(),

@@ -8,8 +8,15 @@ const options = {
     info: {
       title: "Wigomarket backend api docs",
       version: "1.0.0",
-      description:
-        "API documentation for WigoMarket e-commerce platform with real-time location tracking",
+      description: [
+        "API documentation for WigoMarket e-commerce platform with real-time location tracking.",
+        "",
+        "**Client integration guides** live alongside this reference at [`/docs`](/docs) —",
+        "long-form notes that a per-endpoint reference cannot carry, such as the",
+        "[maps, delivery-fee and live-tracking guide](/docs/maps-integration) written for the",
+        "Flutter client (address picker session tokens, the fee tariff, GeoJSON coordinate",
+        "order, and the `/ws/location` WebSocket protocol).",
+      ].join("\n"),
     },
     servers: [
       {

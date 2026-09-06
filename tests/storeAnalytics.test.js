@@ -254,7 +254,10 @@ describe("getBusinessAnalytics", () => {
   it("falls back to statusHistory when actualDeliveryTime is missing", async () => {
     const store = await makeStore();
     const product = await makeProduct(store._id, { price: 5000 });
-    const at = now().startOf("day").plus({ hours: 2 }).toJSDate();
+    // Anchored at the start of the day, not a fixed hour into it: the "today"
+    // window runs to *now*, so an hour-2 stamp is in the future — and outside
+    // the window — whenever the suite runs before 02:00.
+    const at = now().startOf("day").toJSDate();
 
     const order = await makeOrder({ lines: [{ product, store }], at });
     await Order.collection.updateOne(

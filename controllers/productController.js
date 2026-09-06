@@ -19,7 +19,41 @@ const {
   describeAllSchemas,
   SPEC_SCHEMA_KEYS,
 } = require("../utils/productSpecs");
-const { validateVariants, listedPriceFor } = require("../utils/productVariants");
+const {
+  validateVariants,
+  listedPriceFor,
+  combinationKey,
+} = require("../utils/productVariants");
+
+// Stored shelf visibility. Mirrors productModel.status — "out of stock" is a
+// derived display state, not a value a client can set.
+const PRODUCT_STATUSES = ["active", "hidden"];
+const Store = require("../models/storeModel");
+const { listProducts } = require("../services/productQueryService");
+const { serializeProductDetail } = require("../utils/productSerializer");
+const Wishlist = require("../models/wishlistModel");
+
+// How a buyer can receive a product. Mirrors productModel.availableFor.
+const FULFILMENT_OPTIONS = ["delivery", "pickup"];
+
+/**
+ * Validate the availableFor list from a create/update body.
+ * @returns {{ error?: string, availableFor?: string[] }}
+ */
+const validateAvailableFor = (availableFor) => {
+  if (availableFor === undefined) return { availableFor: undefined };
+  if (!Array.isArray(availableFor) || availableFor.length === 0) {
+    return {
+      error: `availableFor must be a non-empty array containing any of: ${FULFILMENT_OPTIONS.join(", ")}`,
+    };
+  }
+  const bad = availableFor.filter((v) => !FULFILMENT_OPTIONS.includes(v));
+  if (bad.length) {
+    return { error: `availableFor may only contain: ${FULFILMENT_OPTIONS.join(", ")}` };
+  }
+  // De-duplicate — ["delivery","delivery"] is a client bug, not a new option.
+  return { availableFor: [...new Set(availableFor)] };
+};
 /**
  * Resolve and validate a `parent` category id from a request body.
  * @returns {{ error?: string, parent?: (string|null) }}
@@ -189,10 +223,11 @@ const getProductsByCategory = asyncHandler(async (req, res) => {
   validateMongodbId(categoryId);
 
   try {
-    const products = await Product.find({ category: categoryId }).populate(
-      "store",
-      "name image mobile address",
-    ); // Find products by category ID
+    // Public listing — a hidden product is off the storefront entirely.
+    const products = await Product.find({
+      category: categoryId,
+      status: { $ne: "hidden" },
+    }).populate("store", "name image mobile address"); // Find products by category ID
     res.json(products);
   } catch (error) {
     throw new Error(error);
@@ -420,6 +455,17 @@ const createProduct = asyncHandler(async (req, res) => {
     return invalid(res, 'productType must be either "single" or "variable"');
   }
 
+  // Shelf visibility. Defaults to active; "hidden" lets a seller stage a
+  // product without it appearing on the storefront.
+  const status = req.body.status || "active";
+  if (!PRODUCT_STATUSES.includes(status)) {
+    return invalid(res, `status must be one of: ${PRODUCT_STATUSES.join(", ")}`);
+  }
+
+  // How the buyer can receive it — "Available for: Delivery & Pick-up".
+  const fulfilment = validateAvailableFor(req.body.availableFor);
+  if (fulfilment.error) return invalid(res, fulfilment.error);
+
   validateMongodbId(category);
 
   if (!Validate.string(title))       ThrowError("Invalid Title");
@@ -571,6 +617,8 @@ const createProduct = asyncHandler(async (req, res) => {
       colors:         validatedColors,
       optionTypes:    validatedOptionTypes,
       variants:       validatedVariants,
+      ...(fulfilment.availableFor && { availableFor: fulfilment.availableFor }),
+      status,
       store:          req.store,
     });
     newProduct = await newProduct.populate([
@@ -596,6 +644,7 @@ const createProduct = asyncHandler(async (req, res) => {
           hasVideo: Boolean(validatedVideo),
           variantCount: validatedVariants.length,
           specSchema: specSchemaKey,
+          status,
         },
       },
     });
@@ -637,17 +686,45 @@ const updateProduct = asyncHandler(async (req, res) => {
   const { id } = req.params;
   validateMongodbId(id);
 
-  if (req.body.title      && !Validate.string(req.body.title))       ThrowError("Invalid Title");
-  if (req.body.brand      && !Validate.string(req.body.brand))       ThrowError("Invalid Brand");
-  if (req.body.description && !Validate.string(req.body.description)) ThrowError("Invalid Description");
-  if (req.body.price    !== undefined && (!Validate.float(req.body.price)    || req.body.price    <= 0)) ThrowError("Invalid Price");
-  if (req.body.quantity !== undefined && (!Validate.integer(req.body.quantity) || req.body.quantity < 0)) ThrowError("Invalid Quantity");
+  // Load first: what may be edited depends on the product — a variable product
+  // is priced and stocked per variant, a single one is not — and the load
+  // doubles as the ownership check. A seller may only edit their own products,
+  // and a product id alone must never be enough to change one.
+  const existing = await Product.findOne({ _id: id, store: req.store }).lean();
+  if (!existing) {
+    return res.status(404).json({
+      success: false,
+      message: "Product not found in your store",
+    });
+  }
 
-  // Whitelist — callers cannot overwrite internal fields (sold, views, store, rating, etc.)
+  const isVariable = existing.productType === "variable";
+
+  if (req.body.title       && !Validate.string(req.body.title))       ThrowError("Invalid Title");
+  if (req.body.brand       && !Validate.string(req.body.brand))       ThrowError("Invalid Brand");
+  if (req.body.description && !Validate.string(req.body.description)) ThrowError("Invalid Description");
+  if (req.body.status !== undefined && !PRODUCT_STATUSES.includes(req.body.status)) {
+    return invalid(res, `status must be one of: ${PRODUCT_STATUSES.join(", ")}`);
+  }
+
+  // A product cannot change shape after creation: turning a single product into
+  // a variable one (or back) would leave existing carts and orders pointing at
+  // a pricing model that no longer exists.
+  if (req.body.productType !== undefined && req.body.productType !== existing.productType) {
+    return invalid(
+      res,
+      `productType cannot be changed after creation (this product is "${existing.productType}") — create a new product instead`,
+    );
+  }
+
+  // Whitelist — callers cannot overwrite internal or derived fields (sold,
+  // views, store, rating, slug, listedPrice).
+  // `status` is the hide/unhide toggle on the product card; "out of stock" is
+  // never set here, it follows from quantity.
   const ALLOWED = [
     "title", "price", "quantity", "category", "brand", "description",
-    "images", "tags", "isFeatured",
-    "specifications", "sizes", "colors",
+    "images", "video", "sku", "tags", "isFeatured", "status", "availableFor",
+    "specifications", "sizes", "colors", "optionTypes", "variants",
   ];
   const updateData = {};
   for (const field of ALLOWED) {
@@ -658,12 +735,122 @@ const updateProduct = asyncHandler(async (req, res) => {
     return res.status(400).json({ success: false, message: "No valid fields to update" });
   }
 
-  // Recompute listedPrice when price changes
-  if (updateData.price !== undefined) {
-    updateData.listedPrice = money.add(
-      updateData.price,
-      money.percentage(updateData.price, 2),
+  // ── Pricing & stock ──────────────────────────────────────────────────────
+  if (isVariable) {
+    if (updateData.price !== undefined || updateData.quantity !== undefined) {
+      return invalid(
+        res,
+        "This is a multiple-version product: price and quantity are derived from its variants — send `variants` instead",
+      );
+    }
+  } else {
+    if (updateData.optionTypes !== undefined || updateData.variants !== undefined) {
+      return invalid(
+        res,
+        'optionTypes and variants only apply to a multiple-version product — this product is "single"',
+      );
+    }
+    if (updateData.price !== undefined && (!Validate.float(updateData.price) || updateData.price <= 0)) {
+      ThrowError("Invalid Price");
+    }
+    if (updateData.quantity !== undefined && (!Validate.integer(updateData.quantity) || updateData.quantity < 0)) {
+      ThrowError("Invalid Quantity");
+    }
+    // Recompute listedPrice when price changes.
+    if (updateData.price !== undefined) {
+      updateData.price = money.round(updateData.price);
+      updateData.listedPrice = listedPriceFor(updateData.price);
+    }
+  }
+
+  // ── Variants — the "Edit Variant" table ──────────────────────────────────
+  if (updateData.variants !== undefined || updateData.optionTypes !== undefined) {
+    // Either may be sent alone: repricing a variant does not touch the axes,
+    // and adding an option value does not touch the rows.
+    const result = validateVariants({
+      optionTypes: updateData.optionTypes ?? existing.optionTypes,
+      variants: updateData.variants ?? existing.variants,
+    });
+    if (result.errors.length) {
+      return invalid(res, "Invalid product versions", result.errors);
+    }
+
+    // validateVariants zeroes `sold` — it is written for creation. Carry the
+    // real figures across by option combination, so repricing a variant does
+    // not erase its sales history.
+    const soldByCombination = new Map(
+      (existing.variants || []).map((v) => [combinationKey(v.options || []), v.sold || 0]),
     );
+
+    updateData.optionTypes = result.optionTypes;
+    updateData.variants = result.variants.map((variant) => ({
+      ...variant,
+      sold: soldByCombination.get(combinationKey(variant.options)) || 0,
+    }));
+
+    // Top-level price/quantity stay derived — search, sort, cart, stock checks
+    // and the order pipeline all key off them.
+    updateData.price = result.derived.price;
+    updateData.listedPrice = result.derived.listedPrice;
+    updateData.quantity = result.derived.quantity;
+  }
+
+  // ── Media ────────────────────────────────────────────────────────────────
+  if (updateData.images !== undefined) {
+    const imageResult = validateImages(updateData.images);
+    if (imageResult.error) {
+      return invalid(res, imageResult.error, imageResult.invalidUrls);
+    }
+    updateData.images = imageResult.images;
+  }
+
+  if (updateData.video !== undefined) {
+    // null or "" removes the video.
+    if (updateData.video === null || String(updateData.video).trim() === "") {
+      updateData.video = null;
+    } else if (!Validate.cloudinaryUrl(updateData.video)) {
+      return invalid(
+        res,
+        "video must be a valid Cloudinary URL. Upload via POST /api/upload/signature (folder: products).",
+      );
+    } else {
+      updateData.video = String(updateData.video).trim();
+    }
+  }
+
+  // ── Fulfilment ───────────────────────────────────────────────────────────
+  const fulfilment = validateAvailableFor(updateData.availableFor);
+  if (fulfilment.error) return invalid(res, fulfilment.error);
+  if (fulfilment.availableFor !== undefined) updateData.availableFor = fulfilment.availableFor;
+
+  // ── Category ─────────────────────────────────────────────────────────────
+  if (updateData.category !== undefined) {
+    validateMongodbId(updateData.category);
+    const categoryExists = await Category.exists({ _id: updateData.category });
+    if (!categoryExists) {
+      return res.status(404).json({ success: false, message: "Category not found" });
+    }
+  }
+
+  // ── SKU — unique within the store ────────────────────────────────────────
+  let unset;
+  if (updateData.sku !== undefined) {
+    if (updateData.sku === null || String(updateData.sku).trim() === "") {
+      // $unset rather than a null: the partial unique index only covers string
+      // values, so a stored null would be a stray field.
+      delete updateData.sku;
+      unset = { sku: "" };
+    } else {
+      updateData.sku = String(updateData.sku).trim();
+      const clash = await Product.exists({
+        store: req.store,
+        sku: updateData.sku,
+        _id: { $ne: id },
+      });
+      if (clash) {
+        return invalid(res, `SKU '${updateData.sku}' is already used by another product in your store`);
+      }
+    }
   }
 
   if (updateData.title) {
@@ -671,70 +858,232 @@ const updateProduct = asyncHandler(async (req, res) => {
   }
 
   try {
-    const updatedProduct = await Product.findByIdAndUpdate(id, updateData, {
-      new: true,
-      runValidators: true,
-    });
+    const updatedProduct = await Product.findOneAndUpdate(
+      { _id: id, store: req.store },
+      { $set: updateData, ...(unset && { $unset: unset }) },
+      { new: true, runValidators: true },
+    )
+      .populate("store", "name image mobile address")
+      .populate({ path: "category", select: "name parent", populate: { path: "parent", select: "name" } })
+      .lean();
 
     if (!updatedProduct) {
-      return res.status(404).json({ success: false, message: "Product not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Product not found in your store",
+      });
     }
 
     audit.log({
       action: "product.updated",
       actor: audit.actor(req),
       resource: { type: "product", id, displayName: updatedProduct.title },
-      changes: { before: { fieldsChanged: Object.keys(updateData) }, after: updateData },
+      changes: {
+        before: { fieldsChanged: Object.keys(updateData).concat(unset ? ["sku"] : []) },
+        after: updateData,
+      },
     });
 
-    res.json({ success: true, data: updatedProduct });
+    res.json({
+      success: true,
+      // The same shape the product page reads, so a client can render the
+      // result of an edit without re-fetching.
+      data: serializeProductDetail(updatedProduct),
+    });
   } catch (error) {
+    // Last line of defence against two concurrent edits claiming one SKU.
+    if (error?.code === 11000 && error?.keyPattern?.sku) {
+      return invalid(res, `SKU '${updateData.sku}' is already used by another product in your store`);
+    }
     throw new Error(error);
   }
 });
 
 /**
  * @function deleteProduct
- * @description Delete a product
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- * @param {string} req.body.id - Product ID (required)
- * @returns {Object} - Deletion status message
- * @throws {Error} - Throws error if deletion fails
+ * @description Permanently delete one of the caller's own products, along with
+ *   its reviews, and remove it from every cart and wishlist holding it.
+ * @route DELETE /api/product/:id
+ * @param {string} req.params.id - Product ID (required)
+ * @returns {Object} - Deletion summary
  */
 const deleteProduct = asyncHandler(async (req, res) => {
-  const { id } = req.body;
-  try {
-    const deleteProduct = await Product.findOneAndDelete(id);
-    audit.log({
-      action: "product.deleted",
-      actor: audit.actor(req),
-      resource: { type: "product", id: id },
+  const { id } = req.params;
+  validateMongodbId(id);
+
+  // Scoped to the caller's own store. The previous version read `req.body.id`
+  // (never sent — the id is a path param) and passed the bare value to
+  // findOneAndDelete, which treats a non-object filter as {} and would delete
+  // an arbitrary product from someone else's store.
+  const product = await Product.findOneAndDelete({ _id: id, store: req.store });
+
+  if (!product) {
+    return res.status(404).json({
+      success: false,
+      message: "Product not found in your store",
     });
-    res.json({
-      message: "Product deleted successfully",
-    });
-  } catch (error) {
-    throw new Error(error);
   }
+
+  await cleanUpDeletedProducts([product._id]);
+
+  audit.log({
+    action: "product.deleted",
+    actor: audit.actor(req),
+    resource: { type: "product", id, displayName: product.title },
+    changes: { before: { title: product.title, sku: product.sku, status: product.status } },
+  });
+
+  res.json({
+    success: true,
+    message: "Product deleted successfully",
+    data: { id: product._id, title: product.title },
+  });
+});
+
+/**
+ * Remove deleted products from everything that references them. Reviews go with
+ * the product; carts and wishlists would otherwise keep a dangling row that
+ * renders as an empty line item.
+ *
+ * Best-effort: the product is already gone, so a failure here must not turn a
+ * successful delete into a 500. Failures are audited instead.
+ *
+ * @param {Array<mongoose.Types.ObjectId>} ids
+ */
+const cleanUpDeletedProducts = async (ids) => {
+  try {
+    await Promise.all([
+      ProductReview.deleteMany({ product: { $in: ids } }),
+      Cart.updateMany(
+        { "products.product": { $in: ids } },
+        { $pull: { products: { product: { $in: ids } } } },
+      ),
+      Wishlist.updateMany(
+        { "products.product": { $in: ids } },
+        { $pull: { products: { product: { $in: ids } } } },
+      ),
+    ]);
+  } catch (error) {
+    audit.log({
+      action: "product.delete_cleanup_failed",
+      resource: { type: "product", id: String(ids[0]) },
+      changes: { after: { ids: ids.map(String), error: error.message } },
+    });
+  }
+};
+
+// Actions the seller's "Bulk action" menu can apply to a multi-select.
+const BULK_ACTIONS = ["hide", "unhide", "delete"];
+const MAX_BULK_IDS = 100;
+
+/**
+ * @function bulkUpdateProducts
+ * @description Apply one action to several of the caller's own products at once
+ *   — the "Bulk action" control above the product list.
+ * @route POST /api/product/bulk
+ * @param {string}   req.body.action - hide | unhide | delete
+ * @param {string[]} req.body.ids    - Product ids, max 100
+ * @returns {Object} - How many were affected, and which ids were skipped
+ */
+const bulkUpdateProducts = asyncHandler(async (req, res) => {
+  const { action, ids } = req.body;
+
+  if (!BULK_ACTIONS.includes(action)) {
+    return invalid(res, `action must be one of: ${BULK_ACTIONS.join(", ")}`);
+  }
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return invalid(res, "ids must be a non-empty array of product ids");
+  }
+  if (ids.length > MAX_BULK_IDS) {
+    return invalid(res, `A bulk action may cover at most ${MAX_BULK_IDS} products at a time`);
+  }
+
+  const malformed = ids.filter((id) => !mongoose.isValidObjectId(id));
+  if (malformed.length) {
+    return invalid(res, "Every id must be a valid product id", malformed);
+  }
+
+  // Only the caller's own products are ever touched. Ids that belong to another
+  // store — or no longer exist — are reported back as skipped rather than
+  // failing the whole batch, so one stale row in the grid cannot block the rest.
+  const owned = await Product.find(
+    { _id: { $in: ids }, store: req.store },
+    "_id title status",
+  ).lean();
+
+  const ownedIds = owned.map((p) => p._id);
+  const ownedSet = new Set(ownedIds.map(String));
+  const skipped = ids.filter((id) => !ownedSet.has(String(id)));
+
+  if (ownedIds.length === 0) {
+    return res.status(404).json({
+      success: false,
+      message: "None of those products are in your store",
+      data: { action, matched: 0, affected: 0, skipped },
+    });
+  }
+
+  let affected = 0;
+
+  if (action === "delete") {
+    const result = await Product.deleteMany({ _id: { $in: ownedIds }, store: req.store });
+    affected = result.deletedCount || 0;
+    await cleanUpDeletedProducts(ownedIds);
+  } else {
+    const status = action === "hide" ? "hidden" : "active";
+    const result = await Product.updateMany(
+      { _id: { $in: ownedIds }, store: req.store },
+      { $set: { status } },
+    );
+    // modifiedCount excludes products already in the target state; the seller
+    // asked for a state, not a change, so report what now matches.
+    affected = result.matchedCount ?? result.n ?? 0;
+  }
+
+  audit.log({
+    action: `product.bulk_${action}`,
+    actor: audit.actor(req),
+    resource: { type: "product", id: String(ownedIds[0]) },
+    changes: {
+      after: {
+        action,
+        ids: ownedIds.map(String),
+        affected,
+        skipped: skipped.map(String),
+      },
+    },
+  });
+
+  res.json({
+    success: true,
+    message: `${affected} product${affected === 1 ? "" : "s"} ${action === "delete" ? "deleted" : `${action === "hide" ? "hidden" : "unhidden"}`}`,
+    data: {
+      action,
+      matched: ownedIds.length,
+      affected,
+      // Ids that were not in the caller's store, or already gone.
+      skipped,
+    },
+  });
 });
 
 /**
  * @function getAProduct
- * @description Get a single product by ID
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- * @param {string} req.body.id - Product ID (required)
- * @returns {Object} - Product information with store details
- * @throws {Error} - Throws error if product not found or retrieval fails
+ * @description Full detail for one product — everything the product page
+ *   renders: overview, every image and the video, description, pricing and
+ *   inventory (including the variants table), and the rating summary.
+ * @route GET /api/product/:id
+ * @param {string} req.params.id - Product ID (required)
+ * @returns {Object} - Serialized product detail
  */
 const getAProduct = asyncHandler(async (req, res) => {
   const { id } = req.params;
   validateMongodbId(id);
 
   const product = await Product.findById(id)
-    .populate("store",    "name image mobile address")
-    .populate("category", "name")
+    .populate("store", "name image mobile address")
+    // The parent comes too, for the "Fashion > Men's Clothing" breadcrumb.
+    .populate({ path: "category", select: "name parent", populate: { path: "parent", select: "name" } })
     .select("-__v")
     .lean();
 
@@ -742,78 +1091,149 @@ const getAProduct = asyncHandler(async (req, res) => {
     return res.status(404).json({ success: false, message: "Product not found" });
   }
 
-  // Increment view count (fire-and-forget, non-blocking)
-  Product.findByIdAndUpdate(id, { $inc: { views: 1 } }).catch(() => {});
+  // A hidden product is invisible to the storefront but must stay reachable by
+  // its owner — the seller's edit screen loads it through this same route.
+  // The route runs optionalAuthMiddleware, so req.user is set only when a
+  // token was sent.
+  const ownStore = req.user
+    ? await Store.findOne({ owner: req.user._id }, "_id").lean()
+    : null;
+  const isOwner =
+    Boolean(ownStore) &&
+    String(product.store?._id || product.store) === String(ownStore._id);
 
-  res.json({ success: true, data: product });
+  if (product.status === "hidden" && !isOwner) {
+    return res.status(404).json({ success: false, message: "Product not found" });
+  }
+
+  const productObjId = new mongoose.Types.ObjectId(id);
+
+  const [lastOrder, breakdownRaw] = await Promise.all([
+    // "Last Ordered" on the inventory panel. Only the owner sees it — it is
+    // sales data, not something the storefront should expose.
+    isOwner
+      ? Order.findOne({ "products.product": productObjId })
+          .sort({ createdAt: -1 })
+          .select("createdAt")
+          .lean()
+      : Promise.resolve(null),
+
+    // Star distribution for the Rating & Reviews panel, so the page renders
+    // without a second round trip to /:id/reviews.
+    ProductReview.aggregate([
+      { $match: { product: productObjId, status: "active" } },
+      { $group: { _id: "$rating", count: { $sum: 1 } } },
+    ]),
+  ]);
+
+  const breakdown = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  for (const b of breakdownRaw) breakdown[b._id] = b.count;
+
+  // Increment view count (fire-and-forget, non-blocking). The seller opening
+  // their own product does not count as a view.
+  if (!isOwner) {
+    Product.findByIdAndUpdate(id, { $inc: { views: 1 } }).catch(() => {});
+  }
+
+  const data = serializeProductDetail(product, {
+    lastOrderedAt: lastOrder?.createdAt || null,
+    reviews: {
+      average: product.rating?.average ?? 0,
+      count: product.rating?.count ?? 0,
+      breakdown,
+    },
+  });
+
+  res.json({
+    success: true,
+    // True when the caller owns this product — the client uses it to decide
+    // whether to render the Edit / Delete / Hide controls.
+    isOwner,
+    data,
+  });
 });
 /**
  * @function getAllProducts
- * @description Get paginated list of all products with store details
+ * @description Paginated product listing behind GET /api/product/get-products.
+ *              Serves two callers from one query:
+ *                • the public storefront — active, in-stock products only;
+ *                • a signed-in seller with `mine=true` — their own products,
+ *                  hidden and out-of-stock included, which is what the seller
+ *                  dashboard's product grid renders.
  * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- * @param {number} [req.body.page=1] - Page number
- * @param {number} [req.body.limit=30] - Number of products per page
- * @returns {Object} - Paginated list of products with store details
- * @throws {Error} - Throws error if retrieval fails
+ * @param {string}  [req.query.search]      - Matches product name or SKU
+ * @param {string}  [req.query.category]    - Category id
+ * @param {string}  [req.query.store]       - Store id (public store page)
+ * @param {string}  [req.query.brand]       - Brand, partial match
+ * @param {string}  [req.query.status]      - active | out_of_stock | hidden | all
+ * @param {number}  [req.query.minPrice]    - Minimum listed price
+ * @param {number}  [req.query.maxPrice]    - Maximum listed price
+ * @param {string}  [req.query.sort=newest] - newest | oldest | price_asc | price_desc |
+ *                                            best_selling | top_rated | title_asc |
+ *                                            title_desc | stock_asc | stock_desc
+ * @param {boolean} [req.query.mine]        - Scope to the caller's own store
+ * @param {boolean} [req.query.includeVariants] - Embed full variant lists
+ * @param {number}  [req.query.page=1]      - Page number
+ * @param {number}  [req.query.limit=30]    - Page size (max 100)
+ * @returns {Object} - Serialized product cards, pagination and status counts
  */
 const getAllProducts = asyncHandler(async (req, res) => {
-  let { page, limit } = req.body;
-  if (!Validate.integer(page) || page <= 0) {
-    page = 1;
-  }
-  if (!Validate.integer(limit) || limit <= 0) {
-    limit = 30;
-  }
-  try {
-    const totalProducts = await Product.countDocuments({
-      quantity: { $gt: 0 },
-    });
-    const totalPages = Math.ceil(totalProducts / limit);
-    const findProduct = await Product.aggregate([
-      { $match: { quantity: { $gt: 0 } } }, // Match products with stock > 0
-      { $sort: { created_at: -1 } }, // Sort by creation date (descending)
-      { $skip: (page - 1) * 30 }, // Skip previous pages
-      { $limit: 30 }, // Limit to 30 products
-      {
-        $lookup: {
-          from: "stores", // The name of the stores collection
-          localField: "store", // Field from the products collection
-          foreignField: "_id", // Field from the stores collection
-          as: "storeDetails", // Name of the new array field to add
-        },
-      },
-      {
-        $unwind: {
-          path: "$storeDetails", // Unwind the storeDetails array
-          preserveNullAndEmptyArrays: true, // Keep products without a store
-        },
-      },
-      {
-        $project: {
-          title: 1, // Include product title
-          quantity: 1, // Include product quantity
-          listedPrice: 1, // Include product listed price
-          image: 1, // Include product image
-          description: 1, // Include product description
-          brand: 1, // Include product brand
-          "storeDetails.name": 1, // Include store name
-          "storeDetails.address": 1, // Include store address
-          "storeDetails.mobile": 1, // Include store mobile
-          "storeDetails.image": 1,
-        },
-      },
-    ]);
+  const mine = String(req.query.mine || "") === "true";
 
-    res.json({
-      data: findProduct,
-      totalProducts,
-      totalPages,
-      currentPage: page,
-    });
-  } catch (error) {
-    throw new Error(error);
+  let baseFilter = {};
+  let includeHidden = false;
+  let withCounts = false;
+
+  if (mine) {
+    // The route runs optionalAuthMiddleware, so an anonymous caller reaches
+    // here with no req.user rather than being rejected at the door.
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Sign in to list your own products",
+      });
+    }
+
+    const store = await Store.findOne({ owner: req.user._id }, "_id").lean();
+    if (!store) {
+      return res.status(404).json({
+        success: false,
+        message: "No store found for this account",
+      });
+    }
+
+    baseFilter = { store: store._id };
+    includeHidden = true; // it is their own shelf
+    withCounts = true;    // drives the Status filter chips
+  } else if (req.query.store) {
+    validateMongodbId(req.query.store);
+    baseFilter = { store: req.query.store };
+    withCounts = true;
   }
+
+  if (req.query.category) validateMongodbId(req.query.category);
+
+  const { products, pagination, counts, appliedStatus } = await listProducts({
+    baseFilter,
+    query: req.query,
+    includeHidden,
+    withCounts,
+    // The seller's grid needs per-variant stock; the storefront does not.
+    includeVariants: mine || String(req.query.includeVariants || "") === "true",
+  });
+
+  res.json({
+    success: true,
+    data: products,
+    pagination,
+    counts,
+    appliedStatus,
+    // Legacy keys from the original response shape. Deprecated — read
+    // `pagination` instead; kept so existing clients keep working.
+    totalProducts: pagination.total,
+    totalPages: pagination.pages,
+    currentPage: pagination.page,
+  });
 });
 
 /**
@@ -857,8 +1277,9 @@ const getProducts = asyncHandler(async (req, res) => {
       return res.json(JSON.parse(cachedData));
     }
 
-    // Build filter object
-    const filters = {};
+    // Build filter object. Hidden products are excluded from every public
+    // listing; sellers see their own through GET /api/product/get-products?mine=true.
+    const filters = { status: { $ne: "hidden" } };
     if (category) {
       validateMongodbId(category);
       filters.category = category;
@@ -1044,6 +1465,7 @@ const getPersonalizedSuggestions = asyncHandler(async (req, res) => {
     ) {
       const suggestionFilters = {
         quantity: { $gt: 0 },
+        status: { $ne: "hidden" },
       };
 
       if (
@@ -1072,7 +1494,10 @@ const getPersonalizedSuggestions = asyncHandler(async (req, res) => {
 
     // If no personalized suggestions, get trending products
     if (suggestions.length === 0) {
-      suggestions = await Product.find({ quantity: { $gt: 0 } })
+      suggestions = await Product.find({
+        quantity: { $gt: 0 },
+        status: { $ne: "hidden" },
+      })
         .populate("category", "name")
         .populate("store", "name address")
         .sort({ sold: -1, views: -1 })
@@ -1138,6 +1563,7 @@ const getTrendingProducts = asyncHandler(async (req, res) => {
     const trending = await Product.find({
       ...dateFilter,
       quantity: { $gt: 0 },
+      status: { $ne: "hidden" },
     })
       .populate("category", "name")
       .populate("store", "name address")
@@ -1195,6 +1621,7 @@ const getCategorySuggestions = asyncHandler(async (req, res) => {
     const suggestions = await Product.find({
       category: categoryId,
       quantity: { $gt: 0 },
+      status: { $ne: "hidden" },
     })
       .populate("category", "name")
       .populate("store", "name address")
@@ -1268,24 +1695,57 @@ const SORT_OPTIONS = {
 };
 
 /**
+ * Cache keys carry a per-product version counter, so posting a review
+ * invalidates every cached page of every sort and star filter in one write.
+ * Deleting keys individually could not cover the combinations.
+ */
+const reviewCacheVersion = async (productId) => {
+  try {
+    const version = await redisClient.get(`product:reviews:ver:${productId}`);
+    return version || "0";
+  } catch (_) {
+    return "0";
+  }
+};
+
+const bumpReviewCacheVersion = async (productId) => {
+  try {
+    await redisClient.incr(`product:reviews:ver:${productId}`);
+  } catch (_) {}
+};
+
+/**
  * @function getProductReviews
- * @description Paginated reviews for a product with per-star breakdown.
+ * @description Paginated reviews for a product with the per-star breakdown and
+ *   average that the Rating & Reviews panel renders.
  * @route GET /api/product/:id/reviews
  * @query {number} [page=1]
- * @query {number} [limit=10]  max 20
- * @query {string} [sort=recent]  recent | helpful | highest | lowest
+ * @query {number} [limit=10]    max 20 — the panel shows 5 or 10 per page
+ * @query {string} [sort=recent] recent | helpful | highest | lowest
+ * @query {number} [rating]      1-5, to show only that star rating
  */
 const getProductReviews = asyncHandler(async (req, res) => {
   const { id } = req.params;
   validateMongodbId(id);
 
   const page     = Math.max(1, parseInt(req.query.page)  || 1);
-  const limit    = Math.min(20, parseInt(req.query.limit) || 10);
+  const limit    = Math.min(20, Math.max(1, parseInt(req.query.limit) || 10));
   const sortKey  = SORT_OPTIONS[req.query.sort] ? req.query.sort : "recent";
   const sortOpt  = SORT_OPTIONS[sortKey];
   const skip     = (page - 1) * limit;
 
-  const cacheKey = `product:reviews:${id}:${page}:${limit}:${sortKey}`;
+  // Star filter — clicking a bar in the breakdown narrows the list to it.
+  let starFilter = null;
+  if (req.query.rating !== undefined && req.query.rating !== "") {
+    const star = parseInt(req.query.rating, 10);
+    if (!Number.isInteger(star) || star < 1 || star > 5) {
+      return invalid(res, "rating must be an integer between 1 and 5");
+    }
+    starFilter = star;
+  }
+
+  const version  = await reviewCacheVersion(id);
+  const cacheKey = `product:reviews:${id}:v${version}:${page}:${limit}:${sortKey}:${starFilter ?? "all"}`;
 
   try {
     const cached = await redisClient.get(cacheKey);
@@ -1293,9 +1753,11 @@ const getProductReviews = asyncHandler(async (req, res) => {
   } catch (_) {}
 
   const productObjId = new mongoose.Types.ObjectId(id);
+  const baseFilter = { product: id, status: "active" };
+  const listFilter = starFilter ? { ...baseFilter, rating: starFilter } : baseFilter;
 
-  const [reviews, total, breakdownRaw] = await Promise.all([
-    ProductReview.find({ product: id, status: "active" })
+  const [reviews, total, breakdownRaw, product] = await Promise.all([
+    ProductReview.find(listFilter)
       .sort(sortOpt)
       .skip(skip)
       .limit(limit)
@@ -1303,13 +1765,16 @@ const getProductReviews = asyncHandler(async (req, res) => {
       .select("-__v -order")
       .lean(),
 
-    ProductReview.countDocuments({ product: id, status: "active" }),
+    ProductReview.countDocuments(listFilter),
 
-    // Star distribution: count of 1★ … 5★
+    // Star distribution: count of 1★ … 5★. Always across every review, not
+    // just the filtered slice — the bars must not collapse when one is picked.
     ProductReview.aggregate([
       { $match: { product: productObjId, status: "active" } },
       { $group: { _id: "$rating", count: { $sum: 1 } } },
     ]),
+
+    Product.findById(id).select("rating").lean(),
   ]);
 
   const breakdown = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
@@ -1319,8 +1784,17 @@ const getProductReviews = asyncHandler(async (req, res) => {
   const payload = {
     success: true,
     data: {
+      // "4.5 / 5.0 (10 Reviews)" plus the bars, in one place.
+      summary: {
+        average: product?.rating?.average ?? 0,
+        count: product?.rating?.count ?? 0,
+        breakdown,
+      },
       reviews,
+      // Kept alongside summary.breakdown for clients written against the
+      // original response shape.
       breakdown,
+      appliedFilters: { sort: sortKey, rating: starFilter },
       pagination: {
         currentPage: page,
         totalPages,
@@ -1387,13 +1861,9 @@ const createProductReview = asyncHandler(async (req, res) => {
     { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true },
   );
 
-  // Invalidate page-1 cache for all sort orders (most common landing)
-  const sorts = Object.keys(SORT_OPTIONS);
-  try {
-    await Promise.all(
-      sorts.map((s) => redisClient.del(`product:reviews:${id}:1:10:${s}`)),
-    );
-  } catch (_) {}
+  // One counter bump retires every cached page, sort and star filter for this
+  // product — the old per-key deletes only covered page 1 at limit 10.
+  await bumpReviewCacheVersion(id);
 
   res.status(201).json({ success: true, data: review });
 });
@@ -1404,6 +1874,7 @@ module.exports = {
   getAllProducts,
   updateProduct,
   deleteProduct,
+  bulkUpdateProducts,
   createProductCategory,
   updateProductCategory,
   getProductsByCategory,

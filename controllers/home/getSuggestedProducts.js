@@ -98,6 +98,8 @@ const getSuggestedProducts = asyncHandler(async (req, res) => {
             category: { $in: purchasedCategories.map((c) => require("mongoose").Types.ObjectId.createFromHexString(c)) },
             _id: { $nin: purchasedProductIds },
             quantity: { $gt: 0 },
+        status: { $ne: "hidden" },
+            status: { $ne: "hidden" },
           },
         },
         // Rank by rating then recency

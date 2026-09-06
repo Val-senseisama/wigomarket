@@ -1,5 +1,6 @@
 require("dotenv").config();
 const express = require("express");
+const path = require("path");
 const bodyParser = require("body-parser");
 const cookieParser = require("cookie-parser");
 const morgan = require("morgan");
@@ -55,9 +56,23 @@ app.use(
 app.use(requestId);
 
 app.get("/", (req, res) => {
-  res.send(`<a href="/api-docs">API Docs</a>`);
+  res.send(
+    `<a href="/api-docs">API Docs</a> &middot; <a href="/docs">Client guides</a>`,
+  );
 });
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(specs));
+
+// Client integration guides (public/docs). Served straight from the repo so
+// they ship with every deploy — nothing is written to disk at runtime, which
+// the ephemeral filesystem would lose anyway. `extensions` lets the frontend
+// link to /docs/maps-integration without the .html suffix.
+app.use(
+  "/docs",
+  express.static(path.join(__dirname, "public", "docs"), {
+    extensions: ["html"],
+    maxAge: "1h",
+  }),
+);
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: false }));

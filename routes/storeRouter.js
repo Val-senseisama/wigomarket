@@ -17,6 +17,52 @@ const { updateStoreLocation } = require("../controllers/storeController");
 const { authMiddleware, isSeller } = require("../middleware/authMiddleware");
 
 const router = express.Router();
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     StoreOrderRow:
+ *       type: object
+ *       description: One row of the seller's order-management table.
+ *       properties:
+ *         id: { type: string, description: 'Mongo id — use it for GET /api/store/orders/{id}' }
+ *         orderNumber:
+ *           type: string
+ *           description: Human-facing order id, already prefixed with "#".
+ *           example: "#WM1201"
+ *         orderDate: { type: string, format: date-time }
+ *         customer:
+ *           type: object
+ *           properties:
+ *             id: { type: string, nullable: true }
+ *             name: { type: string, nullable: true, example: "Chidi Okafor" }
+ *             email: { type: string, nullable: true }
+ *             mobile: { type: string, nullable: true }
+ *         itemsCount:
+ *           type: integer
+ *           description: Total units across the order's lines, not the number of lines.
+ *           example: 3
+ *         amount: { type: number, description: Order total the customer paid (NGN), example: 17400 }
+ *         currency: { type: string, example: "NGN" }
+ *         deliveryType: { type: string, enum: ["Pick up", "Delivery"] }
+ *         status:
+ *           type: string
+ *           enum: [pending, confirmed, preparing, pickUpReady, inTransit, delivered, cancelled]
+ *           description: Canonical lifecycle token — filter and compare on this.
+ *         statusLabel:
+ *           type: string
+ *           description: Display text for the status pill.
+ *           example: "Pick up Ready"
+ *         raw:
+ *           type: object
+ *           description: Underlying document fields, for detail views and overrides.
+ *           properties:
+ *             orderStatus: { type: string }
+ *             deliveryStatus: { type: string }
+ *             paymentStatus: { type: string }
+ *             deliveryMethod: { type: string, enum: [self_delivery, delivery_agent] }
+ */
 /**
  * @swagger
  * /api/store/create:
@@ -380,6 +426,78 @@ router.get("/analytics", authMiddleware, isSeller, getBusinessAnalytics);
  *     responses:
  *       200:
  *         description: Paginated list of order rows with category counts
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     orders:
+ *                       type: array
+ *                       items: { $ref: '#/components/schemas/StoreOrderRow' }
+ *                     pagination: { $ref: '#/components/schemas/Pagination' }
+ *                     counts:
+ *                       type: object
+ *                       description: >
+ *                         Tab totals, scoped to the store but ignoring the other
+ *                         filters — so each tab shows its true total.
+ *                       properties:
+ *                         all: { type: integer }
+ *                         pending: { type: integer }
+ *                         ongoing: { type: integer }
+ *                         history: { type: integer }
+ *             example:
+ *               success: true
+ *               data:
+ *                 orders:
+ *                   - id: "66f1a2b3c4d5e6f708192a3b"
+ *                     orderNumber: "#WM1201"
+ *                     orderDate: "2026-08-24T15:41:09.117Z"
+ *                     customer:
+ *                       id: "66a0b1c2d3e4f5a6b7c8d9e0"
+ *                       name: "Chidi Okafor"
+ *                       email: "chidi@example.com"
+ *                       mobile: "2348012345678"
+ *                     itemsCount: 3
+ *                     amount: 17400
+ *                     currency: "NGN"
+ *                     deliveryType: "Delivery"
+ *                     status: "preparing"
+ *                     statusLabel: "Preparing"
+ *                     raw:
+ *                       orderStatus: "preparing"
+ *                       deliveryStatus: "pending_assignment"
+ *                       paymentStatus: "Paid"
+ *                       deliveryMethod: "delivery_agent"
+ *                   - id: "66f1a2b3c4d5e6f708192a3c"
+ *                     orderNumber: "#WM1200"
+ *                     orderDate: "2026-08-23T09:12:44.002Z"
+ *                     customer:
+ *                       id: "66a0b1c2d3e4f5a6b7c8d9e1"
+ *                       name: "Amaka Eze"
+ *                       email: "amaka@example.com"
+ *                       mobile: "2348098765432"
+ *                     itemsCount: 1
+ *                     amount: 5000
+ *                     currency: "NGN"
+ *                     deliveryType: "Pick up"
+ *                     status: "delivered"
+ *                     statusLabel: "Delivered"
+ *                     raw:
+ *                       orderStatus: "delivered"
+ *                       deliveryStatus: "delivered"
+ *                       paymentStatus: "Paid"
+ *                       deliveryMethod: "self_delivery"
+ *                 pagination:
+ *                   total: 42
+ *                   page: 1
+ *                   limit: 10
+ *                   pages: 5
+ *                   hasMore: true
+ *                 counts: { all: 42, pending: 4, ongoing: 11, history: 31 }
  *       404:
  *         description: No store found for this account
  */

@@ -5,6 +5,7 @@ const {
   getAllProducts,
   updateProduct,
   deleteProduct,
+  bulkUpdateProducts,
   createProductCategory,
   updateProductCategory,
   getProductsByCategory,
@@ -19,8 +20,260 @@ const {
   getProductReviews,
   createProductReview,
 } = require("../controllers/productController");
-const { authMiddleware, isSeller, isAdmin } = require("../middleware/authMiddleware");
+const {
+  authMiddleware,
+  optionalAuthMiddleware,
+  isSeller,
+  isAdmin,
+} = require("../middleware/authMiddleware");
 const router = express.Router();
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     Pagination:
+ *       type: object
+ *       properties:
+ *         total: { type: integer, description: Rows matching the filter, example: 20 }
+ *         page: { type: integer, example: 1 }
+ *         limit: { type: integer, example: 30 }
+ *         pages: { type: integer, description: Total pages at this limit, example: 1 }
+ *         hasMore: { type: boolean, example: false }
+ *     ProductVariant:
+ *       type: object
+ *       description: One version of a multiple-version product.
+ *       properties:
+ *         id: { type: string }
+ *         sku: { type: string, nullable: true, example: "WM1201-M-BRN" }
+ *         price: { type: number, description: Seller's price (NGN), example: 4900 }
+ *         listedPrice: { type: number, nullable: true, description: Buyer-facing price (NGN), example: 5000 }
+ *         stock: { type: integer, example: 12 }
+ *         sold: { type: integer, example: 9 }
+ *         image: { type: string, nullable: true, format: uri }
+ *         inStock: { type: boolean }
+ *         options:
+ *           type: array
+ *           description: The option combination this variant is for.
+ *           items:
+ *             type: object
+ *             properties:
+ *               name: { type: string, example: "Size" }
+ *               value: { type: string, example: "M" }
+ *     ProductListItem:
+ *       type: object
+ *       description: |
+ *         A product as rendered on a product-list card. Everything the card
+ *         shows is here: image, title, SKU, price, variant count, stock, units
+ *         sold, status pill and rating.
+ *       properties:
+ *         id: { type: string }
+ *         title: { type: string, example: "Men's Casual Short Sleeve Shirt" }
+ *         slug: { type: string, nullable: true }
+ *         sku:
+ *           type: string
+ *           nullable: true
+ *           description: Seller's unit code, unique within the store. Null for products created before SKUs existed. Render as "SKU:&nbsp;#WM1201".
+ *           example: "WM1201"
+ *         description: { type: string, nullable: true }
+ *         brand: { type: string, nullable: true }
+ *         price: { type: number, description: What the seller set (NGN), example: 4900 }
+ *         listedPrice:
+ *           type: number
+ *           description: What the buyer pays (NGN) — the figure to show on the card.
+ *           example: 5000
+ *         currency: { type: string, example: "NGN" }
+ *         image: { type: string, nullable: true, format: uri, description: 'images[0] — the display image' }
+ *         images: { type: array, items: { type: string, format: uri } }
+ *         video: { type: string, nullable: true, format: uri }
+ *         stock:
+ *           type: integer
+ *           description: Units in stock. For a variable product, the total across variants.
+ *           example: 50
+ *         sold: { type: integer, example: 50 }
+ *         views: { type: integer, example: 412 }
+ *         productType: { type: string, enum: [single, variable] }
+ *         variantCount:
+ *           type: integer
+ *           description: Render "None" when 0.
+ *           example: 6
+ *         optionTypes:
+ *           type: array
+ *           description: The axes a variable product varies along.
+ *           items:
+ *             type: object
+ *             properties:
+ *               name: { type: string, example: "Size" }
+ *               values: { type: array, items: { type: string } }
+ *         priceRange:
+ *           type: object
+ *           nullable: true
+ *           description: Cheapest and dearest variant price — the "from ₦X" figure. Null for a single product.
+ *           properties:
+ *             from: { type: number, example: 5000 }
+ *             to: { type: number, example: 6500 }
+ *         variants:
+ *           type: array
+ *           description: Present only when includeVariants=true or mine=true.
+ *           items: { $ref: '#/components/schemas/ProductVariant' }
+ *         status:
+ *           type: string
+ *           enum: [active, hidden]
+ *           description: Stored shelf visibility — what the hide/unhide toggle writes.
+ *         displayStatus:
+ *           type: string
+ *           enum: [active, out_of_stock, hidden]
+ *           description: The pill to render. Derived — hidden wins, then quantity 0, else active.
+ *         statusLabel:
+ *           type: string
+ *           description: Display text for displayStatus.
+ *           example: "Out of stock"
+ *         rating:
+ *           type: object
+ *           properties:
+ *             average: { type: number, example: 4.5 }
+ *             count: { type: integer, example: 131 }
+ *         category:
+ *           type: object
+ *           nullable: true
+ *           properties:
+ *             id: { type: string }
+ *             name: { type: string, nullable: true, example: "Men's Fashion" }
+ *             parent: { type: string, nullable: true }
+ *         store:
+ *           type: object
+ *           nullable: true
+ *           properties:
+ *             id: { type: string }
+ *             name: { type: string, nullable: true }
+ *             image: { type: string, nullable: true, format: uri }
+ *             address: { type: string, nullable: true }
+ *             mobile: { type: string, nullable: true }
+ *         specifications:
+ *           type: array
+ *           items:
+ *             type: object
+ *             properties:
+ *               key: { type: string, example: "RAM" }
+ *               value: { type: string, example: "8 GB" }
+ *         sizes: { type: array, items: { type: string } }
+ *         colors:
+ *           type: array
+ *           items:
+ *             type: object
+ *             properties:
+ *               name: { type: string, example: "Brown" }
+ *               hex: { type: string, nullable: true, example: "#5B3A29" }
+ *         tags: { type: array, items: { type: string } }
+ *         isFeatured: { type: boolean }
+ *         availableFor:
+ *           type: array
+ *           description: How a buyer can receive this product.
+ *           items: { type: string, enum: [delivery, pickup] }
+ *         availableForLabel:
+ *           type: string
+ *           nullable: true
+ *           description: Ready-made label for the availableFor list.
+ *           example: "Delivery & Pick-up"
+ *         createdAt: { type: string, format: date-time }
+ *         updatedAt: { type: string, format: date-time }
+ *     ProductDetail:
+ *       allOf:
+ *         - $ref: '#/components/schemas/ProductListItem'
+ *         - type: object
+ *           description: |
+ *             Everything the product page renders. The flat card fields above are
+ *             all present; the blocks below group them the way the screen is laid
+ *             out, so each panel maps to one key. `variants` is always included.
+ *           properties:
+ *             overview:
+ *               type: object
+ *               description: The Product Overview panel.
+ *               properties:
+ *                 name: { type: string, example: "Men's Casual Short Sleeve Shirt" }
+ *                 categoryPath:
+ *                   type: string
+ *                   nullable: true
+ *                   description: Breadcrumb under Product Category.
+ *                   example: "Fashion > Men's Clothing"
+ *                 category:
+ *                   type: object
+ *                   nullable: true
+ *                   properties:
+ *                     id: { type: string }
+ *                     name: { type: string, nullable: true }
+ *                     parent: { type: string, nullable: true }
+ *                     parentCategory:
+ *                       type: object
+ *                       nullable: true
+ *                       properties:
+ *                         id: { type: string }
+ *                         name: { type: string, nullable: true }
+ *                     path: { type: string, nullable: true }
+ *                 sku: { type: string, nullable: true, example: "SHRT-MNS-CAS-SS-NAVY-L" }
+ *                 dateAdded: { type: string, format: date-time }
+ *                 variantCount: { type: integer, example: 6 }
+ *                 availableFor: { type: array, items: { type: string, enum: [delivery, pickup] } }
+ *                 availableForLabel: { type: string, nullable: true, example: "Delivery & Pick-up" }
+ *                 status: { type: string, enum: [active, hidden] }
+ *                 displayStatus: { type: string, enum: [active, out_of_stock, hidden] }
+ *                 statusLabel: { type: string, example: "Active" }
+ *                 productType: { type: string, enum: [single, variable] }
+ *                 brand: { type: string, nullable: true }
+ *             media:
+ *               type: object
+ *               description: Every picture ever uploaded for this product, in upload order, plus the video.
+ *               properties:
+ *                 image: { type: string, nullable: true, format: uri, description: 'images[0] — the main image' }
+ *                 images: { type: array, items: { type: string, format: uri } }
+ *                 video: { type: string, nullable: true, format: uri }
+ *                 imageCount: { type: integer, example: 3 }
+ *                 hasVideo: { type: boolean }
+ *             inventory:
+ *               type: object
+ *               description: The Pricing & Inventory panel, including the variants table.
+ *               properties:
+ *                 price: { type: number, example: 7500 }
+ *                 listedPrice: { type: number, example: 7650 }
+ *                 currency: { type: string, example: "NGN" }
+ *                 priceRange:
+ *                   type: object
+ *                   nullable: true
+ *                   properties:
+ *                     from: { type: number }
+ *                     to: { type: number }
+ *                 totalStock:
+ *                   type: integer
+ *                   description: Units ever listed — availableStock + totalSold.
+ *                   example: 20
+ *                 availableStock: { type: integer, description: Units left on the shelf, example: 8 }
+ *                 totalSold: { type: integer, example: 12 }
+ *                 lastOrderedAt:
+ *                   type: string
+ *                   format: date-time
+ *                   nullable: true
+ *                   description: When this product was last ordered. Owner-only — null for everyone else.
+ *                 variants:
+ *                   type: array
+ *                   description: One row per version. Empty for a single-version product, whose one row is the price/stock above.
+ *                   items: { $ref: '#/components/schemas/ProductVariant' }
+ *             reviews:
+ *               type: object
+ *               description: The Rating & Reviews summary. Full list at GET /api/product/{id}/reviews.
+ *               properties:
+ *                 average: { type: number, example: 4.5 }
+ *                 count: { type: integer, example: 10 }
+ *                 breakdown:
+ *                   type: object
+ *                   nullable: true
+ *                   description: Reviews per star, for the 5-bar chart.
+ *                   properties:
+ *                     "1": { type: integer }
+ *                     "2": { type: integer }
+ *                     "3": { type: integer }
+ *                     "4": { type: integer }
+ *                     "5": { type: integer }
+ */
 /**
  * @swagger
  * /api/product/create-category:
@@ -248,6 +501,22 @@ router.put("/update-category", authMiddleware, isAdmin, updateProductCategory)
  *                 type: string
  *                 description: Stock keeping unit. Optional, but unique within your store.
  *                 example: "SPK-001"
+ *               status:
+ *                 type: string
+ *                 enum: [active, hidden]
+ *                 default: active
+ *                 description: >
+ *                   Shelf visibility. Send `hidden` to stage a product without it
+ *                   appearing on the storefront; it still shows in your own
+ *                   product list. Change it later with PUT /api/product/{id}.
+ *               availableFor:
+ *                 type: array
+ *                 default: [delivery]
+ *                 description: >
+ *                   How a buyer can receive this product — the "Available for"
+ *                   line on the product page. Defaults to delivery only.
+ *                 items: { type: string, enum: [delivery, pickup] }
+ *                 example: ["delivery", "pickup"]
  *               price:
  *                 type: integer
  *                 description: >
@@ -628,10 +897,40 @@ router.post("/create-product", authMiddleware, isSeller, createProduct);
 router.get("/spec-schemas", getSpecSchemas);
 /**
  * @swagger
- * /api/product/update/:id:
+ * /api/product/{id}:
  *   put:
- *     summary: Update an existing product
- *     description: Update an existing product
+ *     summary: Update a product in your own store
+ *     description: |
+ *       Partial update — only the fields you send change. Seller-only, and
+ *       scoped to the caller's own store: a product id belonging to another
+ *       store returns 404, not 403.
+ *
+ *       Internal and derived fields (`sold`, `views`, `store`, `rating`, `slug`,
+ *       `listedPrice`) are not accepted; `slug` and `listedPrice` are recomputed
+ *       when `title` or `price` changes. `productType` cannot change after
+ *       creation — existing carts and orders are priced against the shape the
+ *       product had when they were made.
+ *
+ *       **Hiding a product** — send `{ "status": "hidden" }` to take it off the
+ *       storefront, `{ "status": "active" }` to put it back. "Out of stock" is
+ *       not a value here: it follows from `quantity` and is reported as
+ *       `displayStatus` on the listing endpoints.
+ *
+ *       **Single-version products** are repriced and restocked with `price` and
+ *       `quantity`.
+ *
+ *       **Multiple-version products** are repriced and restocked through
+ *       `variants` — the "Edit Variant" table. Send the full list you want to
+ *       keep: rows you leave out are removed, and top-level `price`,
+ *       `listedPrice` and `quantity` are re-derived from what you send (cheapest
+ *       variant, and the total stock). Each variant's `sold` is carried over by
+ *       its option combination, so repricing never erases sales history.
+ *       Sending `price` or `quantity` directly on a variable product is a 400.
+ *       `optionTypes` may be sent alone to add an option value, or together with
+ *       `variants`; every variant must pin one allowed value per option type.
+ *
+ *       **Removing the video** — send `"video": null`. **Clearing the SKU** —
+ *       send `"sku": null`. A SKU must stay unique within your store.
  *     tags:
  *       - Products
  *     security:
@@ -640,8 +939,7 @@ router.get("/spec-schemas", getSpecSchemas);
  *       - in: path
  *         name: id
  *         required: true
- *         schema:
- *           type: string
+ *         schema: { type: string }
  *         description: Product ID
  *     requestBody:
  *       required: true
@@ -649,66 +947,114 @@ router.get("/spec-schemas", getSpecSchemas);
  *         application/json:
  *           schema:
  *             type: object
-*             properties:
-*               title:
-*                 type: string
-*                 description: Updated product title
-*               price:
-*                 type: number
-*                 description: Updated product price
-*               quantity:
-*                 type: number
-*                 description: Updated product quantity
-*               category:
-*                 type: string
-*                 description: Updated category ID
-*               brand:
-*                 type: string
-*                 description: Updated product brand
-*               description:
-*                 type: string
-*                 description: Updated product description
-*     responses:
-*       200:
-*         description: Updated product information
-*         content:
-*           application/json:
-*             schema:
-*               type: object
-*               properties:
-*                 _id:
-*                   type: string
-*                 title:
-*                   type: string
-*                 price:
-*                   type: number
-*                 listedPrice:
-*                   type: number
-*                 quantity:
-*                   type: number
-*                 category:
-*                   type: string
-*                 brand:
-*                   type: string
-*                 description:
-*                   type: string
-*                 store:
-*                   type: object
-*                   properties:
-*                     name:
-*                       type: string
-*                     image:
-*                       type: string
-*       400:
-*         description: Validation fails or product not found
-*/
-router.put("/:id", updateProduct);
+ *             properties:
+ *               title: { type: string }
+ *               price: { type: number, description: "Seller's price (NGN); listedPrice is recomputed from it" }
+ *               quantity: { type: integer, minimum: 0 }
+ *               category: { type: string, description: Category id }
+ *               brand: { type: string }
+ *               description: { type: string }
+ *               images: { type: array, items: { type: string, format: uri }, description: Cloudinary URLs, 1-5 }
+ *               video:
+ *                 type: string
+ *                 format: uri
+ *                 nullable: true
+ *                 description: Cloudinary URL, or null to remove the video
+ *               sku:
+ *                 type: string
+ *                 nullable: true
+ *                 description: Unique within your store; null clears it
+ *               availableFor:
+ *                 type: array
+ *                 description: How a buyer can receive this product
+ *                 items: { type: string, enum: [delivery, pickup] }
+ *               optionTypes:
+ *                 type: array
+ *                 description: Multiple-version products only — the axes the product varies along
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     name: { type: string, example: "Size" }
+ *                     values: { type: array, items: { type: string } }
+ *               variants:
+ *                 type: array
+ *                 description: Multiple-version products only — the full list of versions to keep
+ *                 items:
+ *                   type: object
+ *                   required: [price, quantity, options]
+ *                   properties:
+ *                     sku: { type: string }
+ *                     price: { type: number, description: "Seller's price (NGN)" }
+ *                     quantity: { type: integer, minimum: 0 }
+ *                     image: { type: string, format: uri, nullable: true }
+ *                     options:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           name: { type: string, example: "Size" }
+ *                           value: { type: string, example: "M" }
+ *               status:
+ *                 type: string
+ *                 enum: [active, hidden]
+ *                 description: Shelf visibility — the hide/unhide toggle on the product card
+ *               tags: { type: array, items: { type: string } }
+ *               isFeatured: { type: boolean }
+ *               sizes: { type: array, items: { type: string } }
+ *               colors:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     name: { type: string }
+ *                     hex: { type: string, nullable: true }
+ *               specifications:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     key: { type: string }
+ *                     value: { type: string }
+ *           example:
+ *             status: "hidden"
+ *     responses:
+ *       200:
+ *         description: |
+ *           The updated product, in the same shape `GET /api/product/{id}`
+ *           returns — so the page can re-render from the response without a
+ *           second call.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data: { $ref: '#/components/schemas/ProductDetail' }
+ *       400:
+ *         description: Validation failed, or no updatable field supplied
+ *       401:
+ *         description: Missing or invalid token
+ *       403:
+ *         description: Not a seller
+ *       404:
+ *         description: Product not found in your store
+ */
+router.put("/:id", authMiddleware, isSeller, updateProduct);
 /**
  * @swagger
- * /api/product/delete/:id:
+ * /api/product/{id}:
  *   delete:
- *     summary: Delete a product
- *     description: Delete a product
+ *     summary: Delete one of your own products
+ *     description: |
+ *       Permanently deletes the product, its reviews, and every cart and
+ *       wishlist row pointing at it. Seller-only and scoped to the caller's own
+ *       store: another store's product id returns 404, not 403.
+ *
+ *       Deletion cannot be undone. To take a product off the storefront while
+ *       keeping it (and its sales history), hide it instead:
+ *       `PUT /api/product/{id}` with `{ "status": "hidden" }`.
+ *
+ *       Past orders are untouched — they carry their own copy of the line item.
  *     tags:
  *       - Products
  *     security:
@@ -717,96 +1063,345 @@ router.put("/:id", updateProduct);
  *       - in: path
  *         name: id
  *         required: true
- *         schema:
- *           type: string
+ *         schema: { type: string }
  *         description: Product ID
  *     responses:
  *       200:
- *         description: Deletion status message
+ *         description: The product was deleted
  *         content:
  *           application/json:
  *             schema:
  *               type: object
-*               properties:
-*                 message:
-*                   type: string
-*       400:
-*         description: Deletion fails
-*/
+ *               properties:
+ *                 success: { type: boolean }
+ *                 message: { type: string }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id: { type: string }
+ *                     title: { type: string }
+ *             example:
+ *               success: true
+ *               message: "Product deleted successfully"
+ *               data:
+ *                 id: "66f1a2b3c4d5e6f708192a3b"
+ *                 title: "Men's Casual Short Sleeve Shirt"
+ *       401:
+ *         description: Missing or invalid token
+ *       403:
+ *         description: Not a seller
+ *       404:
+ *         description: Product not found in your store
+ */
 router.delete("/:id", authMiddleware, isSeller, deleteProduct);
+/**
+ * @swagger
+ * /api/product/bulk:
+ *   post:
+ *     summary: Hide, unhide or delete several of your products at once
+ *     description: |
+ *       The "Bulk action" control above the product list. Send the ids the
+ *       seller ticked and the action to apply.
+ *
+ *       - `hide`   — take them off the storefront (`status: "hidden"`)
+ *       - `unhide` — put them back (`status: "active"`)
+ *       - `delete` — permanent, and also removes their reviews and any cart or
+ *         wishlist rows pointing at them
+ *
+ *       Only products in the caller's own store are touched. Ids belonging to
+ *       another store, or already deleted, come back in `skipped` rather than
+ *       failing the batch — one stale row in the grid cannot block the rest.
+ *       Every id must be a valid ObjectId, and at most 100 per call.
+ *     tags:
+ *       - Products
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [action, ids]
+ *             properties:
+ *               action:
+ *                 type: string
+ *                 enum: [hide, unhide, delete]
+ *               ids:
+ *                 type: array
+ *                 maxItems: 100
+ *                 items: { type: string }
+ *           example:
+ *             action: "hide"
+ *             ids:
+ *               - "66f1a2b3c4d5e6f708192a3b"
+ *               - "66f1a2b3c4d5e6f708192a3c"
+ *     responses:
+ *       200:
+ *         description: The action was applied
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 message: { type: string }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     action: { type: string, enum: [hide, unhide, delete] }
+ *                     matched: { type: integer, description: Ids found in your store }
+ *                     affected: { type: integer, description: Products now in the requested state }
+ *                     skipped:
+ *                       type: array
+ *                       description: Ids that are not in your store, or no longer exist.
+ *                       items: { type: string }
+ *             example:
+ *               success: true
+ *               message: "2 products hidden"
+ *               data:
+ *                 action: "hide"
+ *                 matched: 2
+ *                 affected: 2
+ *                 skipped: []
+ *       400:
+ *         description: Unknown action, empty ids, more than 100 ids, or a malformed id
+ *       401:
+ *         description: Missing or invalid token
+ *       403:
+ *         description: Not a seller
+ *       404:
+ *         description: None of those products are in your store
+ */
+router.post("/bulk", authMiddleware, isSeller, bulkUpdateProducts);
 /**
  * @swagger
  * /api/product/get-products:
  *   get:
- *     summary: Get paginated list of all products with store details
- *     description: Get paginated list of all products with store details
+ *     summary: List products (storefront grid and the seller's own product list)
+ *     description: |
+ *       One listing endpoint for two callers.
+ *
+ *       **Public / storefront** — no token, or any token without `mine=true`.
+ *       Returns active, in-stock products only; hidden products are never
+ *       included, whoever asks.
+ *
+ *       **Seller's own product list** — send the seller's Bearer token with
+ *       `mine=true`. Scopes to the caller's store and includes hidden and
+ *       out-of-stock products, embeds each product's variants, and returns
+ *       `counts` for the Status filter chips. This is what the "Product List"
+ *       grid uses.
+ *
+ *       Every item is the same card shape: image, title, SKU, price, variant
+ *       count, stock, units sold, status pill and rating.
+ *
+ *       **Status is partly derived.** `status` on the document is only
+ *       `active` or `hidden`; the pill to render is `displayStatus`, which is
+ *       `hidden` when the seller hid it, `out_of_stock` when quantity is 0, and
+ *       `active` otherwise. To hide or unhide, `PUT /api/product/{id}` with
+ *       `{ "status": "hidden" | "active" }`.
  *     tags:
  *       - Products
+ *     security:
+ *       - bearerAuth: []
+ *       - {}
  *     parameters:
  *       - in: query
- *         name: page
+ *         name: search
+ *         schema: { type: string }
+ *         description: Matches product name or SKU (case-insensitive, partial). A leading "#" is ignored.
+ *         example: WM1201
+ *       - in: query
+ *         name: mine
+ *         schema: { type: boolean, default: false }
+ *         description: Scope to the authenticated seller's own store, including hidden and out-of-stock products.
+ *       - in: query
+ *         name: status
  *         schema:
- *           type: integer
-*           default: 1
-*         description: Page number
-*       - in: query
-*         name: limit
-*         schema:
-*           type: integer
-*           default: 30
-*         description: Number of products per page
-*     responses:
-*       200:
-*         description: Paginated list of products with store details
-*         content:
-*           application/json:
-*             schema:
-*               type: object
-*               properties:
-*                 data:
-*                   type: array
-*                   items:
-*                     type: object
-*                     properties:
-*                       title:
-*                         type: string
-*                       quantity:
-*                         type: number
-*                       listedPrice:
-*                         type: number
-*                       image:
-*                         type: string
-*                       description:
-*                         type: string
-*                       brand:
-*                         type: string
-*                       storeDetails:
-*                         type: object
-*                         properties:
-*                           name:
-*                             type: string
-*                           address:
-*                             type: string
-*                           mobile:
-*                             type: string
-*                           image:
-*                             type: string
-*                 totalProducts:
-*                   type: number
-*                 totalPages:
-*                   type: number
-*                 currentPage:
-*                   type: number
-*       400:
-*         description: Retrieval fails
-*/
-router.get("/get-products", getAllProducts);
+ *           type: string
+ *           enum: [active, out_of_stock, hidden, all]
+ *         description: |
+ *           Status filter. Defaults to `active` for public callers and `all` for `mine=true`.
+ *           `hidden` returns nothing for a public caller.
+ *       - in: query
+ *         name: category
+ *         schema: { type: string }
+ *         description: >
+ *           Category id — the Category filter dropdown. Picking a top-level
+ *           category also returns products filed under its subcategories.
+ *       - in: query
+ *         name: store
+ *         schema: { type: string }
+ *         description: Store id — a public store page. Ignored when `mine=true`.
+ *       - in: query
+ *         name: brand
+ *         schema: { type: string }
+ *         description: Brand, partial match
+ *       - in: query
+ *         name: minPrice
+ *         schema: { type: number }
+ *         description: Minimum listed price
+ *       - in: query
+ *         name: maxPrice
+ *         schema: { type: number }
+ *         description: Maximum listed price
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *           enum: [newest, oldest, price_asc, price_desc, best_selling, top_rated, title_asc, title_desc, stock_asc, stock_desc]
+ *           default: newest
+ *       - in: query
+ *         name: includeVariants
+ *         schema: { type: boolean, default: false }
+ *         description: Embed the full variant list on each product. Always on when `mine=true`.
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 30, maximum: 100 }
+ *     responses:
+ *       200:
+ *         description: Paginated product cards
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: array
+ *                   items: { $ref: '#/components/schemas/ProductListItem' }
+ *                 pagination: { $ref: '#/components/schemas/Pagination' }
+ *                 counts:
+ *                   type: object
+ *                   nullable: true
+ *                   description: Per-status totals for the filter chips. Null on unscoped public listings.
+ *                   properties:
+ *                     all: { type: integer }
+ *                     active: { type: integer }
+ *                     out_of_stock: { type: integer }
+ *                     hidden: { type: integer }
+ *                 appliedStatus:
+ *                   type: string
+ *                   description: The status filter actually applied, including the default.
+ *                 totalProducts: { type: integer, deprecated: true }
+ *                 totalPages: { type: integer, deprecated: true }
+ *                 currentPage: { type: integer, deprecated: true }
+ *             example:
+ *               success: true
+ *               data:
+ *                 - id: "66f1a2b3c4d5e6f708192a3b"
+ *                   title: "Men's Casual Short Sleeve Shirt"
+ *                   slug: "mens-casual-short-sleeve-shirt"
+ *                   sku: "WM1201"
+ *                   description: "Breathable cotton shirt, regular fit."
+ *                   brand: "Wigo Basics"
+ *                   price: 4900
+ *                   listedPrice: 5000
+ *                   currency: "NGN"
+ *                   image: "https://res.cloudinary.com/demo/image/upload/v1/products/shirt-1.jpg"
+ *                   images:
+ *                     - "https://res.cloudinary.com/demo/image/upload/v1/products/shirt-1.jpg"
+ *                     - "https://res.cloudinary.com/demo/image/upload/v1/products/shirt-2.jpg"
+ *                   video: null
+ *                   stock: 50
+ *                   sold: 50
+ *                   views: 412
+ *                   productType: "variable"
+ *                   variantCount: 6
+ *                   optionTypes:
+ *                     - name: "Size"
+ *                       values: ["S", "M", "L"]
+ *                     - name: "Color"
+ *                       values: ["Brown", "Black"]
+ *                   priceRange: { from: 5000, to: 6500 }
+ *                   variants:
+ *                     - id: "66f1a2b3c4d5e6f708192a4c"
+ *                       sku: "WM1201-M-BRN"
+ *                       price: 4900
+ *                       listedPrice: 5000
+ *                       stock: 12
+ *                       sold: 9
+ *                       image: "https://res.cloudinary.com/demo/image/upload/v1/products/shirt-brown.jpg"
+ *                       options:
+ *                         - { name: "Size", value: "M" }
+ *                         - { name: "Color", value: "Brown" }
+ *                       inStock: true
+ *                   status: "active"
+ *                   displayStatus: "active"
+ *                   statusLabel: "Active"
+ *                   rating: { average: 4.5, count: 131 }
+ *                   category: { id: "66e0…", name: "Men's Fashion", parent: "66d9…" }
+ *                   store: { id: "66c1…", name: "Wigo Threads", image: null, address: "12 Allen Ave, Ikeja", mobile: "2348012345678" }
+ *                   specifications: []
+ *                   sizes: []
+ *                   colors: []
+ *                   tags: []
+ *                   isFeatured: false
+ *                   createdAt: "2026-08-01T09:14:22.113Z"
+ *                   updatedAt: "2026-08-20T16:02:41.900Z"
+ *                 - id: "66f1a2b3c4d5e6f708192a3c"
+ *                   title: "Sprinkle Birthday cake"
+ *                   slug: "sprinkle-birthday-cake"
+ *                   sku: "WM1202"
+ *                   description: "Vanilla sponge with buttercream and sprinkles."
+ *                   brand: null
+ *                   price: 4900
+ *                   listedPrice: 5000
+ *                   currency: "NGN"
+ *                   image: "https://res.cloudinary.com/demo/image/upload/v1/products/cake.jpg"
+ *                   images: ["https://res.cloudinary.com/demo/image/upload/v1/products/cake.jpg"]
+ *                   video: null
+ *                   stock: 0
+ *                   sold: 50
+ *                   views: 88
+ *                   productType: "single"
+ *                   variantCount: 0
+ *                   optionTypes: []
+ *                   priceRange: null
+ *                   variants: []
+ *                   status: "active"
+ *                   displayStatus: "out_of_stock"
+ *                   statusLabel: "Out of stock"
+ *                   rating: { average: 4.5, count: 131 }
+ *                   category: { id: "66e1…", name: "Cakes", parent: "66d8…" }
+ *                   store: { id: "66c1…", name: "Wigo Threads", image: null, address: "12 Allen Ave, Ikeja", mobile: "2348012345678" }
+ *                   specifications: []
+ *                   sizes: []
+ *                   colors: []
+ *                   tags: []
+ *                   isFeatured: false
+ *                   createdAt: "2026-07-28T11:02:10.000Z"
+ *                   updatedAt: "2026-08-19T08:31:00.000Z"
+ *               pagination:
+ *                 total: 20
+ *                 page: 1
+ *                 limit: 30
+ *                 pages: 1
+ *                 hasMore: false
+ *               counts: { all: 20, active: 16, out_of_stock: 3, hidden: 1 }
+ *               appliedStatus: "all"
+ *               totalProducts: 20
+ *               totalPages: 1
+ *               currentPage: 1
+ *       401:
+ *         description: "`mine=true` without a valid token"
+ *       404:
+ *         description: "`mine=true` for an account with no store"
+ */
+router.get("/get-products", optionalAuthMiddleware, getAllProducts);
 /**
  * @swagger
  * /api/product/products/category:
  *   get:
  *     summary: Get products by category
- *     description: Get products by category
+ *     description: |
+ *       Public listing for one category — products the seller has hidden are
+ *       never returned. Note this reads `categoryId` from the **request body**;
+ *       `GET /api/product/get-products?category=<id>` is the query-param
+ *       listing, and it also covers a category's subcategories.
  *     tags:
  *       - Products
  *     parameters:
@@ -1263,9 +1858,18 @@ router.post("/products/track-view/:id", trackProductView);
  *   get:
  *     summary: Get paginated reviews for a product
  *     description: |
- *       Returns reviews sorted by the chosen strategy, a per-star breakdown
- *       (count of 1★ – 5★), and pagination metadata.
- *       Results are cached for 2 minutes so fresh reviews appear quickly.
+ *       The Rating & Reviews panel: a `summary` (average, review count and the
+ *       per-star breakdown for the 5 bars), one page of reviews, and pagination
+ *       for the arrows.
+ *
+ *       `sort` is the "Sort by" dropdown. `rating` narrows the list to one star
+ *       rating — clicking a bar in the breakdown — while `summary.breakdown`
+ *       stays across every review, so the bars do not collapse when a filter is
+ *       applied.
+ *
+ *       `limit` is the page size: 5 and 10 are the usual choices, 20 the
+ *       maximum. Results are cached for 2 minutes and the cache is retired the
+ *       moment a review is posted.
  *     tags: [Products]
  *     parameters:
  *       - in: path
@@ -1290,6 +1894,10 @@ router.post("/products/track-view/:id", trackProductView);
  *           `helpful` — most upvoted first
  *           `highest` — 5★ first
  *           `lowest`  — 1★ first
+ *       - in: query
+ *         name: rating
+ *         schema: { type: integer, minimum: 1, maximum: 5 }
+ *         description: Show only reviews with this star rating. Omit for all.
  *     responses:
  *       200:
  *         description: Reviews with breakdown and pagination
@@ -1302,6 +1910,27 @@ router.post("/products/track-view/:id", trackProductView);
  *                 data:
  *                   type: object
  *                   properties:
+ *                     summary:
+ *                       type: object
+ *                       description: Everything the rating header needs — the average, the review count and the bars.
+ *                       properties:
+ *                         average: { type: number, example: 4.5 }
+ *                         count: { type: integer, example: 10 }
+ *                         breakdown:
+ *                           type: object
+ *                           description: Reviews per star, across all reviews — unaffected by the rating filter.
+ *                           properties:
+ *                             "1": { type: integer, example: 0 }
+ *                             "2": { type: integer, example: 1 }
+ *                             "3": { type: integer, example: 1 }
+ *                             "4": { type: integer, example: 2 }
+ *                             "5": { type: integer, example: 6 }
+ *                     appliedFilters:
+ *                       type: object
+ *                       description: Echo of the filters in force, so the client renders its controls without re-deriving defaults.
+ *                       properties:
+ *                         sort: { type: string, example: "recent" }
+ *                         rating: { type: integer, nullable: true, example: null }
  *                     reviews:
  *                       type: array
  *                       items:
@@ -1322,7 +1951,7 @@ router.post("/products/track-view/:id", trackProductView);
  *                               image: { type: string }
  *                     breakdown:
  *                       type: object
- *                       description: Count of reviews per star rating
+ *                       description: Same as summary.breakdown — kept for clients written against the original shape.
  *                       properties:
  *                         "1": { type: integer }
  *                         "2": { type: integer }
@@ -1337,6 +1966,8 @@ router.post("/products/track-view/:id", trackProductView);
  *                         totalResults: { type: integer }
  *                         hasNext: { type: boolean }
  *                         hasPrev: { type: boolean }
+ *       400:
+ *         description: rating must be an integer between 1 and 5
  *       404:
  *         description: Product not found
  */
@@ -1415,16 +2046,41 @@ router.post("/:id/reviews", authMiddleware, createProductReview);
  *   get:
  *     summary: Get full product detail
  *     description: |
- *       Returns the complete product record including:
- *       - Core fields: title, price, listedPrice, brand, description, quantity, images
- *       - Structured data: specifications (key/value pairs), available sizes, available colours
- *       - Ratings summary: average and review count (see `GET /{id}/reviews` for the full list)
- *       - Store details: name, image, address
- *       - Category name
- *       - Social proof: sold count, view count
+ *       Everything the product page renders, in one call:
  *
- *       Also increments the product's view counter (fire-and-forget).
+ *       - **overview** — name, category breadcrumb ("Fashion > Men's Clothing"),
+ *         SKU, date added, variant count, what it is available for
+ *         (Delivery / Pick-up), and the status pill
+ *       - **media** — every picture ever uploaded, in upload order, plus the
+ *         product video
+ *       - **description** — the full product description (also at the top level)
+ *       - **inventory** — price, total stock, available stock, total sold, last
+ *         ordered, and the variants table for a multiple-version product
+ *       - **reviews** — average, review count and the per-star breakdown for the
+ *         Rating & Reviews panel; the reviews themselves are paginated at
+ *         `GET /api/product/{id}/reviews`
+ *
+ *       Every flat product-card field is present at the top level too, so a
+ *       client already parsing a listing response can reuse it unchanged.
+ *
+ *       For a **single-version** product `inventory.variants` is empty and the
+ *       one row is `inventory.price` / `inventory.availableStock`. For a
+ *       **multiple-version** product those top-level figures are derived — the
+ *       cheapest variant's price and the total stock across variants — and the
+ *       table lives in `inventory.variants`.
+ *
+ *       Sending the seller's Bearer token adds `isOwner: true` and
+ *       `inventory.lastOrderedAt` (sales data, not exposed to buyers), and
+ *       suppresses the view-count increment so a seller opening their own
+ *       product does not inflate its views.
+ *
+ *       **Hidden products** (`status: "hidden"`) return 404 to everyone except
+ *       the seller who owns them — send the seller's token to load one into an
+ *       edit screen. The token is optional everywhere else.
  *     tags: [Products]
+ *     security:
+ *       - bearerAuth: []
+ *       - {}
  *     parameters:
  *       - in: path
  *         name: id
@@ -1441,66 +2097,101 @@ router.post("/:id/reviews", authMiddleware, createProductReview);
  *               type: object
  *               properties:
  *                 success: { type: boolean, example: true }
- *                 data:
- *                   type: object
- *                   properties:
- *                     _id: { type: string }
- *                     title: { type: string }
- *                     slug: { type: string }
- *                     description: { type: string }
- *                     price: { type: number, description: "Seller's base price in NGN" }
- *                     listedPrice: { type: number, description: "Price shown to buyers (price + 2% commission)" }
- *                     brand: { type: string }
- *                     quantity: { type: integer }
- *                     sold: { type: integer }
- *                     views: { type: integer }
- *                     images: { type: array, items: { type: string } }
- *                     tags: { type: array, items: { type: string } }
- *                     isFeatured: { type: boolean }
- *                     rating:
- *                       type: object
- *                       properties:
- *                         average: { type: number, example: 4.3 }
- *                         count: { type: integer, example: 12 }
- *                     specifications:
- *                       type: array
- *                       description: Key/value product attributes
- *                       items:
- *                         type: object
- *                         properties:
- *                           key:   { type: string, example: "Storage" }
- *                           value: { type: string, example: "256 GB" }
- *                     sizes:
- *                       type: array
- *                       description: Available size options
- *                       items: { type: string, example: "XL" }
- *                     colors:
- *                       type: array
- *                       description: Available colour variants
- *                       items:
- *                         type: object
- *                         properties:
- *                           name: { type: string, example: "Midnight Black" }
- *                           hex:  { type: string, example: "#1a1a1a" }
- *                     store:
- *                       type: object
- *                       properties:
- *                         _id: { type: string }
- *                         name: { type: string }
- *                         image: { type: string }
- *                         mobile: { type: string }
- *                         address: { type: string }
- *                     category:
- *                       type: object
- *                       properties:
- *                         _id: { type: string }
- *                         name: { type: string }
+ *                 isOwner:
+ *                   type: boolean
+ *                   description: True when the caller owns this product — render the Edit / Delete / Hide controls.
+ *                 data: { $ref: '#/components/schemas/ProductDetail' }
+ *             example:
+ *               success: true
+ *               isOwner: true
+ *               data:
+ *                 id: "66f1a2b3c4d5e6f708192a3b"
+ *                 title: "Men's Casual Short Sleeve Shirt"
+ *                 sku: "SHRT-MNS-CAS-SS-NAVY-L"
+ *                 description: "A lightweight, breathable casual shirt perfect for everyday wear. Made with 100% cotton and tailored for comfort."
+ *                 price: 7500
+ *                 listedPrice: 7650
+ *                 currency: "NGN"
+ *                 image: "https://res.cloudinary.com/wigo/image/upload/shirt-black.jpg"
+ *                 images:
+ *                   - "https://res.cloudinary.com/wigo/image/upload/shirt-black.jpg"
+ *                   - "https://res.cloudinary.com/wigo/image/upload/shirt-white.jpg"
+ *                   - "https://res.cloudinary.com/wigo/image/upload/shirt-navy.jpg"
+ *                 video: "https://res.cloudinary.com/wigo/video/upload/shirt-demo.mp4"
+ *                 stock: 8
+ *                 sold: 12
+ *                 views: 412
+ *                 productType: "variable"
+ *                 variantCount: 4
+ *                 status: "active"
+ *                 displayStatus: "active"
+ *                 statusLabel: "Active"
+ *                 availableFor: ["delivery", "pickup"]
+ *                 availableForLabel: "Delivery & Pick-up"
+ *                 rating: { average: 4.5, count: 10 }
+ *                 overview:
+ *                   name: "Men's Casual Short Sleeve Shirt"
+ *                   categoryPath: "Fashion > Men's Clothing"
+ *                   category:
+ *                     id: "66f1a2b3c4d5e6f708192a11"
+ *                     name: "Men's Clothing"
+ *                     parent: "66f1a2b3c4d5e6f708192a10"
+ *                     parentCategory: { id: "66f1a2b3c4d5e6f708192a10", name: "Fashion" }
+ *                     path: "Fashion > Men's Clothing"
+ *                   sku: "SHRT-MNS-CAS-SS-NAVY-L"
+ *                   dateAdded: "2026-06-03T09:12:44.000Z"
+ *                   variantCount: 4
+ *                   availableFor: ["delivery", "pickup"]
+ *                   availableForLabel: "Delivery & Pick-up"
+ *                   status: "active"
+ *                   displayStatus: "active"
+ *                   statusLabel: "Active"
+ *                   productType: "variable"
+ *                   brand: "Wigo Basics"
+ *                 media:
+ *                   image: "https://res.cloudinary.com/wigo/image/upload/shirt-black.jpg"
+ *                   imageCount: 3
+ *                   hasVideo: true
+ *                 inventory:
+ *                   price: 7500
+ *                   listedPrice: 7650
+ *                   currency: "NGN"
+ *                   priceRange: { from: 7650, to: 8160 }
+ *                   totalStock: 20
+ *                   availableStock: 8
+ *                   totalSold: 12
+ *                   lastOrderedAt: "2026-06-04T18:22:10.000Z"
+ *                   variants:
+ *                     - id: "66f1a2b3c4d5e6f708192b01"
+ *                       sku: "Shirt-BL-M-01"
+ *                       price: 7500
+ *                       listedPrice: 7650
+ *                       stock: 2
+ *                       sold: 10
+ *                       inStock: true
+ *                       options:
+ *                         - { name: "Color", value: "Black" }
+ *                         - { name: "Size",  value: "M" }
+ *                     - id: "66f1a2b3c4d5e6f708192b02"
+ *                       sku: "Shirt-BL-L-01"
+ *                       price: 8000
+ *                       listedPrice: 8160
+ *                       stock: 6
+ *                       sold: 2
+ *                       inStock: true
+ *                       options:
+ *                         - { name: "Color", value: "Black" }
+ *                         - { name: "Size",  value: "L" }
+ *                 reviews:
+ *                   average: 4.5
+ *                   count: 10
+ *                   breakdown: { "1": 0, "2": 1, "3": 1, "4": 2, "5": 6 }
  *       404:
- *         description: Product not found
+ *         description: Product not found, or hidden and you do not own it
  *         content:
  *           application/json:
  *             schema: { $ref: '#/components/schemas/Error' }
  */
-router.get("/:id", getAProduct);
+router.get("/:id", optionalAuthMiddleware, getAProduct);
 
 module.exports = router;

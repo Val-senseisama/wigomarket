@@ -99,6 +99,26 @@ var productSchema = new mongoose.Schema(
       default: false,
     },
 
+    // Seller-controlled shelf visibility. "Out of stock" is deliberately NOT a
+    // value here — it is derived from `quantity` at read time (see
+    // utils/productSerializer) so it can never drift from the real stock level.
+    // A hidden product stays in the seller's list but is never returned to
+    // public storefront callers.
+    status: {
+      type: String,
+      enum: ["active", "hidden"],
+      default: "active",
+      index: true,
+    },
+
+    // How a buyer can receive this product. Drives the "Available for:
+    // Delivery & Pick-up" line on the product detail screen. Seller-controlled;
+    // every product supports delivery unless the seller says otherwise.
+    availableFor: {
+      type: [{ type: String, enum: ["delivery", "pickup"] }],
+      default: ["delivery"],
+    },
+
     // Structured key/value attributes — e.g. { key: "RAM", value: "8 GB" }
     specifications: [
       {

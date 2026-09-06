@@ -62,6 +62,40 @@ const authMiddleware = asyncHandler(async (req, res, next) => {
   next();
 });
 
+/**
+ * Authenticate when a usable Bearer token is present, otherwise continue as an
+ * anonymous caller. Never rejects — it is for routes that are public but return
+ * more to a signed-in user (a seller listing their own hidden products through
+ * the same endpoint the storefront uses). Routes must check `req.user`
+ * themselves before granting anything.
+ *
+ * A malformed or expired token is treated as "not signed in" rather than 401,
+ * so a stale token in a browser cannot break a public page.
+ */
+const optionalAuthMiddleware = asyncHandler(async (req, res, next) => {
+  const header = req.headers?.authorization;
+  if (!header?.startsWith("Bearer ")) return next();
+
+  const token = header.split(" ")[1];
+  if (!token) return next();
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(decoded?.id).select("-password -refreshToken");
+
+    if (user && !user.isBlocked && user.status === "active") {
+      req.user = user;
+      req.userId = user._id;
+      req.userRoles = user.role;
+      req.activeRole = user.activeRole;
+    }
+  } catch (error) {
+    // Anonymous — deliberately swallowed.
+  }
+
+  next();
+});
+
 const isSeller = asyncHandler(async (req, res, next) => {
   const userRoles = req.userRoles;
 
@@ -105,4 +139,10 @@ const isAdmin = asyncHandler(async (req, res, next) => {
 
   next();
 });
-module.exports = { authMiddleware, isAdmin, isDispatch, isSeller };
+module.exports = {
+  authMiddleware,
+  optionalAuthMiddleware,
+  isAdmin,
+  isDispatch,
+  isSeller,
+};

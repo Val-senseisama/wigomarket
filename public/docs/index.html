@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WigoMarket — Client Guides</title>
+<style>
+  :root { --bg:#f7f8f7; --surface:#fff; --ink:#16211c; --ink-soft:#55655c; --line:#dfe6e1; --accent:#0f7a5a; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg:#0e1512; --surface:#151d19; --ink:#e8efea; --ink-soft:#9fb0a7; --line:#26332d; --accent:#4fd1a5; }
+  }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { max-width:720px; margin:0 auto; padding:48px 20px; }
+  h1 { font-size:26px; margin:0 0 6px; letter-spacing:-0.01em; }
+  p.sub { color:var(--ink-soft); margin:0 0 28px; }
+  a.card { display:block; background:var(--surface); border:1px solid var(--line); border-radius:10px;
+           padding:16px 18px; margin:12px 0; text-decoration:none; color:inherit; }
+  a.card:hover { border-color:var(--accent); }
+  a.card strong { display:block; color:var(--accent); margin-bottom:2px; }
+  a.card span { color:var(--ink-soft); font-size:14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>WigoMarket client guides</h1>
+  <p class="sub">Integration notes for the mobile and web clients. The full endpoint reference lives in Swagger.</p>
+
+  <a class="card" href="/docs/maps-integration.html">
+    <strong>Maps, Delivery Fees &amp; Live Tracking</strong>
+    <span>Address picker, fee tariff, order coordinates, and the /ws/location protocol — written for the Flutter client.</span>
+  </a>
+
+  <a class="card" href="/api-docs">
+    <strong>API reference (Swagger)</strong>
+    <span>Every endpoint, with request bodies and sample responses.</span>
+  </a>
+</div>
+</body>
+</html>

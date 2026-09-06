@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WigoMarket — Maps, Delivery &amp; Live Tracking</title>
+<style>
+  :root {
+    --bg: #f7f8f7;
+    --surface: #ffffff;
+    --ink: #16211c;
+    --ink-soft: #55655c;
+    --line: #dfe6e1;
+    --accent: #0f7a5a;
+    --accent-soft: #e6f3ee;
+    --warn-bg: #fdf3e3;
+    --warn-line: #e6c68a;
+    --code-bg: #10201a;
+    --code-ink: #d8efe5;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1512;
+      --surface: #151d19;
+      --ink: #e8efea;
+      --ink-soft: #9fb0a7;
+      --line: #26332d;
+      --accent: #4fd1a5;
+      --accent-soft: #172c25;
+      --warn-bg: #2a2317;
+      --warn-line: #5c4a24;
+      --code-bg: #0a120f;
+      --code-ink: #d8efe5;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 32px 20px 96px; }
+  header.page {
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 20px;
+    margin-bottom: 28px;
+  }
+  h1 { font-size: 28px; line-height: 1.25; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .sub { color: var(--ink-soft); margin: 0; }
+  h2 {
+    font-size: 20px;
+    margin: 40px 0 12px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    letter-spacing: -0.01em;
+  }
+  h3 { font-size: 16px; margin: 26px 0 8px; }
+  p, li { color: var(--ink); }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-ink);
+    padding: 14px 16px;
+    border-radius: var(--radius);
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  pre code { background: none; color: inherit; padding: 0; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--ink-soft); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .scroll { overflow-x: auto; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    margin: 16px 0;
+  }
+  .note {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-line);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    margin: 16px 0;
+  }
+  .method {
+    display: inline-block;
+    font: 600 11px/1 ui-monospace, monospace;
+    padding: 4px 7px;
+    border-radius: 4px;
+    background: var(--accent);
+    color: #fff;
+    margin-right: 8px;
+    letter-spacing: 0.04em;
+  }
+  .path { font-family: ui-monospace, monospace; font-size: 13.5px; }
+  ul.toc { list-style: none; padding: 0; margin: 0; columns: 2; column-gap: 28px; }
+  ul.toc li { margin: 4px 0; break-inside: avoid; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="page">
+  <h1>Maps, Delivery Fees &amp; Live Tracking</h1>
+  <p class="sub">Integration guide for the Flutter client. Companion to the full reference at <a href="/api-docs">/api-docs</a>.</p>
+</header>
+
+<div class="card">
+  <ul class="toc">
+    <li><a href="#basics">1. Basics every call shares</a></li>
+    <li><a href="#picker">2. The address picker</a></li>
+    <li><a href="#fee">3. Delivery fee preview</a></li>
+    <li><a href="#order">4. Placing the order</a></li>
+    <li><a href="#map">5. Drawing the order on a map</a></li>
+    <li><a href="#ws">6. Live tracking over WebSocket</a></li>
+    <li><a href="#dispatch">7. The dispatch rider's side</a></li>
+    <li><a href="#gotchas">8. Gotchas</a></li>
+  </ul>
+</div>
+
+<h2 id="basics">1. Basics every call shares</h2>
+
+<p><strong>Auth.</strong> Every <code>/api/maps/*</code> and <code>/api/location/*</code> endpoint requires a Bearer token. There are no anonymous map lookups — the Mapbox key lives on the server and is never shipped to the client.</p>
+
+<pre><code>Authorization: Bearer &lt;accessToken&gt;</code></pre>
+
+<p><strong>Rate limit.</strong> <code>/api/maps/*</code> allows <strong>60 lookups per minute per user</strong>. Type-ahead is the only thing that gets near it, so debounce autocomplete by ~300&nbsp;ms. Over the limit you get <code>429</code> with <code>{ success: false, message: "Too many map lookups…" }</code>.</p>
+
+<p><strong>Envelope.</strong> Every response is <code>{ success, data }</code> on the way out and <code>{ success: false, message }</code> on failure. Read <code>data</code>, not the root.</p>
+
+<div class="note">
+  <strong>Coordinate order.</strong> Request and response bodies use <code>{ lat, lng }</code>. Anything stored on an order as GeoJSON — <code>deliveryLocation.coordinates</code> — is <code>[lng, lat]</code>, longitude first. That flip is the single most common integration bug on this API.
+</div>
+
+<h2 id="picker">2. The address picker</h2>
+
+<p>Four endpoints, used in this order.</p>
+
+<div class="scroll">
+<table>
+  <thead><tr><th>Endpoint</th><th>Query</th><th>Returns</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><span class="method">GET</span><span class="path">/api/maps/places/autocomplete</span></td>
+      <td><code>input</code>, <code>sessiontoken</code></td>
+      <td>Suggestions as the user types (Nigeria only)</td>
+    </tr>
+    <tr>
+      <td><span class="method">GET</span><span class="path">/api/maps/places/details</span></td>
+      <td><code>placeId</code>, <code>sessiontoken</code></td>
+      <td>Coordinates + formatted address for one suggestion</td>
+    </tr>
+    <tr>
+      <td><span class="method">GET</span><span class="path">/api/maps/geocode</span></td>
+      <td><code>address</code></td>
+      <td>Coordinates for a typed-out address</td>
+    </tr>
+    <tr>
+      <td><span class="method">GET</span><span class="path">/api/maps/reverse-geocode</span></td>
+      <td><code>lat</code>, <code>lng</code></td>
+      <td>Address for a dropped pin / GPS fix</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Session tokens</h3>
+<p>Generate one UUID when the picker opens, send it with <em>every</em> autocomplete keystroke <em>and</em> the final details call, then throw it away. One token per address chosen. Reusing a token across addresses, or omitting it, is billed as separate lookups.</p>
+
+<pre><code>class AddressPicker {
+  final _dio = Dio();
+  String _session = const Uuid().v4();   // one per address chosen
+
+  Future&lt;List&lt;dynamic&gt;&gt; suggest(String input) async {
+    if (input.trim().length &lt; 3) return [];
+    final r = await _dio.get('/api/maps/places/autocomplete',
+        queryParameters: {'input': input, 'sessiontoken': _session});
+    return r.data['data']['predictions'] as List;
+  }
+
+  Future&lt;Map&lt;String, dynamic&gt;&gt; choose(String placeId) async {
+    final r = await _dio.get('/api/maps/places/details',
+        queryParameters: {'placeId': placeId, 'sessiontoken': _session});
+    _session = const Uuid().v4();        // token is spent — start a new one
+    return r.data['data'];               // { lat, lng, formattedAddress, ... }
+  }
+}</code></pre>
+
+<h2 id="fee">3. Delivery fee preview</h2>
+
+<p>Distance and drive time between two points:</p>
+
+<pre><code>GET /api/maps/distance
+    ?originLat=6.5244&amp;originLng=3.3792
+    &amp;destLat=6.4281&amp;destLng=3.4219</code></pre>
+
+<p>The fee the backend will charge follows this tariff:</p>
+
+<div class="scroll">
+<table>
+  <thead><tr><th>Rule</th><th>Value</th></tr></thead>
+  <tbody>
+    <tr><td>Base fee (covers the first 5 km)</td><td>₦1,200</td></tr>
+    <tr><td>Every kilometre beyond 5 km</td><td>₦100</td></tr>
+    <tr><td>Maximum delivery distance</td><td>100 km</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>So a 12 km delivery is ₦1,200 + (7 × ₦100) = <strong>₦1,900</strong>. Mirror that arithmetic in the client for a preview, but treat the figure on the created order as the truth — see the gotcha below.</p>
+
+<h2 id="order">4. Placing the order</h2>
+
+<p><span class="method">POST</span><span class="path">/api/order/create</span> — send <code>deliveryLocation</code> alongside the usual fields:</p>
+
+<pre><code>{
+  "deliveryAddress": "12 Adeola Odeku St, Victoria Island, Lagos",
+  "deliveryLocation": {
+    "lat": 6.4281,
+    "lng": 3.4219,
+    "formattedAddress": "12 Adeola Odeku St, Victoria Island, Lagos"
+  }
+}</code></pre>
+
+<p>Send <code>lat</code>/<code>lng</code> — that is the path the server uses to compute a real distance-based fee. Without coordinates the order still succeeds, but the fee falls back to the flat base fee.</p>
+
+<h2 id="map">5. Drawing the order on a map</h2>
+
+<p>Read the order back (<code>GET /api/order/:id</code>) and use:</p>
+
+<div class="scroll">
+<table>
+  <thead><tr><th>Field</th><th>Shape</th><th>Use</th></tr></thead>
+  <tbody>
+    <tr><td><code>deliveryLocation.coordinates</code></td><td><code>[lng, lat]</code></td><td>Destination marker</td></tr>
+    <tr><td><code>deliveryAddress</code></td><td>string</td><td>Label under the marker</td></tr>
+    <tr><td><code>deliveryFee</code></td><td>number (NGN)</td><td>What the buyer was actually charged</td></tr>
+    <tr><td><code>deliveryAgent</code></td><td>object / null</td><td>Null until a rider accepts — no live tracking before that</td></tr>
+    <tr><td><code>orderStatus</code></td><td>string</td><td>Which stage of the tracking UI to show</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="ws">6. Live tracking over WebSocket</h2>
+
+<p>Endpoint: <code>wss://&lt;host&gt;/ws/location?token=&lt;accessToken&gt;</code>. The token may also travel as an <code>Authorization: Bearer</code> header; the query parameter exists because most Flutter WebSocket clients cannot set headers.</p>
+
+<h3>Messages you send</h3>
+<div class="scroll">
+<table>
+  <thead><tr><th>Message</th><th>When</th></tr></thead>
+  <tbody>
+    <tr><td><code>{"type":"subscribe_order","orderId":"…"}</code></td><td>After the tracking screen opens</td></tr>
+    <tr><td><code>{"type":"unsubscribe_order","orderId":"…"}</code></td><td>When it closes</td></tr>
+    <tr><td><code>{"type":"ping"}</code></td><td>Every ~30 s to hold the connection open</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Messages you receive</h3>
+<div class="scroll">
+<table>
+  <thead><tr><th>Type</th><th>Payload</th></tr></thead>
+  <tbody>
+    <tr><td><code>connection</code></td><td><code>message</code>, <code>userId</code>, <code>timestamp</code> — the handshake succeeded</td></tr>
+    <tr><td><code>subscribed</code> / <code>unsubscribed</code></td><td><code>orderId</code>, <code>message</code></td></tr>
+    <tr><td><code>location_update</code></td><td><code>deliveryAgentId</code>, <code>orderId</code>, <code>location</code>, <code>timestamp</code> — move the rider marker</td></tr>
+    <tr><td><code>pong</code></td><td><code>timestamp</code></td></tr>
+    <tr><td><code>error</code></td><td><code>message</code> — malformed or unknown message type</td></tr>
+  </tbody>
+</table>
+</div>
+
+<pre><code>final ws = WebSocketChannel.connect(
+  Uri.parse('wss://$host/ws/location?token=$accessToken'),
+);
+
+ws.sink.add(jsonEncode({'type': 'subscribe_order', 'orderId': orderId}));
+
+ws.stream.listen((raw) {
+  final msg = jsonDecode(raw);
+  if (msg['type'] == 'location_update') {
+    final loc = msg['location'];          // { lat, lng } — not GeoJSON
+    controller.moveRider(LatLng(loc['lat'], loc['lng']));
+  }
+});
+
+// keep-alive
+Timer.periodic(const Duration(seconds: 30),
+    (_) =&gt; ws.sink.add(jsonEncode({'type': 'ping'})));</code></pre>
+
+<div class="note">
+  A closed socket is normal on mobile — backgrounding kills it. Reconnect with backoff and <strong>re-send <code>subscribe_order</code></strong>: subscriptions live per socket and are not restored for you. While disconnected, fall back to <code>GET /api/location/current/:orderId</code>.
+</div>
+
+<h3>REST fallbacks</h3>
+<div class="scroll">
+<table>
+  <thead><tr><th>Endpoint</th><th>Use</th></tr></thead>
+  <tbody>
+    <tr><td><span class="method">GET</span><span class="path">/api/location/current/:orderId</span></td><td>Last known rider position — poll ~15 s while the socket is down</td></tr>
+    <tr><td><span class="method">GET</span><span class="path">/api/location/history/:orderId</span></td><td>The breadcrumb trail already travelled</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="dispatch">7. The dispatch rider's side</h2>
+
+<p>These require the <code>dispatch</code> role and are for the rider app, not the buyer app.</p>
+
+<div class="scroll">
+<table>
+  <thead><tr><th>Endpoint</th><th>Use</th></tr></thead>
+  <tbody>
+    <tr><td><span class="method">POST</span><span class="path">/api/location/update</span></td><td>Push the rider's position (fans out to every subscribed buyer)</td></tr>
+    <tr><td><span class="method">POST</span><span class="path">/api/location/route</span></td><td>Road route between two points, as an encoded polyline</td></tr>
+    <tr><td><span class="method">PUT</span><span class="path">/api/location/status</span></td><td>Advance the delivery status</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>The route polyline is <strong>polyline5</strong> encoded — decode it before handing it to the map (<code>flutter_polyline_points</code> or equivalent).</p>
+
+<h2 id="gotchas">8. Gotchas</h2>
+
+<div class="scroll">
+<table>
+  <thead><tr><th>Symptom</th><th>Cause</th></tr></thead>
+  <tbody>
+    <tr><td>Marker lands in the sea off Ghana</td><td><code>[lng, lat]</code> read as <code>[lat, lng]</code>. Null Island is 0,0.</td></tr>
+    <tr><td>Fee is exactly ₦1,200 regardless of distance</td><td>No coordinates on the order, or the upstream lookup failed. The tariff <em>silently</em> falls back to the flat base fee — it never errors. Always show the fee from the created order, not your own estimate.</td></tr>
+    <tr><td><code>429</code> from autocomplete</td><td>Undebounced type-ahead. Debounce ~300 ms and require 3+ characters.</td></tr>
+    <tr><td>No <code>location_update</code> ever arrives</td><td>No rider assigned yet (<code>deliveryAgent</code> is null), or the socket reconnected without re-subscribing.</td></tr>
+    <tr><td>Autocomplete billed twice per address</td><td>A fresh session token per keystroke. One token per address, spent on the details call.</td></tr>
+    <tr><td>Socket dies after a few minutes idle</td><td>No keep-alive. Send <code>ping</code> every 30 s.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Checklist</h2>
+<ul>
+  <li>Bearer token on every maps and tracking call</li>
+  <li>Autocomplete debounced, 3-character minimum, one session token per address</li>
+  <li><code>lat</code>/<code>lng</code> sent on <code>POST /api/order/create</code></li>
+  <li>GeoJSON read as <code>[lng, lat]</code></li>
+  <li>Delivery fee displayed from the order, not from a client-side estimate</li>
+  <li>WebSocket: subscribe on open, re-subscribe on reconnect, ping every 30 s, unsubscribe on close</li>
+  <li>REST polling fallback while the socket is down</li>
+</ul>
+
+</div>
+</body>
+</html>

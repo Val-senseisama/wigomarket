@@ -203,6 +203,8 @@ const search = asyncHandler(async (req, res) => {
         $match: {
           ...keyword,
           quantity: { $gt: 0 },
+          // Hidden products stay off the public store page.
+          status: { $ne: "hidden" },
         },
       },
       {
