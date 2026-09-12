@@ -247,10 +247,13 @@ const buildPickups = (order) => {
     if (!store || !store._id) continue;
     const id = store._id.toString();
     if (seen.has(id)) continue;
+    const [pickupLng, pickupLat] = store.location?.coordinates || [];
     seen.set(id, {
       id: store._id,
       store: store.name || null,
       address: store.address || store.location?.formattedAddress || null,
+      lat: pickupLat ?? null,
+      lng: pickupLng ?? null,
       mobile: store.mobile || null,
     });
   }
@@ -298,7 +301,14 @@ const serializeDeliveryOrder = (order) => {
     // distinct stores for multi-store orders.
     pickup: pickups[0] || null,
     pickups,
-    dropoff: order.deliveryAddress || order.deliveryLocation?.formattedAddress || null,
+    dropoff: (() => {
+      const [dropoffLng, dropoffLat] = order.deliveryLocation?.coordinates || [];
+      return {
+        address: order.deliveryAddress || order.deliveryLocation?.formattedAddress || null,
+        lat: dropoffLat ?? null,
+        lng: dropoffLng ?? null,
+      };
+    })(),
     products,
     // itemsCount = number of items in the order (sum of quantities) — the
     // "Items" column. The three money fields are distinct:

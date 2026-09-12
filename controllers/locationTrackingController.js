@@ -10,6 +10,14 @@ const { ThrowError } = require("../Helpers/Helpers");
 const redisClient = require("../config/redisClient");
 const mapboxService = require("../services/mapboxService");
 
+// Rider is considered off-route when more than this many metres from the
+// nearest polyline vertex. Tune to taste — 50 m works well in urban areas.
+const DEVIATION_THRESHOLD_METERS = 50;
+
+// How long to cache an order's pickup + dropoff coords in Redis.
+// These never change once an order is placed, so a long TTL is safe.
+const ORDER_COORDS_TTL = 86_400; // 24 hours in seconds
+
 /**
  * @function updateLocation
  * @description Update delivery agent's current location
@@ -115,6 +123,14 @@ const updateLocation = asyncHandler(async (req, res) => {
     // Check geofences
     await checkGeofences(tracking, latitude, longitude);
 
+    // ── ETA refresh + deviation-triggered reroute ─────────────────────────
+    // Non-blocking: a failure here must never break the location ping itself.
+    const { etaSeconds, etaText, rerouted, route: newRoute } =
+      await refreshEtaAndRoute(tracking, latitude, longitude).catch((err) => {
+        console.warn("[updateLocation] ETA/reroute error:", err.message);
+        return {};
+      });
+
     // Cache location for real-time updates
     await redisClient.setex(
       `location:${_id}:${orderId}`,
@@ -125,16 +141,22 @@ const updateLocation = asyncHandler(async (req, res) => {
         address,
         timestamp: new Date(),
         status: tracking.status,
+        etaSeconds: etaSeconds ?? null,
       }),
     );
 
-    // Publish location update to WebSocket clients
+    // Publish location update to WebSocket clients.
+    // Includes ETA on every ping; includes new route polyline when rerouted.
     await publishLocationUpdate(_id, orderId, {
       latitude,
       longitude,
       address,
       status: tracking.status,
       timestamp: new Date(),
+      etaSeconds: etaSeconds ?? null,
+      etaText: etaText ?? null,
+      rerouted: rerouted ?? false,
+      ...(newRoute ? { route: newRoute } : {}),
     });
 
     res.json({
@@ -149,6 +171,12 @@ const updateLocation = asyncHandler(async (req, res) => {
           timestamp: new Date(),
         },
         status: tracking.status,
+        eta: {
+          seconds: etaSeconds ?? null,
+          text: etaText ?? null,
+        },
+        rerouted: rerouted ?? false,
+        ...(newRoute ? { route: newRoute } : {}),
       },
     });
   } catch (error) {
@@ -476,7 +504,7 @@ const updateDeliveryStatus = asyncHandler(async (req, res) => {
     if (status === "delivered") {
       await Order.findByIdAndUpdate(orderId, {
         deliveryStatus: "delivered",
-        orderStatus: "Filled",
+        orderStatus: "delivered",
         actualDeliveryTime: new Date(),
       });
 
@@ -648,6 +676,200 @@ async function publishLocationUpdate(deliveryAgentId, orderId, locationData) {
   } catch (error) {
     console.log("WebSocket publish error:", error.message);
   }
+}
+
+// ─── ETA + Rerouting Helpers ────────────────────────────────────────────────
+
+/**
+ * Decode a precision-5 encoded polyline string into [[lat, lng], ...] pairs.
+ * Mapbox uses the same format as Google (standard polyline encoding at 1e-5).
+ */
+function decodePolyline(encoded) {
+  const points = [];
+  let index = 0, lat = 0, lng = 0;
+  while (index < encoded.length) {
+    let shift = 0, result = 0, byte;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    lat += result & 1 ? ~(result >> 1) : result >> 1;
+
+    shift = 0; result = 0;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    lng += result & 1 ? ~(result >> 1) : result >> 1;
+
+    points.push([lat / 1e5, lng / 1e5]);
+  }
+  return points;
+}
+
+/**
+ * Haversine distance between two lat/lng points, in metres.
+ */
+function haversineMeters(lat1, lng1, lat2, lng2) {
+  const R = 6_371_000;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/**
+ * Minimum distance (metres) from (lat, lng) to any vertex in a decoded polyline.
+ */
+function minDistToPolyline(lat, lng, polylinePoints) {
+  let min = Infinity;
+  for (const [pLat, pLng] of polylinePoints) {
+    const d = haversineMeters(lat, lng, pLat, pLng);
+    if (d < min) min = d;
+  }
+  return min;
+}
+
+/**
+ * Fetch (and Redis-cache) the pickup + dropoff coordinates for an order so
+ * every location ping avoids a full Mongo populate.
+ * Dropoff = order.deliveryLocation GeoJSON; pickup = first store with a location.
+ * Either coord may be null if the order was saved without geocoding.
+ */
+async function getOrderCoords(orderId) {
+  const cacheKey = `order_coords:${orderId}`;
+  try {
+    const cached = await redisClient.get(cacheKey);
+    if (cached) return JSON.parse(cached);
+  } catch (_) {}
+
+  const order = await Order.findById(orderId)
+    .populate("products.store", "address location")
+    .select("deliveryAddress deliveryLocation products");
+
+  if (!order) return null;
+
+  let dropoffLat = null, dropoffLng = null;
+  if (order.deliveryLocation?.coordinates?.length === 2) {
+    [dropoffLng, dropoffLat] = order.deliveryLocation.coordinates; // GeoJSON: [lng, lat]
+  }
+
+  let pickupLat = null, pickupLng = null;
+  for (const line of order.products || []) {
+    const store = line.store && typeof line.store === "object" ? line.store : null;
+    if (store?.location?.coordinates?.length === 2) {
+      [pickupLng, pickupLat] = store.location.coordinates;
+      break;
+    }
+  }
+
+  const coords = { pickupLat, pickupLng, dropoffLat, dropoffLng };
+  try {
+    await redisClient.setex(cacheKey, ORDER_COORDS_TTL, JSON.stringify(coords));
+  } catch (_) {}
+  return coords;
+}
+
+/**
+ * Called after every successful location ping.
+ *
+ * Step 1 — ETA refresh: calls the Mapbox Matrix API (one cheap REST call)
+ *   from the rider's current position to the dropoff. Returns fresh
+ *   etaSeconds + etaText on every ping so the frontend clock stays accurate.
+ *
+ * Step 2 — Deviation detection: decodes the stored route polyline and finds
+ *   the minimum distance from the rider's current position to any polyline
+ *   vertex. If the rider is within DEVIATION_THRESHOLD_METERS, we're done.
+ *
+ * Step 3 — Reroute: if the rider is outside the threshold (or no route is
+ *   stored yet), calls getDirections from the rider's current position.
+ *   If the order is still in "assigned" status (not yet picked up) the store
+ *   is inserted as a waypoint. The new route is persisted on the tracking
+ *   record and returned with rerouted: true so the frontend can swap its
+ *   displayed polyline immediately via the WebSocket payload.
+ *
+ * Never throws — all errors are caught and logged; callers receive {}.
+ */
+async function refreshEtaAndRoute(tracking, riderLat, riderLng) {
+  const result = { etaSeconds: null, etaText: null, rerouted: false, route: null };
+
+  const coords = await getOrderCoords(tracking.order.toString());
+  if (!coords || coords.dropoffLat == null || coords.dropoffLng == null) {
+    return result; // no dropoff coords — nothing to compute
+  }
+
+  // ── 1. Fresh ETA ─────────────────────────────────────────────────────────
+  const matrix = await mapboxService.getDistanceMatrix(
+    { lat: riderLat, lng: riderLng },
+    { lat: coords.dropoffLat, lng: coords.dropoffLng },
+  );
+  if (matrix) {
+    result.etaSeconds = matrix.durationSeconds;
+    result.etaText = matrix.durationText;
+  }
+
+  // ── 2. Deviation detection ───────────────────────────────────────────────
+  const storedPolyline = tracking.route?.optimizedRoute?.polyline;
+  if (storedPolyline) {
+    try {
+      const points = decodePolyline(storedPolyline);
+      const offRoute = minDistToPolyline(riderLat, riderLng, points);
+      if (offRoute <= DEVIATION_THRESHOLD_METERS) return result; // on route — done
+      console.log(
+        `[reroute] Rider is ${Math.round(offRoute)}m off route — recalculating`,
+      );
+    } catch (_) {
+      // corrupt or missing polyline — fall through to reroute
+    }
+  }
+
+  // ── 3. Reroute ───────────────────────────────────────────────────────────
+  const waypoints = [];
+  if (
+    coords.pickupLat != null &&
+    coords.pickupLng != null &&
+    tracking.status === "assigned" // still needs to pick up
+  ) {
+    waypoints.push({ lat: coords.pickupLat, lng: coords.pickupLng });
+  }
+
+  const newRoute = await mapboxService.getDirections(
+    { lat: riderLat, lng: riderLng },
+    { lat: coords.dropoffLat, lng: coords.dropoffLng },
+    waypoints,
+  );
+
+  if (!newRoute) return result; // Mapbox unavailable — return matrix ETA as-is
+
+  const estimatedArrival = new Date(Date.now() + newRoute.duration * 1000);
+  result.rerouted = true;
+  result.etaSeconds = newRoute.duration; // directions is more accurate than matrix
+  result.etaText = null;
+  result.route = {
+    polyline: newRoute.polyline,
+    distance: newRoute.distance,
+    duration: newRoute.duration,
+    steps: newRoute.steps,
+    estimatedArrival,
+  };
+
+  // Persist the recalculated route so future pings use the new baseline polyline
+  await LocationTracking.findByIdAndUpdate(tracking._id, {
+    "route.optimizedRoute": {
+      polyline: newRoute.polyline,
+      distance: newRoute.distance,
+      duration: newRoute.duration,
+      steps: newRoute.steps,
+    },
+    "route.estimatedArrival": estimatedArrival,
+  });
+
+  return result;
 }
 
 module.exports = {

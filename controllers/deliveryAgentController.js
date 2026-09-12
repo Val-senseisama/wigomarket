@@ -829,6 +829,86 @@ const getDeliveryCounts = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * @function getActiveOrder
+ * @description Returns the single order the authenticated rider currently has
+ *              in-flight — any order in assigned / picked_up / in_transit state.
+ *              Used by the tracking screen on mount so it can display route,
+ *              pickup, and dropoff coordinates without the rider having to pass
+ *              an orderId. Returns null when the rider has no active order.
+ * @route GET /api/delivery-agent/orders/active
+ */
+const getActiveOrder = asyncHandler(async (req, res) => {
+  const { _id } = req.user;
+
+  if (!req.userRoles.includes("dispatch")) {
+    return res.status(403).json({
+      success: false,
+      message: "Access denied. Only delivery agents can view orders.",
+    });
+  }
+
+  const order = await populateDeliveryOrder(
+    Order.findOne({
+      deliveryAgent: _id,
+      deliveryMethod: "delivery_agent",
+      deliveryStatus: { $in: ["assigned", "picked_up", "in_transit"] },
+    }),
+  );
+
+  res.json({
+    success: true,
+    data: { order: order ? serializeDeliveryOrder(order) : null },
+  });
+});
+
+/**
+ * @function getOrderById
+ * @description Fetch a single order by its Mongo ID. The rider may view:
+ *              - Any order in the shared available pool (pending_assignment)
+ *              - Any order that belongs to them (deliveryAgent === _id)
+ *              Used by the tracking screen when the rider already has an orderId
+ *              (e.g. deep-linked from a push notification).
+ * @param {string} req.params.orderId - The order's Mongo _id
+ * @route GET /api/delivery-agent/orders/:orderId
+ */
+const getOrderById = asyncHandler(async (req, res) => {
+  const { _id } = req.user;
+  const { orderId } = req.params;
+
+  if (!req.userRoles.includes("dispatch")) {
+    return res.status(403).json({
+      success: false,
+      message: "Access denied. Only delivery agents can view orders.",
+    });
+  }
+
+  validateMongodbId(orderId);
+
+  const order = await populateDeliveryOrder(
+    Order.findOne({
+      _id: orderId,
+      deliveryMethod: "delivery_agent",
+      $or: [
+        { deliveryAgent: _id },
+        AVAILABLE_POOL_FILTER,
+      ],
+    }),
+  );
+
+  if (!order) {
+    return res.status(404).json({
+      success: false,
+      message: "Order not found or not accessible",
+    });
+  }
+
+  res.json({
+    success: true,
+    data: { order: serializeDeliveryOrder(order) },
+  });
+});
+
 module.exports = {
   getAvailableOrders,
   selectOrder,
@@ -838,4 +918,6 @@ module.exports = {
   getRecentDeliveries,
   getDeliveryCounts,
   updateAvailability,
+  getActiveOrder,
+  getOrderById,
 };

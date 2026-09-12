@@ -14,7 +14,20 @@ const router = express.Router();
  * /api/location/update:
  *   post:
  *     summary: Update delivery agent location
- *     description: Update current location of delivery agent
+ *     description: |
+ *       Push the rider's current GPS position. On every call the server:
+ *       1. Persists the position to `LocationTracking` and the breadcrumb history.
+ *       2. Checks geofences.
+ *       3. Calculates a **fresh ETA** (Mapbox Matrix API: current pos → dropoff).
+ *       4. Runs **deviation detection** — decodes the stored route polyline and
+ *          measures the nearest vertex distance. If the rider is more than 50 m
+ *          off-route (or no route has been calculated yet), a new route is
+ *          requested from Mapbox Directions and the response includes the full
+ *          `route` object with `rerouted: true`.
+ *
+ *       The same payload is broadcast to WebSocket subscribers on the
+ *       `location_updates` Redis channel so the customer tracking screen
+ *       updates in real time.
  *     tags:
  *       - Location Tracking
  *     security:
@@ -33,21 +46,23 @@ const router = express.Router();
  *               latitude:
  *                 type: number
  *                 description: Current latitude
+ *                 example: 6.5244
  *               longitude:
  *                 type: number
  *                 description: Current longitude
+ *                 example: 3.3792
  *               orderId:
  *                 type: string
- *                 description: Order ID being delivered
+ *                 description: Mongo _id of the order being delivered
  *               accuracy:
  *                 type: number
- *                 description: Location accuracy in meters
+ *                 description: GPS accuracy in metres (default 10)
  *               speed:
  *                 type: number
  *                 description: Current speed in km/h
  *               heading:
  *                 type: number
- *                 description: Current heading in degrees
+ *                 description: Current heading in degrees (0–360)
  *     responses:
  *       200:
  *         description: Location updated successfully
@@ -72,6 +87,7 @@ const router = express.Router();
  *                           type: number
  *                         address:
  *                           type: string
+ *                           description: Reverse-geocoded street address
  *                         accuracy:
  *                           type: number
  *                         timestamp:
@@ -79,10 +95,74 @@ const router = express.Router();
  *                           format: date-time
  *                     status:
  *                       type: string
+ *                       description: Current tracking status (e.g. in_transit)
+ *                     eta:
+ *                       type: object
+ *                       description: >
+ *                         Live ETA from the rider's current position to the
+ *                         dropoff, recalculated on every ping.
+ *                       properties:
+ *                         seconds:
+ *                           type: integer
+ *                           nullable: true
+ *                           description: Remaining travel time in seconds
+ *                           example: 480
+ *                         text:
+ *                           type: string
+ *                           nullable: true
+ *                           description: Human-readable ETA (e.g. "8 mins")
+ *                           example: "8 mins"
+ *                     rerouted:
+ *                       type: boolean
+ *                       description: >
+ *                         True when the rider deviated more than 50 m from the
+ *                         stored route and a new route was calculated. The
+ *                         frontend should swap its displayed polyline whenever
+ *                         this is true.
+ *                       example: false
+ *                     route:
+ *                       type: object
+ *                       nullable: true
+ *                       description: >
+ *                         Only present when `rerouted` is true. Contains the
+ *                         recalculated route from the rider's current position.
+ *                       properties:
+ *                         polyline:
+ *                           type: string
+ *                           description: Precision-5 encoded polyline string
+ *                         distance:
+ *                           type: number
+ *                           description: Total route distance in metres
+ *                         duration:
+ *                           type: number
+ *                           description: Total route duration in seconds
+ *                         steps:
+ *                           type: array
+ *                           description: Turn-by-turn instruction steps
+ *                           items:
+ *                             type: object
+ *                             properties:
+ *                               instruction:
+ *                                 type: string
+ *                               distance:
+ *                                 type: number
+ *                               duration:
+ *                                 type: number
+ *                               startLocation:
+ *                                 type: object
+ *                                 properties:
+ *                                   lat:
+ *                                     type: number
+ *                                   lng:
+ *                                     type: number
+ *                         estimatedArrival:
+ *                           type: string
+ *                           format: date-time
+ *                           description: Absolute arrival timestamp
  *       400:
- *         description: Invalid request data
+ *         description: Missing or invalid latitude / longitude / orderId
  *       403:
- *         description: Access denied - delivery agent only
+ *         description: Access denied — delivery agents only
  */
 router.post("/update", authMiddleware, isDispatch, updateLocation);
 

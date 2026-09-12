@@ -8,6 +8,8 @@ const {
   getRecentDeliveries,
   getDeliveryCounts,
   updateAvailability,
+  getActiveOrder,
+  getOrderById,
 } = require("../controllers/deliveryAgentController");
 const {
   createDispatchProfile,
@@ -637,6 +639,70 @@ router.post(
     });
   }),
 );
+
+/**
+ * @swagger
+ * /api/delivery-agent/orders/active:
+ *   get:
+ *     summary: Get the rider's current active order
+ *     description: |
+ *       Returns the single in-flight order the rider has accepted
+ *       (deliveryStatus: assigned | picked_up | in_transit). Returns
+ *       `data.order: null` when the rider has no active order. Used by
+ *       the tracking screen on mount to bootstrap pickup/dropoff coords
+ *       and live route without requiring the caller to know an orderId.
+ *     tags: [Delivery Agent]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Active order (or null)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     order:
+ *                       oneOf:
+ *                         - $ref: '#/components/schemas/DeliveryOrder'
+ *                         - type: 'null'
+ */
+router.get("/orders/active", authMiddleware, isDispatch, getActiveOrder);
+
+/**
+ * @swagger
+ * /api/delivery-agent/orders/{orderId}:
+ *   get:
+ *     summary: Get a single order by ID
+ *     description: |
+ *       Returns a fully-populated delivery order. The rider may fetch:
+ *       - Any order still in the shared available pool (pending_assignment)
+ *       - Any order assigned to them
+ *
+ *       Used by the tracking screen when the rider was deep-linked from a
+ *       push notification that already carries the orderId.
+ *     tags: [Delivery Agent]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Mongo _id of the order
+ *     responses:
+ *       200:
+ *         description: Order found
+ *       404:
+ *         description: Order not found or not accessible
+ */
+router.get("/orders/:orderId", authMiddleware, isDispatch, getOrderById);
 
 // Dispatch Profile Management Routes
 /**
