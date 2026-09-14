@@ -1,5 +1,5 @@
 const asyncHandler = require("express-async-handler");
-const { listOrders } = require("../../services/orderQueryService");
+const { listOrders, OrderQueryError } = require("../../services/orderQueryService");
 
 /**
  * @function listOrders
@@ -10,8 +10,21 @@ const { listOrders } = require("../../services/orderQueryService");
  * orderType, dateFrom, dateTo, search, sortBy, sortOrder, page, limit.
  */
 const listAllOrders = asyncHandler(async (req, res) => {
-  const result = await listOrders({ baseFilter: {}, query: req.query });
-  res.json({ success: true, data: result });
+  try {
+    const result = await listOrders({
+      baseFilter: {},
+      query: req.query,
+      role: "admin",
+    });
+    res.json({ success: true, data: result });
+  } catch (err) {
+    if (err instanceof OrderQueryError) {
+      return res
+        .status(err.statusCode)
+        .json({ success: false, message: err.message });
+    }
+    throw err;
+  }
 });
 
 module.exports = listAllOrders;

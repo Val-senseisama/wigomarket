@@ -123,6 +123,25 @@ const statusMatchValues = (canonical) => [
   ),
 ];
 
+// Case-insensitive lookup from anything a client may send — canonical token
+// ("pickUpReady"), display label ("Pick up Ready") or legacy value
+// ("Processing") — to its canonical state.
+const STATUS_ALIASES = new Map([
+  ...ALL_STATUSES.map((s) => [s.toLowerCase(), s]),
+  ...Object.entries(STATUS_LABELS).map(([s, label]) => [label.toLowerCase(), s]),
+  ...Object.entries(LEGACY_MAP).map(([legacy, s]) => [legacy.toLowerCase(), s]),
+]);
+
+/**
+ * Strictly resolve a client-supplied status to a canonical state.
+ *
+ * Unlike normalizeStatus — which reads stored documents and so maps anything
+ * unknown to "pending" — this returns null for unknown input, so a filter for
+ * a misspelt status fails loudly instead of quietly listing pending orders.
+ */
+const parseStatus = (value) =>
+  STATUS_ALIASES.get(String(value ?? "").trim().toLowerCase()) || null;
+
 const statusLabel = (value) => STATUS_LABELS[normalizeStatus(value)] || "Pending";
 
 const isTerminal = (value) => TERMINAL_STATUSES.includes(normalizeStatus(value));
@@ -161,6 +180,20 @@ const CATEGORY = {
   HISTORY: "history",
 };
 
+// Superseded category names still accepted from older clients.
+const CATEGORY_ALIASES = { recent: CATEGORY.ALL };
+
+/**
+ * Resolve a client-supplied category to a CATEGORY value. Missing → "all";
+ * "recent" → "all" (deprecated alias); anything else unknown → null.
+ */
+const parseCategory = (value) => {
+  if (value == null || value === "") return CATEGORY.ALL;
+  const key = String(value).trim().toLowerCase();
+  if (Object.values(CATEGORY).includes(key)) return key;
+  return CATEGORY_ALIASES[key] || null;
+};
+
 /** Mongo filter fragment for a dashboard category (operates on orderStatus). */
 const categoryFilter = (category) => {
   switch (String(category || CATEGORY.ALL).toLowerCase()) {
@@ -186,6 +219,7 @@ module.exports = {
   TERMINAL_STATUSES,
   ACTIVE_STATUSES,
   normalizeStatus,
+  parseStatus,
   statusMatchValues,
   statusLabel,
   isTerminal,
@@ -194,5 +228,6 @@ module.exports = {
   allowedTransitions,
   findTransition,
   CATEGORY,
+  parseCategory,
   categoryFilter,
 };

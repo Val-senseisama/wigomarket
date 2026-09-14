@@ -54,6 +54,19 @@ const router = express.Router();
  *           type: string
  *           description: Display text for the status pill.
  *           example: "Pick up Ready"
+ *         allowedActions:
+ *           type: array
+ *           description: |
+ *             Statuses the viewer may move this order to right now — render
+ *             exactly these in the row's "Update Status" menu, then call
+ *             `PUT /api/store/orders/{id}/status` with the chosen `status`.
+ *             Identical to `allowedActions` on the order detail; empty when no
+ *             transition is available (e.g. delivered or cancelled).
+ *           items:
+ *             type: object
+ *             properties:
+ *               status: { type: string, example: "pickUpReady" }
+ *               label: { type: string, example: "Pick up Ready" }
  *         raw:
  *           type: object
  *           description: Underlying document fields, for detail views and overrides.
@@ -385,19 +398,46 @@ router.get("/analytics", authMiddleware, isSeller, getBusinessAnalytics);
  *     description: |
  *       Returns orders containing at least one product from the seller's store,
  *       shaped for the order-management dashboard table. Supports category tabs
- *       (recent / ongoing / history), status & order-type filters, date range,
- *       search by order number or customer name, sorting, and pagination.
+ *       (all / pending / ongoing / history), a multi-select status filter, an
+ *       order-type filter, date range, search by order number or customer name,
+ *       sorting, and pagination.
+ *
+ *       Each row carries `allowedActions`, so the table's "Update Status" menu
+ *       needs no extra call to the order detail.
  *     tags: [Stores]
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: query
  *         name: category
- *         schema: { type: string, enum: [recent, ongoing, history], default: recent }
+ *         schema: { type: string, enum: [all, pending, ongoing, history], default: all }
+ *         description: |
+ *           Tab filter. Values match the keys of `counts`:
+ *           - `all` — every order
+ *           - `pending` — awaiting confirmation (a subset of `ongoing`)
+ *           - `ongoing` — every order not yet delivered or cancelled, including pending
+ *           - `history` — delivered or cancelled
+ *
+ *           `recent` is still accepted as a deprecated alias of `all`.
+ *           Unknown values return 400.
  *       - in: query
  *         name: status
- *         schema: { type: string }
- *         description: "Display status: Pending, Confirmed, Preparing, Pick up Ready, In Transit, Delivered, Cancelled"
+ *         style: form
+ *         explode: true
+ *         schema:
+ *           type: array
+ *           items:
+ *             type: string
+ *             enum: [pending, confirmed, preparing, pickUpReady, inTransit, delivered, cancelled]
+ *         description: |
+ *           One or more statuses; an order matches if it has **any** of them.
+ *           Combined with the other filters (including `category`) using AND.
+ *
+ *           Repeat the key (`?status=pending&status=confirmed`) or
+ *           comma-separate (`?status=pending,confirmed`). Send the canonical
+ *           tokens above; display labels (`Pick up Ready`) and legacy values
+ *           are also accepted. Unknown values return 400 rather than being
+ *           silently ignored.
  *       - in: query
  *         name: orderType
  *         schema: { type: string, enum: ["Pick up", "Delivery"] }
@@ -442,8 +482,10 @@ router.get("/analytics", authMiddleware, isSeller, getBusinessAnalytics);
  *                     counts:
  *                       type: object
  *                       description: >
- *                         Tab totals, scoped to the store but ignoring the other
- *                         filters — so each tab shows its true total.
+ *                         Tab totals, keyed by the `category` values. Scoped to
+ *                         the store but ignoring the other filters, so each tab
+ *                         shows its true total. `all` = `ongoing` + `history`;
+ *                         `pending` is a subset of `ongoing`.
  *                       properties:
  *                         all: { type: integer }
  *                         pending: { type: integer }
@@ -467,6 +509,9 @@ router.get("/analytics", authMiddleware, isSeller, getBusinessAnalytics);
  *                     deliveryType: "Delivery"
  *                     status: "preparing"
  *                     statusLabel: "Preparing"
+ *                     allowedActions:
+ *                       - { status: "pickUpReady", label: "Pick up Ready" }
+ *                       - { status: "cancelled", label: "Cancelled" }
  *                     raw:
  *                       orderStatus: "preparing"
  *                       deliveryStatus: "pending_assignment"
@@ -486,6 +531,7 @@ router.get("/analytics", authMiddleware, isSeller, getBusinessAnalytics);
  *                     deliveryType: "Pick up"
  *                     status: "delivered"
  *                     statusLabel: "Delivered"
+ *                     allowedActions: []
  *                     raw:
  *                       orderStatus: "delivered"
  *                       deliveryStatus: "delivered"
@@ -498,6 +544,8 @@ router.get("/analytics", authMiddleware, isSeller, getBusinessAnalytics);
  *                   pages: 5
  *                   hasMore: true
  *                 counts: { all: 42, pending: 4, ongoing: 11, history: 31 }
+ *       400:
+ *         description: Unknown `category` or `status` value
  *       404:
  *         description: No store found for this account
  */

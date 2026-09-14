@@ -427,16 +427,22 @@ router.put("/stores/:id/status", admin.setStoreStatus);
  *   get:
  *     summary: List all orders across stores (paginated, filterable)
  *     description: |
- *       Platform-wide order list for the admin dashboard. Same query contract as
- *       the seller order list: category (recent/ongoing/history), status,
+ *       Platform-wide order list for the admin dashboard. Same query contract
+ *       and response shape as `GET /api/store/orders`: category
+ *       (all/pending/ongoing/history, `recent` = all), multi-value status,
  *       orderType, dateFrom, dateTo, search (order number or customer name),
  *       sortBy, sortOrder, page, limit.
+ *
+ *       Each row's `allowedActions` reflects admin override power, so it can
+ *       include transitions a seller or rider could not perform.
  *     tags: [Admin]
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: Paginated list of order rows with category counts
+ *       400:
+ *         description: Unknown `category` or `status` value
  */
 router.get("/orders", admin.listOrders);
 

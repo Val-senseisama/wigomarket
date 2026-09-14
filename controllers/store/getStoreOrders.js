@@ -1,5 +1,5 @@
 const asyncHandler = require("express-async-handler");
-const { listOrders } = require("../../services/orderQueryService");
+const { listOrders, OrderQueryError } = require("../../services/orderQueryService");
 
 /**
  * @function getStoreOrders
@@ -8,8 +8,12 @@ const { listOrders } = require("../../services/orderQueryService");
  * @access Seller only (isSeller sets req.store)
  *
  * Query params (all optional):
- *   category  — recent | ongoing | history   (default recent)
- *   status    — display status (Pending, Confirmed, Preparing, Pick up Ready, In Transit, Delivered, Cancelled)
+ *   category  — all | pending | ongoing | history   (default all; matches the
+ *               keys of `counts`. "recent" is a deprecated alias of all)
+ *   status    — one or more statuses: repeat the key (?status=pending&status=confirmed)
+ *               or comma-separate (?status=pending,confirmed). Canonical tokens
+ *               (pickUpReady), display labels (Pick up Ready) or legacy values.
+ *               Unknown values → 400.
  *   orderType — "Pick up" | "Delivery"
  *   dateFrom  — ISO date (inclusive lower bound on order date)
  *   dateTo    — ISO date (inclusive upper bound on order date)
@@ -27,12 +31,22 @@ const getStoreOrders = asyncHandler(async (req, res) => {
     });
   }
 
-  const result = await listOrders({
-    baseFilter: { "products.store": req.store },
-    query: req.query,
-  });
-
-  res.json({ success: true, data: result });
+  try {
+    const result = await listOrders({
+      baseFilter: { "products.store": req.store },
+      query: req.query,
+      // Each row carries allowedActions for the table's "Update Status" menu.
+      role: "seller",
+    });
+    res.json({ success: true, data: result });
+  } catch (err) {
+    if (err instanceof OrderQueryError) {
+      return res
+        .status(err.statusCode)
+        .json({ success: false, message: err.message });
+    }
+    throw err;
+  }
 });
 
 module.exports = getStoreOrders;

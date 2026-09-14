@@ -32,11 +32,30 @@ const customerName = (orderedBy) => {
 };
 
 /**
+ * Status transitions the given viewer may perform on the order right now, as
+ * { status, label } pairs. Empty when no role is given. Shared by the list row
+ * and the detail view so the two can never disagree.
+ */
+const allowedActionsFor = (order, role) =>
+  role
+    ? allowedTransitions(order.orderStatus, role, order.deliveryMethod).map(
+        (status) => ({ status, label: statusLabel(status) }),
+      )
+    : [];
+
+/**
  * Flatten an order document into the row shape the dashboard table consumes.
  * The orderedBy ref must be populated (at least fullName/email/mobile) for the
  * customer column to be useful.
+ *
+ * @param {Object} order
+ * @param {Object} [options]
+ * @param {string} [options.role] Viewer role (seller | admin). When given, the
+ *   row carries `allowedActions` — the same list the detail endpoint returns —
+ *   so the table's "Update Status" menu needs no per-row detail fetch. It is
+ *   derived from fields already on the row, so it costs no extra query.
  */
-const serializeOrderSummary = (order) => ({
+const serializeOrderSummary = (order, { role } = {}) => ({
   id: order._id,
   orderNumber: formatOrderNumber(order),
   orderDate: order.createdAt,
@@ -53,6 +72,7 @@ const serializeOrderSummary = (order) => ({
   // Canonical lifecycle token (e.g. "pickUpReady") plus a display label.
   status: normalizeStatus(order.orderStatus),
   statusLabel: statusLabel(order.orderStatus),
+  allowedActions: allowedActionsFor(order, role),
   // Raw fields kept so the frontend can drive detail views / overrides.
   raw: {
     orderStatus: order.orderStatus,
@@ -181,11 +201,7 @@ const serializeOrderDetail = (order, { role } = {}) => {
       : null;
 
   // Next statuses this viewer can move the order to (empty when no role given).
-  const allowedActions = role
-    ? allowedTransitions(order.orderStatus, role, order.deliveryMethod).map(
-        (status) => ({ status, label: statusLabel(status) }),
-      )
-    : [];
+  const allowedActions = allowedActionsFor(order, role);
 
   return {
     id: order._id,

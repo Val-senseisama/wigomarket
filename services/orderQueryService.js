@@ -6,11 +6,22 @@ const {
   ALL_STATUSES,
   ACTIVE_STATUSES,
   TERMINAL_STATUSES,
-  normalizeStatus,
+  parseStatus,
+  statusMatchValues,
   CATEGORY,
+  parseCategory,
   categoryFilter,
 } = require("../utils/orderStatus");
 const { serializeOrderSummary, serializeOrderDetail } = require("../utils/orderSerializer");
+
+/** A client-supplied query value the list cannot honour — surfaced as a 400. */
+class OrderQueryError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "OrderQueryError";
+    this.statusCode = 400;
+  }
+}
 
 // Map the UI "Order Type" dropdown to a deliveryMethod query.
 const orderTypeFilter = (orderType) => {
@@ -25,12 +36,31 @@ const orderTypeFilter = (orderType) => {
   return {};
 };
 
-// Filter by a specific canonical status. Accepts a token (e.g. "pickUpReady")
-// or a legacy value, normalising either to a canonical state.
+// Filter by one or more statuses, for the UI's multi-select. Accepts every
+// shape a multi-select can arrive in:
+//   ?status=pending&status=confirmed      (repeated key → array)
+//   ?status[]=pending&status[]=confirmed
+//   ?status=pending,confirmed             (comma-separated)
+// Each value may be a canonical token, a display label or a legacy value.
+// Selected statuses are OR-ed together, then AND-ed with the other filters.
 const statusFilter = (status) => {
-  if (!status) return {};
-  const normalized = normalizeStatus(status);
-  return ALL_STATUSES.includes(normalized) ? { orderStatus: normalized } : {};
+  if (status == null || status === "") return {};
+  const values = (Array.isArray(status) ? status : [status])
+    .flatMap((v) => String(v).split(","))
+    .map((v) => v.trim())
+    .filter(Boolean);
+  if (!values.length) return {};
+
+  const unknown = values.filter((v) => !parseStatus(v));
+  if (unknown.length) {
+    throw new OrderQueryError(
+      `Invalid status: ${unknown.join(", ")}. Must be one of: ${ALL_STATUSES.join(", ")}`,
+    );
+  }
+
+  const canonical = [...new Set(values.map(parseStatus))];
+  // statusMatchValues folds in legacy spellings still stored on old documents.
+  return { orderStatus: { $in: canonical.flatMap(statusMatchValues) } };
 };
 
 // Inclusive date range on createdAt.
@@ -80,19 +110,28 @@ const scopedCount = (baseFilter, fragment) => {
  *
  * @param {Object} opts
  * @param {Object} [opts.baseFilter={}] Scope filter (e.g. seller's store) applied to every query.
- * @param {Object} opts.query           Raw req.query: category (all|pending|ongoing|history),
- *                                       status, orderType, dateFrom, dateTo, search, sortBy,
- *                                       sortOrder, page, limit.
+ * @param {Object} opts.query           Raw req.query: category (all|pending|ongoing|history,
+ *                                       "recent" = all), status (one or many), orderType,
+ *                                       dateFrom, dateTo, search, sortBy, sortOrder, page, limit.
+ * @param {string} [opts.role]          Viewer role; when given each row carries allowedActions.
  * @returns {Promise<{orders: Object[], pagination: Object, counts: Object}>}
+ * @throws {OrderQueryError} On an unknown category or status.
  */
-const listOrders = async ({ baseFilter = {}, query = {} }) => {
+const listOrders = async ({ baseFilter = {}, query = {}, role }) => {
+  const category = parseCategory(query.category);
+  if (!category) {
+    throw new OrderQueryError(
+      `Invalid category: ${query.category}. Must be one of: ${Object.values(CATEGORY).join(", ")}`,
+    );
+  }
+
   const page = Math.max(1, parseInt(query.page, 10) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(query.limit, 10) || 10));
   const skip = (page - 1) * limit;
 
   const fragments = [
     baseFilter,
-    categoryFilter(query.category),
+    categoryFilter(category),
     statusFilter(query.status),
     orderTypeFilter(query.orderType),
     dateFilter(query.dateFrom, query.dateTo),
@@ -110,6 +149,8 @@ const listOrders = async ({ baseFilter = {}, query = {} }) => {
       .lean(),
     Order.countDocuments(filter),
     // Tab counts are scoped to baseFilter only so each tab shows its true total.
+    // Keys match the `category` values: all = ongoing + history, and pending
+    // (not yet confirmed) is a subset of ongoing.
     scopedCount(baseFilter, {}),
     scopedCount(baseFilter, { orderStatus: STATUS.PENDING }),
     scopedCount(baseFilter, { orderStatus: { $in: ACTIVE_STATUSES } }),
@@ -117,7 +158,7 @@ const listOrders = async ({ baseFilter = {}, query = {} }) => {
   ]);
 
   return {
-    orders: orders.map(serializeOrderSummary),
+    orders: orders.map((order) => serializeOrderSummary(order, { role })),
     pagination: {
       total,
       page,
@@ -146,4 +187,4 @@ const getOrderDetail = async (orderId, baseFilter = {}, options = {}) => {
   return order ? serializeOrderDetail(order, options) : null;
 };
 
-module.exports = { listOrders, getOrderDetail, CATEGORY };
+module.exports = { listOrders, getOrderDetail, CATEGORY, OrderQueryError };
