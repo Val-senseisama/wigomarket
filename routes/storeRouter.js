@@ -841,11 +841,57 @@ router.get("/orders/:id", authMiddleware, isSeller, getStoreOrderDetail);
  *           shape. Re-fetch `GET /api/store/orders/{id}` to refresh the screen —
  *           in particular to get the new `allowedActions` for the next button.
  *       400:
- *         description: Missing/invalid status value
+ *         description: |
+ *           `status` missing, or not one of the canonical status tokens.
+ *           Body: `{ success: false, message }`.
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/Error' }
+ *             examples:
+ *               missing:
+ *                 value: { success: false, message: "status is required" }
+ *               invalid:
+ *                 value: { success: false, message: "Invalid status value: 'shipped'" }
  *       403:
- *         description: Order does not belong to this seller's store
+ *         description: |
+ *           The order does not contain a product from this seller's store.
+ *           Body: `{ success: false, message }`.
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/Error' }
+ *             example: { success: false, message: "This order does not belong to your store" }
+ *       404:
+ *         description: |
+ *           The account has no store. Body: `{ success: false, message }`.
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/Error' }
+ *             example: { success: false, message: "No store found for this account" }
+ *       409:
+ *         description: |
+ *           The order is already in the requested status (e.g. a double-click).
+ *           Safe to treat as success and re-fetch. Body: `{ success: false, message }`.
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/Error' }
+ *             example: { success: false, message: "Order is already 'confirmed'" }
  *       422:
- *         description: Illegal or role-forbidden transition
+ *         description: |
+ *           The state machine rejected the transition — it is not allowed from
+ *           the order's current status for a seller (e.g. the order moved on
+ *           since the menu was rendered). The attempt is audit-logged.
+ *
+ *           Body: `{ success: false, message }`. The `message` is
+ *           developer-oriented: it quotes raw status tokens and the role, and
+ *           lists the statuses allowed from the current state. It is not
+ *           written for end users. Re-fetch the order to refresh
+ *           `allowedActions`.
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/Error' }
+ *             example:
+ *               success: false
+ *               message: "Illegal transition 'delivered' → 'cancelled' for role 'seller'. Allowed from 'delivered': none"
  */
 router.put("/orders/:id/status", authMiddleware, isSeller, updateOrderStatus);
 
