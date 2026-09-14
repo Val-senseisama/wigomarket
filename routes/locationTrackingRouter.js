@@ -18,16 +18,25 @@ const router = express.Router();
  *       Push the rider's current GPS position. On every call the server:
  *       1. Persists the position to `LocationTracking` and the breadcrumb history.
  *       2. Checks geofences.
- *       3. Calculates a **fresh ETA** (Mapbox Matrix API: current pos → dropoff).
- *       4. Runs **deviation detection** — decodes the stored route polyline and
- *          measures the nearest vertex distance. If the rider is more than 50 m
- *          off-route (or no route has been calculated yet), a new route is
- *          requested from Mapbox Directions and the response includes the full
- *          `route` object with `rerouted: true`.
+ *       3. Calculates a **fresh ETA to the dropoff**. While the order's
+ *          `deliveryStatus` is still `assigned` (not yet picked up), the ETA
+ *          goes rider → store → dropoff and `nextStop` is `pickup`. Once the
+ *          rider sends `picked_up` to `PUT /api/delivery-agent/orders/status`,
+ *          it is measured rider → dropoff and `nextStop` is `dropoff`.
+ *       4. Runs **deviation detection** — measures the distance from the rider
+ *          to the nearest point on the stored route line. The rider is
+ *          off-route beyond 50 m plus the reported GPS `accuracy` (the
+ *          accuracy allowance is capped at 50 m). When off-route, or when no
+ *          route exists yet, Mapbox Directions plans a new route (through the
+ *          store only while pickup is still pending) and the response carries
+ *          it as `route` with `rerouted: true`.
  *
- *       The same payload is broadcast to WebSocket subscribers on the
- *       `location_updates` Redis channel so the customer tracking screen
- *       updates in real time.
+ *       The same fields are broadcast to WebSocket subscribers of the order,
+ *       nested under the message's `location` object, with the position as
+ *       `location.latitude` / `location.longitude`.
+ *
+ *       Send roughly every 10 s while the rider is moving; every ping makes
+ *       billed Mapbox calls.
  *     tags:
  *       - Location Tracking
  *     security:
@@ -99,8 +108,11 @@ const router = express.Router();
  *                     eta:
  *                       type: object
  *                       description: >
- *                         Live ETA from the rider's current position to the
- *                         dropoff, recalculated on every ping.
+ *                         Live ETA to the dropoff, recalculated on every ping —
+ *                         via the store while `nextStop` is `pickup`. Both
+ *                         fields are null when the order has no dropoff
+ *                         coordinates or Mapbox failed on this ping; clients
+ *                         should keep the last value shown.
  *                       properties:
  *                         seconds:
  *                           type: integer
@@ -112,11 +124,22 @@ const router = express.Router();
  *                           nullable: true
  *                           description: Human-readable ETA (e.g. "8 mins")
  *                           example: "8 mins"
+ *                     nextStop:
+ *                       type: string
+ *                       nullable: true
+ *                       enum: [pickup, dropoff]
+ *                       description: >
+ *                         Where the rider is heading now. `pickup` until the
+ *                         order's deliveryStatus leaves `assigned`, then
+ *                         `dropoff`. Null only when the order has no dropoff
+ *                         coordinates.
+ *                       example: dropoff
  *                     rerouted:
  *                       type: boolean
  *                       description: >
- *                         True when the rider deviated more than 50 m from the
- *                         stored route and a new route was calculated. The
+ *                         True when the rider left the stored route (50 m plus
+ *                         GPS accuracy, capped at 50 m extra) or no route
+ *                         existed yet, and a new one was calculated. The
  *                         frontend should swap its displayed polyline whenever
  *                         this is true.
  *                       example: false
@@ -360,8 +383,28 @@ router.get("/history/:orderId", authMiddleware, getTrackingHistory);
  * @swagger
  * /api/location/status:
  *   put:
- *     summary: Update delivery status
- *     description: Update delivery status and location
+ *     summary: Update the live-tracking record's status (NOT the order status)
+ *     description: |
+ *       Updates the **tracking record** that backs the live map — the journey
+ *       state the rider is in — and optionally stamps their current position.
+ *
+ *       This is **not** the order lifecycle, and does not duplicate
+ *       `PUT /api/delivery-agent/orders/status`. The two write different
+ *       collections with non-overlapping vocabularies:
+ *
+ *       | | this endpoint | `/delivery-agent/orders/status` |
+ *       |---|---|---|
+ *       | writes | `LocationTracking` | `Order` |
+ *       | statuses | `assigned, en_route, arrived, cancelled` | `assigned, picked_up, in_transit, failed` |
+ *
+ *       **`delivered` is not accepted here.** Marking an order delivered is
+ *       owned exclusively by the dual-confirm flow
+ *       (`POST /api/delivery-agent/orders/confirm-delivery` for the rider,
+ *       `POST /api/order/confirm-delivery` for the customer), which is the only
+ *       path that credits the rider's wallet. Sending `delivered` returns 400.
+ *
+ *       Requires an active tracking record for the order (created by
+ *       `POST /api/location/update`); returns 404 otherwise.
  *     tags:
  *       - Location Tracking
  *     security:
@@ -381,14 +424,16 @@ router.get("/history/:orderId", authMiddleware, getTrackingHistory);
  *                 description: Order ID
  *               status:
  *                 type: string
- *                 enum: [assigned, en_route, arrived, delivered, cancelled]
- *                 description: New delivery status
+ *                 enum: [assigned, en_route, arrived, cancelled]
+ *                 description: >
+ *                   New tracking status. `delivered` is rejected with 400 — use
+ *                   the confirm-delivery flow instead.
  *               latitude:
  *                 type: number
- *                 description: Current latitude (optional)
+ *                 description: Current latitude (optional; sent with longitude to stamp position)
  *               longitude:
  *                 type: number
- *                 description: Current longitude (optional)
+ *                 description: Current longitude (optional; sent with latitude to stamp position)
  *     responses:
  *       200:
  *         description: Status updated successfully
@@ -412,9 +457,9 @@ router.get("/history/:orderId", authMiddleware, getTrackingHistory);
  *                     location:
  *                       type: object
  *       400:
- *         description: Invalid request or status
+ *         description: Missing orderId/status, or an invalid status (including `delivered`)
  *       404:
- *         description: Tracking record not found
+ *         description: No active tracking record for this order and rider
  */
 router.put("/status", authMiddleware, isDispatch, updateDeliveryStatus);
 

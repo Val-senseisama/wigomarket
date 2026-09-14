@@ -236,6 +236,23 @@ const customerPhone = (orderedBy) =>
   (orderedBy && typeof orderedBy === "object" && orderedBy.mobile) || null;
 
 /**
+ * Unpack a GeoJSON point into { lat, lng }. Coordinates are stored as
+ * [longitude, latitude], and the pair is all-or-nothing: anything that isn't
+ * exactly two numbers yields two nulls rather than a half-populated point a
+ * client might hand to a directions API. Mirrors the `length === 2` guard
+ * getOrderCoords uses on the tracking path.
+ */
+const pointToLatLng = (geo) => {
+  const coords = geo?.coordinates;
+  if (!Array.isArray(coords) || coords.length !== 2) return { lat: null, lng: null };
+  const [lng, lat] = coords;
+  if (typeof lat !== "number" || typeof lng !== "number") {
+    return { lat: null, lng: null };
+  }
+  return { lat, lng };
+};
+
+/**
  * Build the list of pickup locations for an order. A rider order is usually a
  * single store, but multi-store orders are supported: stores are de-duplicated
  * by id. Requires products.store to be populated (name, address, mobile).
@@ -247,17 +264,41 @@ const buildPickups = (order) => {
     if (!store || !store._id) continue;
     const id = store._id.toString();
     if (seen.has(id)) continue;
-    const [pickupLng, pickupLat] = store.location?.coordinates || [];
+    const { lat, lng } = pointToLatLng(store.location);
     seen.set(id, {
       id: store._id,
       store: store.name || null,
       address: store.address || store.location?.formattedAddress || null,
-      lat: pickupLat ?? null,
-      lng: pickupLng ?? null,
+      lat,
+      lng,
       mobile: store.mobile || null,
     });
   }
   return Array.from(seen.values());
+};
+
+/**
+ * Build the dropoff location for an order — the destination half of the rider's
+ * route, mirroring the shape of a pickup entry so the map layer can treat both
+ * legs identically.
+ *
+ * `lat`/`lng` come from the order's GeoJSON deliveryLocation, which stores
+ * coordinates as [longitude, latitude]. They are null when the order was
+ * created from a typed address that was never geocoded (the buyer passed
+ * neither lat/lng nor a Places placeId); the rider client must fall back to
+ * address-only display in that case rather than assuming a routable point.
+ *
+ * `mobile` is the buyer's phone — who the rider calls on arrival.
+ */
+const buildDropoff = (order) => {
+  const { lat, lng } = pointToLatLng(order.deliveryLocation);
+  return {
+    address:
+      order.deliveryAddress || order.deliveryLocation?.formattedAddress || null,
+    mobile: customerPhone(order.orderedBy),
+    lat,
+    lng,
+  };
 };
 
 /**
@@ -301,14 +342,9 @@ const serializeDeliveryOrder = (order) => {
     // distinct stores for multi-store orders.
     pickup: pickups[0] || null,
     pickups,
-    dropoff: (() => {
-      const [dropoffLng, dropoffLat] = order.deliveryLocation?.coordinates || [];
-      return {
-        address: order.deliveryAddress || order.deliveryLocation?.formattedAddress || null,
-        lat: dropoffLat ?? null,
-        lng: dropoffLng ?? null,
-      };
-    })(),
+    // dropoff mirrors a pickup entry: { address, mobile, lat, lng }. lat/lng
+    // may be null for orders saved without geocoding — see buildDropoff.
+    dropoff: buildDropoff(order),
     products,
     // itemsCount = number of items in the order (sum of quantities) — the
     // "Items" column. The three money fields are distinct:

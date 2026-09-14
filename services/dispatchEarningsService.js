@@ -13,6 +13,7 @@ const mongoose = require("mongoose");
 const Order = require("../models/orderModel");
 const Wallet = require("../models/walletModel");
 const Transaction = require("../models/transactionModel");
+const LocationTracking = require("../models/locationTrackingModel");
 const { MakeID } = require("../Helpers/Helpers");
 const {
   DeliveryStatus,
@@ -151,6 +152,28 @@ async function customerConfirmDelivery(orderId, customerId, actorContext = {}) {
 }
 
 /**
+ * Close out the order's live-tracking record once the delivery is final.
+ *
+ * Deliberately best-effort and outside the money transaction: tracking is
+ * display state, so a failure here must never roll back a credited wallet.
+ * Lives here rather than on the location endpoint because this is the only
+ * place an order actually becomes delivered.
+ */
+async function _deactivateTracking(orderId) {
+  try {
+    await LocationTracking.updateMany(
+      { order: orderId, isActive: true },
+      { isActive: false, status: DeliveryStatus.DELIVERED, lastUpdated: new Date() },
+    );
+  } catch (error) {
+    console.log(
+      `[Dispatch] tracking deactivation failed for order ${orderId}:`,
+      error.message,
+    );
+  }
+}
+
+/**
  * Internal: atomically credit the agent wallet and mark order delivered.
  * Called once both parties have confirmed.
  */
@@ -164,6 +187,7 @@ async function _creditEarnings(order, agentUserId, actorContext = {}) {
       orderStatus: OrderStatus.DELIVERED,
       "deliveryMetadata.deliveredAt": new Date(),
     });
+    await _deactivateTracking(orderId);
     return { credited: false, reason: "zero_fee" };
   }
 
@@ -236,6 +260,8 @@ async function _creditEarnings(order, agentUserId, actorContext = {}) {
   } finally {
     await session.endSession();
   }
+
+  await _deactivateTracking(orderId);
 
   audit.log({
     action: "delivery.completed",

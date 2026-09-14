@@ -277,7 +277,7 @@
   <tbody>
     <tr><td><code>connection</code></td><td><code>message</code>, <code>userId</code>, <code>timestamp</code> — the handshake succeeded</td></tr>
     <tr><td><code>subscribed</code> / <code>unsubscribed</code></td><td><code>orderId</code>, <code>message</code></td></tr>
-    <tr><td><code>location_update</code></td><td><code>deliveryAgentId</code>, <code>orderId</code>, <code>location</code>, <code>timestamp</code> — move the rider marker</td></tr>
+    <tr><td><code>location_update</code></td><td><code>deliveryAgentId</code>, <code>orderId</code>, <code>timestamp</code>, and <code>location</code> — see the table below</td></tr>
     <tr><td><code>pong</code></td><td><code>timestamp</code></td></tr>
     <tr><td><code>error</code></td><td><code>message</code> — malformed or unknown message type</td></tr>
   </tbody>
@@ -292,15 +292,48 @@ ws.sink.add(jsonEncode({'type': 'subscribe_order', 'orderId': orderId}));
 
 ws.stream.listen((raw) {
   final msg = jsonDecode(raw);
-  if (msg['type'] == 'location_update') {
-    final loc = msg['location'];          // { lat, lng } — not GeoJSON
-    controller.moveRider(LatLng(loc['lat'], loc['lng']));
+  if (msg['type'] != 'location_update') return;
+
+  final loc = msg['location'];            // keys are latitude / longitude
+  controller.moveRider(LatLng(loc['latitude'], loc['longitude']));
+
+  // Null means "no fresh value this ping" — keep showing the last ETA.
+  if (loc['etaSeconds'] != null) controller.setEta(loc['etaText']);
+
+  // The rider left the route and the server planned a new one.
+  if (loc['rerouted'] == true &amp;&amp; loc['route'] != null) {
+    controller.replaceRoute(decodePolyline(loc['route']['polyline']));
   }
 });
 
 // keep-alive
 Timer.periodic(const Duration(seconds: 30),
     (_) =&gt; ws.sink.add(jsonEncode({'type': 'ping'})));</code></pre>
+
+<h3>The <code>location</code> payload</h3>
+<div class="scroll">
+<table>
+  <thead><tr><th>Field</th><th>Type</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>latitude</code>, <code>longitude</code></td><td>number</td><td>Rider position. <strong>Not</strong> <code>lat</code>/<code>lng</code>, and not GeoJSON.</td></tr>
+    <tr><td><code>address</code></td><td>string</td><td>Street address of the rider's position</td></tr>
+    <tr><td><code>etaSeconds</code></td><td>number / null</td><td>Seconds until the order reaches the buyer</td></tr>
+    <tr><td><code>etaText</code></td><td>string / null</td><td>The same ETA, formatted, e.g. <code>"18 mins"</code></td></tr>
+    <tr><td><code>nextStop</code></td><td><code>"pickup"</code> / <code>"dropoff"</code> / null</td><td>Where the rider is heading now</td></tr>
+    <tr><td><code>rerouted</code></td><td>boolean</td><td>True when the server just planned a new route</td></tr>
+    <tr><td><code>route</code></td><td>object, only when <code>rerouted</code></td><td><code>polyline</code> (polyline5), <code>distance</code> (m), <code>duration</code> (s), <code>steps</code>, <code>estimatedArrival</code></td></tr>
+    <tr><td><code>status</code>, <code>timestamp</code></td><td>string</td><td>Tracking state and time of the ping</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>ETA and rerouting</h3>
+<p>The server recalculates both on every rider ping, so the client only draws what arrives.</p>
+<ul>
+  <li><strong>ETA is always to the buyer's door.</strong> While <code>nextStop</code> is <code>"pickup"</code> it includes the trip to the store and then on to the buyer. After the rider marks the order picked up, it is measured straight to the buyer.</li>
+  <li><strong><code>etaSeconds</code> can be null</strong> when the order has no delivery coordinates (the buyer typed an address that was never matched to a map location), when the store has no map location and pickup is still pending, or when the maps lookup failed on that ping. Keep the last value you showed rather than blanking it.</li>
+  <li><strong>Rerouting</strong> happens when the rider is more than 50&nbsp;m from the route line, plus the phone's reported GPS accuracy (up to 50&nbsp;m more). When <code>rerouted</code> is true, replace the drawn line with <code>route.polyline</code>. Other pings leave the current line in place.</li>
+</ul>
 
 <div class="note">
   A closed socket is normal on mobile — backgrounding kills it. Reconnect with backoff and <strong>re-send <code>subscribe_order</code></strong>: subscriptions live per socket and are not restored for you. While disconnected, fall back to <code>GET /api/location/current/:orderId</code>.
@@ -325,14 +358,21 @@ Timer.periodic(const Duration(seconds: 30),
 <table>
   <thead><tr><th>Endpoint</th><th>Use</th></tr></thead>
   <tbody>
-    <tr><td><span class="method">POST</span><span class="path">/api/location/update</span></td><td>Push the rider's position (fans out to every subscribed buyer)</td></tr>
-    <tr><td><span class="method">POST</span><span class="path">/api/location/route</span></td><td>Road route between two points, as an encoded polyline</td></tr>
-    <tr><td><span class="method">PUT</span><span class="path">/api/location/status</span></td><td>Advance the delivery status</td></tr>
+    <tr><td><span class="method">GET</span><span class="path">/api/delivery-agent/orders/active</span></td><td>The rider's current order, with <code>pickup</code> and <code>dropoff</code> as <code>{ address, lat, lng, mobile }</code>. Open the tracking screen with this.</td></tr>
+    <tr><td><span class="method">POST</span><span class="path">/api/location/route</span></td><td>First route for the order from the rider's position: through the store until pickup, then straight to the buyer</td></tr>
+    <tr><td><span class="method">POST</span><span class="path">/api/location/update</span></td><td>Push the rider's position. The response carries the same <code>eta</code>, <code>nextStop</code>, <code>rerouted</code> and <code>route</code> as the socket, so the rider app doesn't need to subscribe.</td></tr>
+    <tr><td><span class="method">PUT</span><span class="path">/api/delivery-agent/orders/status</span></td><td>Move the order forward: <code>picked_up</code>, <code>in_transit</code>, <code>failed</code>. Sending <code>picked_up</code> is what changes <code>nextStop</code> to <code>"dropoff"</code>.</td></tr>
+    <tr><td><span class="method">PUT</span><span class="path">/api/location/status</span></td><td>Optional map display state only (<code>en_route</code>, <code>arrived</code>). Does not change the order.</td></tr>
+    <tr><td><span class="method">POST</span><span class="path">/api/delivery-agent/orders/confirm-delivery</span></td><td>Rider's half of completing the delivery. The buyer confirms too (<code>POST /api/order/confirm-delivery</code>); the rider is paid once both have confirmed.</td></tr>
   </tbody>
 </table>
 </div>
 
 <p>The route polyline is <strong>polyline5</strong> encoded — decode it before handing it to the map (<code>flutter_polyline_points</code> or equivalent).</p>
+
+<p><strong>Ping about every 10 seconds while the rider is moving</strong>, and skip pings while they are standing still. Each ping makes paid maps calls on the server, so don't ping more often than every 5 seconds.</p>
+
+<p>No endpoint accepts <code>delivered</code> as a status. Deliveries finish only through the two confirm calls above.</p>
 
 <h2 id="gotchas">8. Gotchas</h2>
 
@@ -345,6 +385,10 @@ Timer.periodic(const Duration(seconds: 30),
     <tr><td><code>429</code> from autocomplete</td><td>Undebounced type-ahead. Debounce ~300 ms and require 3+ characters.</td></tr>
     <tr><td>No <code>location_update</code> ever arrives</td><td>No rider assigned yet (<code>deliveryAgent</code> is null), or the socket reconnected without re-subscribing.</td></tr>
     <tr><td>Autocomplete billed twice per address</td><td>A fresh session token per keystroke. One token per address, spent on the details call.</td></tr>
+    <tr><td>Rider marker never moves</td><td>Reading <code>location['lat']</code>. The keys are <code>latitude</code> and <code>longitude</code>.</td></tr>
+    <tr><td>ETA shows the store trip after pickup</td><td>The rider app never sent <code>picked_up</code> to <code>PUT /api/delivery-agent/orders/status</code>, so <code>nextStop</code> is still <code>"pickup"</code>.</td></tr>
+    <tr><td>ETA is always null</td><td>The order has no delivery coordinates. Send <code>lat</code>/<code>lng</code> when creating the order.</td></tr>
+    <tr><td>Route line ignores the rider's detour</td><td>The client isn't replacing the line when <code>rerouted</code> is true.</td></tr>
     <tr><td>Socket dies after a few minutes idle</td><td>No keep-alive. Send <code>ping</code> every 30 s.</td></tr>
   </tbody>
 </table>
@@ -359,6 +403,9 @@ Timer.periodic(const Duration(seconds: 30),
   <li>Delivery fee displayed from the order, not from a client-side estimate</li>
   <li>WebSocket: subscribe on open, re-subscribe on reconnect, ping every 30 s, unsubscribe on close</li>
   <li>REST polling fallback while the socket is down</li>
+  <li>Rider position read from <code>latitude</code>/<code>longitude</code></li>
+  <li>Last ETA kept when <code>etaSeconds</code> is null; route line replaced when <code>rerouted</code> is true</li>
+  <li>Rider app sends <code>picked_up</code> to the order-status endpoint, and pings about every 10 s while moving</li>
 </ul>
 
 </div>

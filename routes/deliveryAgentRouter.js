@@ -1612,9 +1612,52 @@ router.get(
  * @swagger
  * components:
  *   schemas:
+ *     DeliveryOrderPickup:
+ *       type: object
+ *       description: |
+ *         A store the rider collects from — one leg of the route.
+ *
+ *         `lat`/`lng` are WGS84 decimal degrees, already unpacked from the
+ *         store's GeoJSON `location` (stored as `[longitude, latitude]`) —
+ *         consume them as-is, do not re-swap the pair. Both are `null` for a
+ *         store that was never geocoded; only `address` is usable then, so
+ *         guard before handing the pair to a directions API.
+ *       properties:
+ *         id: { type: string }
+ *         store: { type: string, nullable: true, example: "Wigo Store" }
+ *         address: { type: string, nullable: true, example: "12 Yaba Road, Lagos" }
+ *         lat: { type: number, format: double, nullable: true, example: 6.5095 }
+ *         lng: { type: number, format: double, nullable: true, example: 3.3711 }
+ *         mobile: { type: string, nullable: true, example: "08031234567" }
+ *     DeliveryOrderDropoff:
+ *       type: object
+ *       description: |
+ *         The delivery destination — the other leg of the route. Mirrors the
+ *         pickup shape so the map layer can treat both legs identically.
+ *
+ *         `lat`/`lng` are WGS84 decimal degrees unpacked from the order's
+ *         GeoJSON `deliveryLocation` (`[longitude, latitude]`). Both are `null`
+ *         when the buyer checked out with a typed address that was never
+ *         geocoded (no lat/lng and no Places placeId), so a routable point is
+ *         not guaranteed.
+ *
+ *         `mobile` is the buyer's phone — who the rider calls on arrival.
+ *       properties:
+ *         address: { type: string, nullable: true, example: "24 Olu Obasanjo Road, Lagos" }
+ *         mobile: { type: string, nullable: true, example: "08109876543" }
+ *         lat: { type: number, format: double, nullable: true, example: 6.4531 }
+ *         lng: { type: number, format: double, nullable: true, example: 3.3958 }
  *     DeliveryOrder:
  *       type: object
- *       description: Rider-facing order shape returned by the available pool, my-deliveries and take/select endpoints.
+ *       description: |
+ *         Rider-facing order shape returned by the available pool, my-deliveries,
+ *         active-order and take/select endpoints.
+ *
+ *         **Route endpoints:** `pickup` is the primary store (`pickups` lists
+ *         every distinct store on a multi-store order) and `dropoff` is the
+ *         destination. Both carry `lat`/`lng` so the client can draw a route
+ *         without a second round-trip — but either side may be `null` when the
+ *         underlying record was saved without geocoding.
  *       properties:
  *         orderId:
  *           type: string
@@ -1635,27 +1678,17 @@ router.get(
  *             phone: { type: string, example: "08012345678" }
  *             email: { type: string }
  *         pickup:
- *           type: object
  *           nullable: true
- *           description: Primary pickup location (the store). null if the store is unknown.
- *           properties:
- *             id: { type: string }
- *             store: { type: string, example: "Wigo Store" }
- *             address: { type: string, example: "12 Yaba Road, Lagos" }
- *             mobile: { type: string }
+ *           description: Primary pickup location (the store). null if no store on the order is populated.
+ *           allOf:
+ *             - $ref: '#/components/schemas/DeliveryOrderPickup'
  *         pickups:
  *           type: array
  *           description: All distinct pickup stores (multi-store orders); usually one entry.
  *           items:
- *             type: object
- *             properties:
- *               id: { type: string }
- *               store: { type: string }
- *               address: { type: string }
- *               mobile: { type: string }
+ *             $ref: '#/components/schemas/DeliveryOrderPickup'
  *         dropoff:
- *           type: string
- *           description: Customer delivery address.
+ *           $ref: '#/components/schemas/DeliveryOrderDropoff'
  *         products:
  *           type: array
  *           items:
