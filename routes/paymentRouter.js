@@ -3,7 +3,6 @@ const {
   initializePayment,
   verifyPayment,
   getPaymentStatus,
-  refundPayment,
   commissionHandler,
   generatePaymentReceipt,
   generateTransactionStatement,
@@ -59,7 +58,7 @@ router.post("/webhook", handleFlutterwaveWebhook);
 
 /**
  * @swagger
- * /api/payment/payment/initialize:
+ * /api/payment/initialize:
  *   post:
  *     summary: Initialize payment with Flutterwave
  *     description: Initialize payment for an order using Flutterwave
@@ -111,7 +110,7 @@ router.post("/initialize", authMiddleware, paymentInitLimiter, initializePayment
 
 /**
  * @swagger
- * /api/payment/payment/verify:
+ * /api/payment/verify:
  *   post:
  *     summary: Verify payment status
  *     description: Verify payment status with Flutterwave after payment
@@ -171,7 +170,7 @@ router.post("/verify", verifyPayment);
 
 /**
  * @swagger
- * /api/payment/payment/status/{orderId}:
+ * /api/payment/status/{orderId}:
  *   get:
  *     summary: Get payment status
  *     description: Get payment status for an order
@@ -214,63 +213,7 @@ router.get("/status/:orderId", authMiddleware, getPaymentStatus);
 
 /**
  * @swagger
- * /api/payment/payment/refund:
- *   post:
- *     summary: Process refund
- *     description: Process refund for an order (Admin only)
- *     tags:
- *       - Payment
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - orderId
- *             properties:
- *               orderId:
- *                 type: string
- *                 description: Order ID to refund
- *               amount:
- *                 type: number
- *                 description: Refund amount (optional, defaults to full amount)
- *               reason:
- *                 type: string
- *                 description: Refund reason
- *     responses:
- *       200:
- *         description: Refund processed successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 message:
- *                   type: string
- *                 data:
- *                   type: object
- *                   properties:
- *                     refund_id:
- *                       type: string
- *                     amount:
- *                       type: number
- *                     status:
- *                       type: string
- *       400:
- *         description: Invalid request or order not paid
- *       403:
- *         description: Access denied - admin only
- */
-router.post("/refund", authMiddleware, isAdmin, refundPayment);
-
-/**
- * @swagger
- * /api/payment/payment/commissions:
+ * /api/payment/commissions:
  *   get:
  *     summary: Get commission breakdown
  *     description: Get commission breakdown for stores and platform
@@ -306,7 +249,7 @@ router.get("/commissions", authMiddleware, commissionHandler);
 
 /**
  * @swagger
- * /api/payment/payment/receipt/{orderId}:
+ * /api/payment/receipt/{orderId}:
  *   get:
  *     summary: Generate payment receipt PDF
  *     description: Generate and download PDF receipt for a completed payment
@@ -388,7 +331,7 @@ router.get("/receipt/:orderId", authMiddleware, generatePaymentReceipt);
 
 /**
  * @swagger
- * /api/payment/payment/statement:
+ * /api/payment/statement:
  *   get:
  *     summary: Generate transaction statement PDF
  *     description: Generate and download PDF statement of user transactions
@@ -452,7 +395,7 @@ router.get("/statement", authMiddleware, generateTransactionStatement);
 
 /**
  * @swagger
- * /api/payment/payment/vat-report:
+ * /api/payment/vat-report:
  *   get:
  *     summary: Generate VAT report PDF (Admin only)
  *     description: Generate and download PDF VAT report for admin users

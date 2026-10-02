@@ -13,6 +13,10 @@ const deliveryFeeService = require("../../services/deliveryFeeService");
 const mapboxService = require("../../services/mapboxService");
 const audit = require("../../services/auditService");
 const {
+  publishStoreOrderEvent,
+  EVENT: ORDER_EVENT,
+} = require("../../services/storeOrderEvents");
+const {
   PaymentStatus,
   OrderStatus,
   DeliveryStatus,
@@ -256,7 +260,14 @@ const createOrder = asyncHandler(async (req, res) => {
       // Create order
       const order = new Order({
         orderNumber,
-        products: userCart.products,
+        // Snapshot unit prices onto each line (see orderModel).
+        products: userCart.products.map((item) => ({
+          product: item.product._id,
+          count: item.count,
+          store: item.store ?? item.product.store,
+          price: item.product.price,
+          listedPrice: item.product.listedPrice ?? item.product.price,
+        })),
         paymentIntent: {
           id: uniqid(),
           method: paymentMethod,
@@ -404,6 +415,9 @@ const createOrder = asyncHandler(async (req, res) => {
     } catch (notificationError) {
       console.log("Notification error:", notificationError);
     }
+
+    // Committed: put it on the sellers' Recent Orders widgets (fire-and-forget).
+    publishStoreOrderEvent(populatedOrder._id, ORDER_EVENT.CREATED);
 
     res.json({
       success: true,

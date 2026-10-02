@@ -13,6 +13,7 @@ const {
   categoryFilter,
 } = require("../utils/orderStatus");
 const { serializeOrderSummary, serializeOrderDetail } = require("../utils/orderSerializer");
+const { parseDateRange } = require("../utils/dateRange");
 
 /** A client-supplied query value the list cannot honour — surfaced as a 400. */
 class OrderQueryError extends Error {
@@ -63,18 +64,12 @@ const statusFilter = (status) => {
   return { orderStatus: { $in: canonical.flatMap(statusMatchValues) } };
 };
 
-// Inclusive date range on createdAt.
+// Inclusive date range on createdAt. A bare dateTo covers that whole day
+// (Africa/Lagos) — see utils/dateRange.
 const dateFilter = (dateFrom, dateTo) => {
-  const range = {};
-  if (dateFrom) {
-    const from = new Date(dateFrom);
-    if (!isNaN(from)) range.$gte = from;
-  }
-  if (dateTo) {
-    const to = new Date(dateTo);
-    if (!isNaN(to)) range.$lte = to;
-  }
-  return Object.keys(range).length ? { createdAt: range } : {};
+  const parsed = parseDateRange(dateFrom, dateTo);
+  if (parsed.error) throw new OrderQueryError(parsed.error);
+  return parsed.filter;
 };
 
 // Search by order number OR customer name (resolved via the User collection).
@@ -114,10 +109,12 @@ const scopedCount = (baseFilter, fragment) => {
  *                                       "recent" = all), status (one or many), orderType,
  *                                       dateFrom, dateTo, search, sortBy, sortOrder, page, limit.
  * @param {string} [opts.role]          Viewer role; when given each row carries allowedActions.
+ * @param {Object} [opts.storeId]       Seller's store; rows then show only that store's
+ *                                       items and amount.
  * @returns {Promise<{orders: Object[], pagination: Object, counts: Object}>}
  * @throws {OrderQueryError} On an unknown category or status.
  */
-const listOrders = async ({ baseFilter = {}, query = {}, role }) => {
+const listOrders = async ({ baseFilter = {}, query = {}, role, storeId }) => {
   const category = parseCategory(query.category);
   if (!category) {
     throw new OrderQueryError(
@@ -143,6 +140,9 @@ const listOrders = async ({ baseFilter = {}, query = {}, role }) => {
   const [orders, total, all, pending, ongoing, history] = await Promise.all([
     Order.find(filter)
       .populate("orderedBy", "fullName firstname lastname email mobile")
+      // Store-scoped amounts fall back to the product's listed price for
+      // orders placed before line prices were snapshotted.
+      .populate(storeId ? { path: "products.product", select: "listedPrice price" } : [])
       .sort(buildSort(query.sortBy, query.sortOrder))
       .skip(skip)
       .limit(limit)
@@ -158,7 +158,7 @@ const listOrders = async ({ baseFilter = {}, query = {}, role }) => {
   ]);
 
   return {
-    orders: orders.map((order) => serializeOrderSummary(order, { role })),
+    orders: orders.map((order) => serializeOrderSummary(order, { role, storeId })),
     pagination: {
       total,
       page,

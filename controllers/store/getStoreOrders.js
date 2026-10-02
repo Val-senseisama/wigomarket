@@ -1,5 +1,6 @@
 const asyncHandler = require("express-async-handler");
 const { listOrders, OrderQueryError } = require("../../services/orderQueryService");
+const { SELLER_VISIBLE_FILTER } = require("../../utils/sellerOrderVisibility");
 
 /**
  * @function getStoreOrders
@@ -33,10 +34,14 @@ const getStoreOrders = asyncHandler(async (req, res) => {
 
   try {
     const result = await listOrders({
-      baseFilter: { "products.store": req.store },
+      // Unpaid card/bank checkouts stay hidden until paid (see
+      // utils/sellerOrderVisibility); tab counts use the same scope.
+      baseFilter: { $and: [{ "products.store": req.store }, SELLER_VISIBLE_FILTER] },
       query: req.query,
       // Each row carries allowedActions for the table's "Update Status" menu.
       role: "seller",
+      // itemsCount/amount cover this store's items only.
+      storeId: req.store,
     });
     res.json({ success: true, data: result });
   } catch (err) {

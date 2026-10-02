@@ -46,12 +46,17 @@ const createTestSeller = async () => {
     activeRole: "seller",
   });
 
-  const ts = Date.now();
+  const unique = `${Date.now()}${String(++userSeq).padStart(4, "0")}`;
   const store = await Store.create({
-    name: `Test Store ${ts}`,
-    mobile: `2347${String(ts).slice(-8)}`,
+    name: `Test Store ${unique}`,
+    email: `store-${unique}@example.com`,
+    mobile: `2347${unique.slice(-8)}`,
     owner: user._id,
     address: "123 Test Street",
+    ownerNIN: unique.slice(-11),
+    state: "Lagos",
+    city: "Ikeja",
+    businessType: "retail",
   });
 
   return { user, token, store };

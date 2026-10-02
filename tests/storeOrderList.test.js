@@ -184,3 +184,22 @@ describe("multi-value status filter", () => {
     expect(res.body.message).toMatch(/Invalid status: shipped/);
   });
 });
+
+describe("date range filter", () => {
+  const backdate = (order, iso) =>
+    Order.collection.updateOne({ _id: order._id }, { $set: { createdAt: new Date(iso) } });
+
+  it("treats a bare dateTo as the end of that Lagos day", async () => {
+    // 20:00 Lagos on 10 Sep — excluded by the old midnight cutoff.
+    await backdate(orders.pending, "2026-09-10T19:00:00.000Z");
+
+    const res = await list("dateFrom=2026-09-10&dateTo=2026-09-10");
+    expect(res.status).toBe(200);
+    expect(res.body.data.orders.map((o) => String(o.id))).toEqual([String(orders.pending._id)]);
+  });
+
+  it("rejects an unparseable or inverted range with 400", async () => {
+    expect((await list("dateFrom=not-a-date")).status).toBe(400);
+    expect((await list("dateFrom=2026-09-12&dateTo=2026-09-10")).status).toBe(400);
+  });
+});

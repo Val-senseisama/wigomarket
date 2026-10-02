@@ -16,14 +16,19 @@
 
 const mongoose = require("mongoose");
 const Order = require("../models/orderModel");
-const User = require("../models/userModel");
-const Wallet = require("../models/walletModel");
 const Transaction = require("../models/transactionModel");
 const VATConfig = require("../models/vatConfigModel");
 const { calculateCommissionBreakdown } = require("./commissionService");
+const {
+  resolveVendorPayouts,
+  creditVendorWallets,
+  primaryVendor,
+} = require("./vendorPayoutService");
+const { orderPaymentEntries } = require("./orderPaymentLedger");
 const { PaymentStatus, OrderStatus } = require("../utils/constants");
 const { MakeID } = require("../Helpers/Helpers");
 const audit = require("./auditService");
+const { publishStoreOrderEvent, EVENT } = require("./storeOrderEvents");
 
 /**
  * Process a confirmed Flutterwave payment webhook payload.
@@ -102,14 +107,16 @@ async function processWebhookPayload(payload, sourceIp = "webhook") {
         ? vatConfig.calculateVAT(fullOrder.paymentIntent.amount)
         : 0;
 
-      const vendor = await User.findById(
-        fullOrder.products[0].product.store,
-      ).session(session);
+      // One payout per store, each to that store's owner.
+      const vendorPayouts = await resolveVendorPayouts(fullOrder, session);
+      const vendor = await primaryVendor(vendorPayouts, session);
       const vatResponsibility =
         vatConfig && vendor
           ? vatConfig.getVATResponsibility(vendor, fullOrder.paymentIntent.amount)
           : "platform";
-      const vendorId = vendor?._id ?? fullOrder.products[0].product.store;
+      // Balanced entries; VAT is a memo on `vat`, not ledger lines (see
+      // services/orderPaymentLedger).
+      const ledger = orderPaymentEntries({ order: fullOrder, payouts: vendorPayouts });
 
       // ── Double-entry ledger ───────────────────────────────────────────────
       const transactionId = `PAY_WH_${Date.now()}_${MakeID(16)}`;
@@ -118,88 +125,8 @@ async function processWebhookPayload(payload, sourceIp = "webhook") {
           transactionId,
           reference: `Payment-${fullOrder._id}`,
           type: "order_payment",
-          totalAmount: fullOrder.paymentIntent.amount,
-          entries: [
-            {
-              account: "cash_account",
-              userId: fullOrder.orderedBy._id,
-              debit: fullOrder.paymentIntent.amount,
-              credit: 0,
-              description: `Payment for order ${fullOrder._id}`,
-            },
-            {
-              account: "accounts_receivable",
-              userId: fullOrder.orderedBy._id,
-              debit: 0,
-              credit: fullOrder.paymentIntent.amount,
-              description: "Receivable from customer",
-            },
-            {
-              account: "commission_revenue",
-              userId: null,
-              debit: commissionData.platformAmount,
-              credit: 0,
-              description: "Platform commission",
-            },
-            {
-              account: "accounts_payable",
-              userId: null,
-              debit: 0,
-              credit: commissionData.platformAmount,
-              description: "Platform commission payable",
-            },
-            {
-              account: "commission_payable",
-              userId: vendorId,
-              debit: commissionData.vendorAmount,
-              credit: 0,
-              description: "Vendor earnings",
-            },
-            {
-              account: "wallet_vendor",
-              userId: vendorId,
-              debit: 0,
-              credit: commissionData.vendorAmount,
-              description: "Vendor wallet credit",
-            },
-            ...(commissionData.dispatchAmount > 0
-              ? [
-                  {
-                    account: "commission_payable",
-                    userId: fullOrder.deliveryAgent?._id,
-                    debit: commissionData.dispatchAmount,
-                    credit: 0,
-                    description: "Dispatch earnings",
-                  },
-                  {
-                    account: "wallet_dispatch",
-                    userId: fullOrder.deliveryAgent?._id,
-                    debit: 0,
-                    credit: commissionData.dispatchAmount,
-                    description: "Dispatch wallet credit",
-                  },
-                ]
-              : []),
-            ...(vatAmount > 0
-              ? [
-                  {
-                    account: "vat_payable",
-                    userId:
-                      vatResponsibility === "platform" ? null : vendorId,
-                    debit: vatAmount,
-                    credit: 0,
-                    description: "VAT collected",
-                  },
-                  {
-                    account: "vat_revenue",
-                    userId: null,
-                    debit: 0,
-                    credit: vatAmount,
-                    description: "VAT revenue",
-                  },
-                ]
-              : []),
-          ],
+          totalAmount: ledger.totalAmount,
+          entries: ledger.entries,
           vat: {
             rate: vatConfig?.rates?.standard ?? 7.5,
             amount: vatAmount,
@@ -208,9 +135,10 @@ async function processWebhookPayload(payload, sourceIp = "webhook") {
           },
           commission: {
             platformRate: commissionData.platformRate,
-            platformAmount: commissionData.platformAmount,
+            platformAmount: ledger.platformAmount,
             vendorAmount: commissionData.vendorAmount,
-            dispatchAmount: commissionData.dispatchAmount,
+            // The delivery fee is held, not paid, at this point.
+            dispatchAmount: 0,
           },
           relatedEntity: { type: "order", id: fullOrder._id },
           status: "completed",
@@ -225,28 +153,10 @@ async function processWebhookPayload(payload, sourceIp = "webhook") {
       );
 
       // ── Credit wallets ────────────────────────────────────────────────────
-      if (commissionData.vendorAmount > 0) {
-        let vWallet = await Wallet.findOne({ user: vendorId }).session(session);
-        if (!vWallet) {
-          [vWallet] = await Wallet.create([{ user: vendorId, balance: 0 }], {
-            session,
-          });
-        }
-        await vWallet.creditEarning(commissionData.vendorAmount, session);
-      }
+      await creditVendorWallets(vendorPayouts, session);
 
-      if (commissionData.dispatchAmount > 0 && fullOrder.deliveryAgent) {
-        let dWallet = await Wallet.findOne({
-          user: fullOrder.deliveryAgent._id,
-        }).session(session);
-        if (!dWallet) {
-          [dWallet] = await Wallet.create(
-            [{ user: fullOrder.deliveryAgent._id, balance: 0 }],
-            { session },
-          );
-        }
-        await dWallet.creditEarning(commissionData.dispatchAmount, session);
-      }
+      // No rider credit here: the delivery fee is held in accounts_payable and
+      // paid to the rider on delivery (dispatchEarningsService).
 
       // ── Mark order paid ───────────────────────────────────────────────────
       await Order.findByIdAndUpdate(
@@ -266,6 +176,10 @@ async function processWebhookPayload(payload, sourceIp = "webhook") {
         `[WebhookProcessor] ✅ Payment processed for order ${fullOrder._id}`,
       );
     });
+
+    // Committed: a paid card order is new to sellers, so it arrives as
+    // order.created on their dashboards (fire-and-forget).
+    publishStoreOrderEvent(order._id, EVENT.CREATED);
 
     audit.log({
       action: "payment.verified",
