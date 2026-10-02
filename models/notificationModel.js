@@ -22,6 +22,11 @@ var notificationSchema = new mongoose.Schema(
         "order_delivered",
         "order_cancelled",
         "order_refunded",
+        "refund_requested",
+        "refund_approved",
+        "refund_rejected",
+        "refund_escalated",
+        "refund_declined",
         "customer_message",
 
         // Payment related

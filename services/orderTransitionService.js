@@ -11,6 +11,7 @@ const {
   allowedTransitions,
 } = require("../utils/orderStatus");
 const audit = require("./auditService");
+const { publishStoreOrderEvent } = require("./storeOrderEvents");
 
 /**
  * Error thrown when a status transition is rejected by the state machine.
@@ -24,7 +25,10 @@ class OrderTransitionError extends Error {
   }
 }
 
-// Restore product stock + reconcile payment status when cancelling.
+// Restore product stock when cancelling. A paid order stays Paid: the seller
+// already holds the money, so the buyer gets it back by requesting a refund
+// from the seller (services/orderRefundService) — cancelling moves no money,
+// and claiming "Refunded" here would say it had.
 const applyCancellationSideEffects = async (order, setFields, session) => {
   const productUpdates = (order.products || [])
     .filter((item) => item.product)
@@ -40,10 +44,9 @@ const applyCancellationSideEffects = async (order, setFields, session) => {
     await Product.bulkWrite(productUpdates, { session });
   }
 
-  setFields.paymentStatus =
-    order.paymentStatus === PaymentStatus.PAID
-      ? PaymentStatus.REFUNDED
-      : PaymentStatus.FAILED;
+  if (order.paymentStatus !== PaymentStatus.PAID) {
+    setFields.paymentStatus = PaymentStatus.FAILED;
+  }
 };
 
 const runTransition = async ({ orderId, toStatus, role, actor, reason, req, extraSet }, session) => {
@@ -138,15 +141,19 @@ const transitionOrder = async (opts) => {
   }
 
   const session = await mongoose.startSession();
+  let result;
   try {
-    let result;
     await session.withTransaction(async () => {
       result = await runTransition(opts, session);
     });
-    return result;
   } finally {
     await session.endSession();
   }
+
+  // Committed: tell the sellers' dashboards (fire-and-forget). With a caller's
+  // session only the caller knows when it commits, so it publishes itself.
+  publishStoreOrderEvent(opts.orderId);
+  return result;
 };
 
 module.exports = { transitionOrder, OrderTransitionError, ROLE, STATUS };

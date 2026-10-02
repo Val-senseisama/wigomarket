@@ -87,6 +87,33 @@ describe("Orders - POST /api/order/create", () => {
     expect(res.status).toBeGreaterThanOrEqual(400);
   });
 
+  it("snapshots unit prices onto each order line", async () => {
+    const { user, token } = await createTestUser();
+    const { store } = await createTestSeller();
+    const product = await createTestProduct(store._id, { price: 4000, listedPrice: 4500 });
+    await setupCart(user._id, product._id, store._id);
+
+    const res = await request(app)
+      .post("/api/order/create")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        paymentMethod: "card",
+        deliveryMethod: "self_delivery",
+        deliveryAddress: "123 Test Street, Lagos",
+      });
+
+    expect(res.status).toBeLessThan(300);
+    const Order = require("../models/orderModel");
+    const Product = require("../models/productModel");
+    const order = await Order.findOne({ orderedBy: user._id }).lean();
+    expect(order.products[0]).toMatchObject({ price: 4000, listedPrice: 4500 });
+
+    // A later price edit leaves the order untouched.
+    await Product.updateOne({ _id: product._id }, { price: 9000, listedPrice: 9900 });
+    const again = await Order.findById(order._id).lean();
+    expect(again.products[0]).toMatchObject({ price: 4000, listedPrice: 4500 });
+  });
+
   it("rejects order creation without auth", async () => {
     const res = await request(app).post("/api/order/create").send({
       paymentMethod: "cash",

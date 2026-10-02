@@ -25,6 +25,7 @@ const {
   sendEarningsCreditedEmail,
 } = require("./dispatchEmailService");
 const audit = require("./auditService");
+const { publishStoreOrderEvent } = require("./storeOrderEvents");
 
 /**
  * Called when the dispatch agent taps "I delivered this order".
@@ -188,6 +189,7 @@ async function _creditEarnings(order, agentUserId, actorContext = {}) {
       "deliveryMetadata.deliveredAt": new Date(),
     });
     await _deactivateTracking(orderId);
+    publishStoreOrderEvent(orderId);
     return { credited: false, reason: "zero_fee" };
   }
 
@@ -211,9 +213,11 @@ async function _creditEarnings(order, agentUserId, actorContext = {}) {
           type: "dispatch_commission",
           totalAmount: earningsAmount,
           entries: [
+            // Released from the delivery fee held in accounts_payable when
+            // the order was paid (see services/orderPaymentLedger).
             {
-              account: "commission_payable",
-              userId: agentUserId,
+              account: "accounts_payable",
+              userId: null,
               debit: earningsAmount,
               credit: 0,
               description: `Dispatch fee earned for order ${orderId}`,
@@ -262,6 +266,9 @@ async function _creditEarnings(order, agentUserId, actorContext = {}) {
   }
 
   await _deactivateTracking(orderId);
+
+  // Committed: tell the sellers' dashboards (fire-and-forget).
+  publishStoreOrderEvent(orderId);
 
   audit.log({
     action: "delivery.completed",

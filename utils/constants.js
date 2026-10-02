@@ -2,6 +2,7 @@ const PaymentStatus = {
   PAID: "Paid",
   PENDING: "Pending",
   FAILED: "Failed",
+  PARTIALLY_REFUNDED: "Partially Refunded",
   REFUNDED: "Refunded",
   UNPAID: "Unpaid",
 };

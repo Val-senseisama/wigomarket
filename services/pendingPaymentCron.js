@@ -20,14 +20,20 @@ const Order = require("../models/orderModel");
 const Wallet = require("../models/walletModel");
 const Transaction = require("../models/transactionModel");
 const VATConfig = require("../models/vatConfigModel");
-const User = require("../models/userModel");
 const BillPayment = require("../models/billPaymentModel");
 const ledgerService = require("./billPaymentLedgerService");
 const appConfig = require("../config/appConfig");
 const { PaymentStatus, OrderStatus } = require("../utils/constants");
 const { MakeID } = require("../Helpers/Helpers");
 const audit = require("./auditService");
+const { publishStoreOrderEvent, EVENT } = require("./storeOrderEvents");
 const { calculateCommissionBreakdown } = require("./commissionService");
+const {
+  resolveVendorPayouts,
+  creditVendorWallets,
+  primaryVendor,
+} = require("./vendorPayoutService");
+const { orderPaymentEntries } = require("./orderPaymentLedger");
 const vtpass = require("./vtpassService");
 
 // Lazy FLW instance
@@ -79,9 +85,9 @@ async function processConfirmedPayment(order, externalTxId, vatConfig) {
         ? vatConfig.calculateVAT(fullOrder.paymentIntent.amount)
         : 0;
 
-      const vendor = await User.findById(
-        fullOrder.products[0]?.product?.store,
-      ).session(session);
+      // One payout per store, each to that store's owner.
+      const vendorPayouts = await resolveVendorPayouts(fullOrder, session);
+      const vendor = await primaryVendor(vendorPayouts, session);
 
       let vatResponsibility = "platform";
       if (vatConfig && vendor) {
@@ -91,6 +97,10 @@ async function processConfirmedPayment(order, externalTxId, vatConfig) {
         );
       }
 
+      // Balanced entries; VAT is a memo on `vat`, not ledger lines (see
+      // services/orderPaymentLedger).
+      const ledger = orderPaymentEntries({ order: fullOrder, payouts: vendorPayouts });
+
       // ── Double-entry ledger ───────────────────────────────────────────────
       const txId = `PAY_CRON_${Date.now()}_${MakeID(16)}`;
       await Transaction.createTransaction(
@@ -98,95 +108,20 @@ async function processConfirmedPayment(order, externalTxId, vatConfig) {
           transactionId: txId,
           reference: `Payment-${fullOrder._id}`,
           type: "order_payment",
-          totalAmount: fullOrder.paymentIntent.amount,
-          entries: [
-            {
-              account: "cash_account",
-              userId: fullOrder.orderedBy._id,
-              debit: fullOrder.paymentIntent.amount,
-              credit: 0,
-              description: `Cron-recovered payment for order ${fullOrder._id}`,
-            },
-            {
-              account: "accounts_receivable",
-              userId: fullOrder.orderedBy._id,
-              debit: 0,
-              credit: fullOrder.paymentIntent.amount,
-              description: "Receivable from customer",
-            },
-            {
-              account: "commission_revenue",
-              userId: null,
-              debit: commission.platformAmount,
-              credit: 0,
-              description: "Platform commission",
-            },
-            {
-              account: "accounts_payable",
-              userId: null,
-              debit: 0,
-              credit: commission.platformAmount,
-              description: "Platform commission payable",
-            },
-            {
-              account: "commission_payable",
-              userId: vendor?._id,
-              debit: commission.vendorAmount,
-              credit: 0,
-              description: "Vendor earnings",
-            },
-            {
-              account: "wallet_vendor",
-              userId: vendor?._id,
-              debit: 0,
-              credit: commission.vendorAmount,
-              description: "Vendor wallet credit",
-            },
-            ...(commission.dispatchAmount > 0
-              ? [
-                  {
-                    account: "commission_payable",
-                    userId: fullOrder.deliveryAgent?._id,
-                    debit: commission.dispatchAmount,
-                    credit: 0,
-                    description: "Dispatch earnings",
-                  },
-                  {
-                    account: "wallet_dispatch",
-                    userId: fullOrder.deliveryAgent?._id,
-                    debit: 0,
-                    credit: commission.dispatchAmount,
-                    description: "Dispatch wallet credit",
-                  },
-                ]
-              : []),
-            ...(vatAmount > 0
-              ? [
-                  {
-                    account: "vat_payable",
-                    userId:
-                      vatResponsibility === "platform" ? null : vendor?._id,
-                    debit: vatAmount,
-                    credit: 0,
-                    description: "VAT collected",
-                  },
-                  {
-                    account: "vat_revenue",
-                    userId: null,
-                    debit: 0,
-                    credit: vatAmount,
-                    description: "VAT revenue",
-                  },
-                ]
-              : []),
-          ],
+          totalAmount: ledger.totalAmount,
+          entries: ledger.entries,
           vat: {
             rate: vatConfig?.rates?.standard || 7.5,
             amount: vatAmount,
             responsibility: vatResponsibility,
             collected: true,
           },
-          commission,
+          commission: {
+            platformRate: commission.platformRate,
+            platformAmount: ledger.platformAmount,
+            vendorAmount: commission.vendorAmount,
+            dispatchAmount: 0,
+          },
           relatedEntity: { type: "order", id: fullOrder._id },
           status: "completed",
           metadata: {
@@ -200,30 +135,10 @@ async function processConfirmedPayment(order, externalTxId, vatConfig) {
       );
 
       // ── Credit wallets ────────────────────────────────────────────────────
-      if (commission.vendorAmount > 0 && vendor) {
-        let vWallet = await Wallet.findOne({ user: vendor._id }).session(
-          session,
-        );
-        if (!vWallet) {
-          [vWallet] = await Wallet.create([{ user: vendor._id, balance: 0 }], {
-            session,
-          });
-        }
-        await vWallet.creditEarning(commission.vendorAmount, session);
-      }
+      await creditVendorWallets(vendorPayouts, session);
 
-      if (commission.dispatchAmount > 0 && fullOrder.deliveryAgent) {
-        let dWallet = await Wallet.findOne({
-          user: fullOrder.deliveryAgent._id,
-        }).session(session);
-        if (!dWallet) {
-          [dWallet] = await Wallet.create(
-            [{ user: fullOrder.deliveryAgent._id, balance: 0 }],
-            { session },
-          );
-        }
-        await dWallet.creditEarning(commission.dispatchAmount, session);
-      }
+      // No rider credit here: the delivery fee is held in accounts_payable and
+      // paid to the rider on delivery (dispatchEarningsService).
 
       // ── Mark order paid ───────────────────────────────────────────────────
       await Order.findByIdAndUpdate(
@@ -242,6 +157,10 @@ async function processConfirmedPayment(order, externalTxId, vatConfig) {
 
       console.log(`[Cron] ✅ Recovered payment for order ${fullOrder._id}`);
     });
+
+    // Committed: a paid card order is new to sellers, so it arrives as
+    // order.created on their dashboards (fire-and-forget).
+    publishStoreOrderEvent(order._id, EVENT.CREATED);
 
     audit.log({
       action: "payment.verified",
@@ -510,6 +429,7 @@ async function runWalletReconciliation() {
  * Call once from app.js after the DB connection is ready.
  *
  *   Every  5 min  — recover pending payments
+ *   Every  5 min  — push refunds forward (see orderRefundService.recoverRefunds)
  *   Every 15 min  — clean up stuck 'processing' transactions
  *   Daily  02:00  — wallet health reconciliation
  */
@@ -536,6 +456,10 @@ function startCron() {
     wrap("bill-payment-check", runBillPaymentCheck),
   );
   cron.schedule(
+    "*/5 * * * *",
+    wrap("refund-recovery", () => require("./orderRefundService").recoverRefunds()),
+  );
+  cron.schedule(
     "*/15 * * * *",
     wrap("stuck-transaction-cleanup", cleanupStuckTransactions),
   );
@@ -545,7 +469,7 @@ function startCron() {
   );
 
   console.log(
-    "⏰ Crons scheduled: payment-check (5m), bill-check (10m), stuck-cleanup (15m), reconciliation (02:00)",
+    "⏰ Crons scheduled: payment-check (5m), refund-recovery (5m), bill-check (10m), stuck-cleanup (15m), reconciliation (02:00)",
   );
 }
 

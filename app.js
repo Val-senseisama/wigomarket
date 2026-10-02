@@ -30,6 +30,8 @@ const homeRouter = require("./routes/homeRouter");
 const { notFound, errorHandler } = require("./middleware/errorHandler");
 const { swaggerUi, specs } = require("./swagger");
 const LocationWebSocketServer = require("./websocket/locationWebSocket");
+const StoreOrdersWebSocketServer = require("./websocket/storeOrdersWebSocket");
+const { attachWebSockets } = require("./websocket/upgradeRouter");
 const { startCron } = require("./services/pendingPaymentCron");
 const paymentQueue = require("./services/paymentQueue");
 const taskQueue = require("./services/taskQueue");
@@ -116,6 +118,7 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 5001;
 let server;
 let locationWebSocket;
+let storeOrdersWebSocket;
 
 // Start server with database connection
 const startServer = async () => {
@@ -133,9 +136,15 @@ const startServer = async () => {
       logger.info(`API docs: http://localhost:${PORT}/api-docs`);
     });
 
-    // Initialize WebSocket server for real-time location tracking
-    locationWebSocket = new LocationWebSocketServer(server);
-    logger.info("Location WebSocket server initialized");
+    // WebSocket servers: live rider locations, and live orders for sellers'
+    // dashboards. Upgrades are routed by path (see websocket/upgradeRouter).
+    locationWebSocket = new LocationWebSocketServer();
+    storeOrdersWebSocket = new StoreOrdersWebSocketServer();
+    attachWebSockets(server, {
+      "/ws/location": locationWebSocket,
+      "/ws/orders": storeOrdersWebSocket,
+    });
+    logger.info("WebSocket servers initialized (/ws/location, /ws/orders)");
 
     // Start pending-payment recovery cron (after DB is ready)
     startCron();
@@ -161,7 +170,12 @@ const gracefulShutdown = async (signal) => {
   try {
     if (locationWebSocket) {
       locationWebSocket.close();
-      logger.info("WebSocket server closed");
+    }
+    if (storeOrdersWebSocket) {
+      storeOrdersWebSocket.close();
+    }
+    if (locationWebSocket || storeOrdersWebSocket) {
+      logger.info("WebSocket servers closed");
     }
 
     if (server) {

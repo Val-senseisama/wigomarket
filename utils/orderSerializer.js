@@ -6,6 +6,8 @@ const {
   allowedTransitions,
 } = require("./orderStatus");
 const { ORDER_NUMBER_PREFIX } = require("./generateOrderNumber");
+const money = require("./money");
+const { unitListedPrice } = require("../services/commissionService");
 
 /**
  * Display order number with a leading "#", e.g. "#WM1201".
@@ -50,12 +52,62 @@ const allowedActionsFor = (order, role) =>
  *
  * @param {Object} order
  * @param {Object} [options]
+ * @param {Object} [options.storeId] Seller's store. When given, itemsCount and
+ *   amount cover only that store's lines (what the customer paid for them).
  * @param {string} [options.role] Viewer role (seller | admin). When given, the
  *   row carries `allowedActions` — the same list the detail endpoint returns —
  *   so the table's "Update Status" menu needs no per-row detail fetch. It is
  *   derived from fields already on the row, so it costs no extra query.
  */
-const serializeOrderSummary = (order, { role } = {}) => ({
+const sameStore = (line, storeId) => {
+  const ref = line.store ?? line.product?.store;
+  const id = ref && ref._id ? ref._id : ref;
+  return id != null && String(id) === String(storeId);
+};
+
+/**
+ * One row of the seller dashboard's Recent Orders widget, scoped to one store:
+ * `items` and `amount` cover only this store's lines (what the customer paid
+ * for them), not the whole basket or the delivery fee. Used by
+ * GET /api/store/orders/recent and by the live /ws/orders feed, so a pushed row
+ * is always identical to a fetched one.
+ *
+ * orderedBy should be populated (fullName/firstname/lastname). products.product
+ * only needs populating (listedPrice) for orders placed before line prices
+ * were snapshotted.
+ */
+/**
+ * One store's part of an order: units of its products, and what the customer
+ * paid for them (listed price; no delivery fee, no other sellers' items).
+ */
+const storeShare = (order, storeId) => {
+  const lines = (order.products || []).filter((line) => sameStore(line, storeId));
+  return {
+    items: lines.reduce((sum, line) => sum + (line.count || 0), 0),
+    amount: money.sum(lines, (line) => money.multiply(unitListedPrice(line), line.count || 0)),
+  };
+};
+
+const serializeStoreOrderRow = (order, storeId) => {
+  const share = storeShare(order, storeId);
+  return {
+    id: order._id,
+    orderNumber: formatOrderNumber(order),
+    items: share.items,
+    amount: share.amount,
+    currency: order.paymentIntent?.currency || "NGN",
+    orderDate: order.createdAt,
+    customer: {
+      id: order.orderedBy?._id || order.orderedBy || null,
+      name: customerName(order.orderedBy),
+    },
+    status: normalizeStatus(order.orderStatus),
+    statusLabel: statusLabel(order.orderStatus),
+    paymentStatus: order.paymentStatus,
+  };
+};
+
+const serializeOrderSummary = (order, { role, storeId } = {}) => ({
   id: order._id,
   orderNumber: formatOrderNumber(order),
   orderDate: order.createdAt,
@@ -65,8 +117,10 @@ const serializeOrderSummary = (order, { role } = {}) => ({
     email: order.orderedBy?.email || null,
     mobile: order.orderedBy?.mobile || null,
   },
-  itemsCount: itemsCount(order),
-  amount: order.paymentIntent?.amount ?? 0,
+  // For a seller (storeId given), only their own part of the order — the same
+  // figures as their Recent Orders widget. Admins see the whole order.
+  itemsCount: storeId ? storeShare(order, storeId).items : itemsCount(order),
+  amount: storeId ? storeShare(order, storeId).amount : order.paymentIntent?.amount ?? 0,
   currency: order.paymentIntent?.currency || "NGN",
   deliveryType: deliveryTypeLabel(order.deliveryMethod),
   // Canonical lifecycle token (e.g. "pickUpReady") plus a display label.
@@ -88,14 +142,15 @@ const firstImage = (images) => {
   return typeof img === "string" ? img : img.url || img.secure_url || null;
 };
 
-// Unit price isn't persisted on the order line, so fall back to the product's
-// current listedPrice (then price). Subtotal is unit × quantity.
-const unitPrice = (product) =>
-  product?.listedPrice ?? product?.price ?? 0;
+// What the customer paid per unit: the price snapshotted on the order line,
+// else (orders placed before snapshots) the product's current listedPrice,
+// then price. Subtotal is unit × quantity.
+const unitPrice = (line, product) =>
+  line.listedPrice ?? product?.listedPrice ?? line.price ?? product?.price ?? 0;
 
 const serializeLineItem = (line) => {
   const product = line.product && typeof line.product === "object" ? line.product : null;
-  const unit = unitPrice(product);
+  const unit = unitPrice(line, product);
   const quantity = line.count || 0;
   return {
     productId: product?._id || line.product || null,
@@ -103,7 +158,7 @@ const serializeLineItem = (line) => {
     image: firstImage(product?.images),
     quantity,
     unitPrice: unit,
-    subtotal: unit * quantity,
+    subtotal: money.multiply(unit, quantity),
   };
 };
 
@@ -390,4 +445,5 @@ module.exports = {
   serializeDeliveryOrderList,
   itemsCount,
   formatOrderNumber,
+  serializeStoreOrderRow,
 };

@@ -26,6 +26,13 @@ var orderSchema = new mongoose.Schema(
           type: mongoose.Schema.Types.ObjectId,
           ref: "Store",
         },
+        // Unit prices (naira) captured when the order is placed, so later
+        // product edits cannot change what this order cost or earned.
+        // price = vendor price (what the store is paid); listedPrice = what the
+        // customer paid. Absent on orders placed before snapshots existed —
+        // readers fall back to the product (see services/commissionService).
+        price: { type: Number },
+        listedPrice: { type: Number },
       },
     ],
     paymentIntent: {},
@@ -147,7 +154,17 @@ var orderSchema = new mongoose.Schema(
     paymentStatus: {
       type: String,
       default: "Unpaid",
-      enum: ["Unpaid", "Pending", "Paid", "Refunded", "Failed", "Not yet paid"],
+      // "Partially Refunded": some, not all, line items refunded
+      // (services/orderRefundService).
+      enum: [
+        "Unpaid",
+        "Pending",
+        "Paid",
+        "Partially Refunded",
+        "Refunded",
+        "Failed",
+        "Not yet paid",
+      ],
     },
     paymentMethod: {
       type: String,
@@ -166,6 +183,10 @@ var orderSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+// Seller order lists (GET /api/store/orders, /orders/recent) filter by store
+// and sort newest first.
+orderSchema.index({ "products.store": 1, createdAt: -1 });
 
 //Export the model
 module.exports = mongoose.model("Order", orderSchema);

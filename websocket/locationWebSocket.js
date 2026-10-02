@@ -4,15 +4,21 @@ const User = require('../models/userModel');
 const { createRedisConnection } = require('../config/redisClient');
 
 class LocationWebSocketServer {
-  constructor(server) {
-    this.wss = new WebSocket.Server({ 
-      server,
-      path: '/ws/location'
-    });
-    
+  // Served at /ws/location. noServer mode: app.js routes HTTP upgrades by path
+  // (websocket/upgradeRouter.js), because a ws server attached with `server`
+  // rejects (400) every upgrade whose path it does not own, which would break
+  // any other WebSocket endpoint on the same HTTP server.
+  constructor() {
+    this.wss = new WebSocket.Server({ noServer: true });
+
     this.clients = new Map(); // Store connected clients
     this.setupWebSocket();
     this.setupRedisSubscription();
+  }
+
+  /** Called by the server's upgrade router for /ws/location. */
+  handleUpgrade(req, socket, head) {
+    this.wss.handleUpgrade(req, socket, head, (ws) => this.wss.emit('connection', ws, req));
   }
 
   setupWebSocket() {

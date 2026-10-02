@@ -12,8 +12,17 @@ const {
   updateOrderStatus,
   contactCustomer,
   getBusinessAnalytics,
+  getStoreEarnings,
+  getRecentEarnings,
+  getRecentOrders,
 } = require("../controllers/store");
 const { updateStoreLocation } = require("../controllers/storeController");
+const {
+  listStoreRefundRequests,
+  getStoreRefundRequest,
+  approveRefundRequest,
+  rejectRefundRequest,
+} = require("../controllers/refund/seller");
 const { authMiddleware, isSeller } = require("../middleware/authMiddleware");
 
 const router = express.Router();
@@ -41,9 +50,19 @@ const router = express.Router();
  *             mobile: { type: string, nullable: true }
  *         itemsCount:
  *           type: integer
- *           description: Total units across the order's lines, not the number of lines.
+ *           description: |
+ *             Total units, not the number of lines. In the seller list
+ *             (`/api/store/orders`) only this store's units; in the admin list
+ *             the whole order's.
  *           example: 3
- *         amount: { type: number, description: Order total the customer paid (NGN), example: 17400 }
+ *         amount:
+ *           type: number
+ *           description: |
+ *             In the seller list (`/api/store/orders`): what the customer paid
+ *             for this store's items only — no delivery fee, no other sellers'
+ *             items — the same figure as the Recent Orders widget. In the admin
+ *             list: the whole order total the customer paid, delivery included.
+ *           example: 17400
  *         currency: { type: string, example: "NGN" }
  *         deliveryType: { type: string, enum: ["Pick up", "Delivery"] }
  *         status:
@@ -392,6 +411,509 @@ router.get("/analytics", authMiddleware, isSeller, getBusinessAnalytics);
 
 /**
  * @swagger
+ * /api/store/earnings:
+ *   get:
+ *     summary: Earnings & Transactions for the logged-in seller's store
+ *     description: |
+ *       Backs the seller's "Earnings & Transactions" screen in one call: the
+ *       **Earnings Summary** cards and the paginated **Recent Earning** table.
+ *
+ *       **What counts as an earning.** An order containing this store's
+ *       products whose payment has gone through. The vendor share is credited
+ *       at payment time, so a paid order is an earned order — delivery is not a
+ *       precondition.
+ *
+ *       **Refunds.** Once a refund the seller (or an admin) approved has gone
+ *       through, the seller's share of it is subtracted from that order:
+ *       `amountEarned` is what the store keeps, with `grossAmount` and
+ *       `refundedAmount` alongside, and every card total uses the net figure.
+ *       `status` is this store's own position — `paid`, `partially_refunded`
+ *       or `refunded` (₦0 kept, still listed). A refund still in progress does
+ *       not change the row: the money stays in the seller's wallet until then.
+ *
+ *       **Amount earned** is this store's line items only, at vendor price
+ *       (what the store is paid, excluding the platform margin). Multi-store
+ *       orders are split; delivery fees go to the rider and are excluded.
+ *
+ *       **Summary cards** always cover the whole store — search, date and
+ *       status filters only affect the table. Each card is
+ *       `{ value, previous, changePercent }` (`changePercent` is the `+54%`
+ *       badge; growth from zero reports `100`).
+ *
+ *       | Card | `value` | Compared against (`previous`) |
+ *       |------|---------|-------------------------------|
+ *       | `totalEarnings` | Lifetime earnings | Lifetime earnings at the start of this month |
+ *       | `weeklyEarnings` | Monday 00:00 (Africa/Lagos) → now | The same span last week |
+ *       | `todayEarnings` | Midnight (Africa/Lagos) → now | The same span yesterday |
+ *
+ *       Card windows use the time the payment was received; the table's date
+ *       filter uses the order date shown in the Order Date column.
+ *
+ *       When only paging or filtering the table, pass `summary=false` to skip
+ *       the card aggregation.
+ *     tags: [Stores]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *         description: |
+ *           Order number, product name, customer name, or amount earned.
+ *           Amounts match exactly and accept `5000`, `₦5,000` or `5,000.50`.
+ *         example: Indomie
+ *       - in: query
+ *         name: dateFrom
+ *         schema: { type: string, format: date }
+ *         description: Inclusive start on order date. A bare date is the start of that day (Africa/Lagos).
+ *         example: "2026-10-01"
+ *       - in: query
+ *         name: dateTo
+ *         schema: { type: string, format: date }
+ *         description: |
+ *           Inclusive end on order date. A bare date is the **end** of that day
+ *           (Africa/Lagos), so `dateFrom=dateTo=2026-10-01` returns that whole day.
+ *         example: "2026-10-31"
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [paid, partially_refunded, refunded] }
+ *         description: Filter rows by this store's refund position. Comma-separate or repeat for several. Default all.
+ *       - in: query
+ *         name: sortBy
+ *         schema: { type: string, enum: [date, amount], default: date }
+ *       - in: query
+ *         name: sortOrder
+ *         schema: { type: string, enum: [asc, desc], default: desc }
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1, minimum: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 10, minimum: 1, maximum: 100 }
+ *         description: The "Rows per page" selector
+ *       - in: query
+ *         name: summary
+ *         schema: { type: boolean, default: true }
+ *         description: Set `false` to omit `summary` (e.g. when only changing page)
+ *     responses:
+ *       200:
+ *         description: Earnings retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     currency: { type: string, example: NGN }
+ *                     timezone: { type: string, example: Africa/Lagos }
+ *                     generatedAt: { type: string, format: date-time }
+ *                     summary:
+ *                       type: object
+ *                       description: Omitted when `summary=false`
+ *                       properties:
+ *                         totalEarnings:
+ *                           $ref: '#/components/schemas/StoreAnalyticsMetric'
+ *                         weeklyEarnings:
+ *                           $ref: '#/components/schemas/StoreAnalyticsMetric'
+ *                         todayEarnings:
+ *                           $ref: '#/components/schemas/StoreAnalyticsMetric'
+ *                         paidOrders:
+ *                           type: integer
+ *                           description: Lifetime count of paid orders, excluding ones fully refunded
+ *                         ranges:
+ *                           type: object
+ *                           description: The windows behind each card, for tooltips
+ *                           properties:
+ *                             total:
+ *                               type: object
+ *                               properties:
+ *                                 previousTo: { type: string, format: date-time }
+ *                             weekly:
+ *                               type: object
+ *                               properties:
+ *                                 from: { type: string, format: date-time }
+ *                                 to: { type: string, format: date-time }
+ *                                 previousFrom: { type: string, format: date-time }
+ *                                 previousTo: { type: string, format: date-time }
+ *                             today:
+ *                               type: object
+ *                               properties:
+ *                                 from: { type: string, format: date-time }
+ *                                 to: { type: string, format: date-time }
+ *                                 previousFrom: { type: string, format: date-time }
+ *                                 previousTo: { type: string, format: date-time }
+ *                     earnings:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/StoreEarning'
+ *                     pagination:
+ *                       type: object
+ *                       properties:
+ *                         total: { type: integer }
+ *                         page: { type: integer }
+ *                         limit: { type: integer }
+ *                         pages: { type: integer }
+ *                         hasMore: { type: boolean }
+ *             example:
+ *               success: true
+ *               data:
+ *                 currency: NGN
+ *                 timezone: Africa/Lagos
+ *                 generatedAt: "2026-10-02T14:32:10.000+01:00"
+ *                 summary:
+ *                   totalEarnings: { value: 100000, previous: 100000, changePercent: 0 }
+ *                   weeklyEarnings: { value: 5000, previous: 3246.75, changePercent: 54 }
+ *                   todayEarnings: { value: 10000, previous: 10000, changePercent: 0 }
+ *                   paidOrders: 20
+ *                   ranges:
+ *                     total: { previousTo: "2026-09-30T23:00:00.000Z" }
+ *                     weekly:
+ *                       from: "2026-09-27T23:00:00.000Z"
+ *                       to: "2026-10-02T13:32:10.000Z"
+ *                       previousFrom: "2026-09-20T23:00:00.000Z"
+ *                       previousTo: "2026-09-25T13:32:10.000Z"
+ *                     today:
+ *                       from: "2026-10-01T23:00:00.000Z"
+ *                       to: "2026-10-02T13:32:10.000Z"
+ *                       previousFrom: "2026-09-30T23:00:00.000Z"
+ *                       previousTo: "2026-10-01T13:32:10.000Z"
+ *                 earnings:
+ *                   - id: "66fd1c2e9b1e8a0012ab34cd"
+ *                     orderNumber: "#WM1201"
+ *                     productSold: "Indomie Noodles (40 Pack)"
+ *                     products:
+ *                       - productId: "66fa0b1e9b1e8a0012ab1111"
+ *                         title: "Indomie Noodles (40 Pack)"
+ *                         image: "https://res.cloudinary.com/demo/image/upload/indomie.jpg"
+ *                         quantity: 1
+ *                         unitPrice: 5000
+ *                         amount: 5000
+ *                     customer: { id: "66f0aa119b1e8a0012ab9999", name: "Gilbert Johnston" }
+ *                     orderDate: "2023-11-08T10:15:00.000Z"
+ *                     earnedAt: "2023-11-08T10:16:02.000Z"
+ *                     amountEarned: 5000
+ *                     grossAmount: 5000
+ *                     refundedAmount: 0
+ *                     currency: NGN
+ *                     status: paid
+ *                     statusLabel: Paid
+ *                 pagination: { total: 100, page: 1, limit: 10, pages: 10, hasMore: true }
+ *       400:
+ *         description: Invalid `dateFrom`/`dateTo`/`status`, or `dateFrom` after `dateTo`
+ *         content:
+ *           application/json:
+ *             example: { success: false, message: "dateFrom must be on or before dateTo" }
+ *       403:
+ *         description: Not a seller
+ *       404:
+ *         description: No store found for this account
+ *
+ * components:
+ *   schemas:
+ *     StoreEarning:
+ *       type: object
+ *       description: One row of the Recent Earning table
+ *       properties:
+ *         id: { type: string, description: Order id }
+ *         orderNumber: { type: string, example: "#WM1201", description: The Order ID column }
+ *         productSold:
+ *           type: string
+ *           description: The Product Sold cell — first product title, plus "+N more" when the order has several of this store's products
+ *           example: "Indomie Noodles (40 Pack) +1 more"
+ *         products:
+ *           type: array
+ *           description: Every line item from this store in the order
+ *           items:
+ *             type: object
+ *             properties:
+ *               productId: { type: string }
+ *               title: { type: string, description: '"Deleted product" if the product no longer exists' }
+ *               image: { type: string, nullable: true }
+ *               quantity: { type: integer }
+ *               unitPrice: { type: number, description: Vendor price per unit (naira), as captured when the order was placed }
+ *               amount: { type: number, description: unitPrice × quantity (naira) }
+ *         customer:
+ *           type: object
+ *           properties:
+ *             id: { type: string, nullable: true }
+ *             name: { type: string, nullable: true }
+ *         orderDate: { type: string, format: date-time, description: When the order was placed }
+ *         earnedAt: { type: string, format: date-time, description: When payment was received (falls back to orderDate) }
+ *         amountEarned: { type: number, description: "What the store keeps from this order (naira): its share at vendor price, less settled refunds" }
+ *         grossAmount: { type: number, description: This store's share before refunds }
+ *         refundedAmount: { type: number, description: This store's share given back through settled refunds }
+ *         currency: { type: string, example: NGN }
+ *         status: { type: string, enum: [paid, partially_refunded, refunded] }
+ *         statusLabel: { type: string, enum: [Paid, Partially refunded, Refunded] }
+ */
+router.get("/earnings", authMiddleware, isSeller, getStoreEarnings);
+
+/**
+ * @swagger
+ * /api/store/earnings/recent:
+ *   get:
+ *     summary: Latest few earnings, for the dashboard's Recent Earnings widget
+ *     description: |
+ *       A lightweight sibling of `GET /api/store/earnings` for the dashboard
+ *       card: the store's most recent sales, newest first by when the payment
+ *       was received. No summary cards, search, filters or total count.
+ *
+ *       Amounts come from the same calculation as the Earnings & Transactions
+ *       table, so an order shows the same figure in both: `amount` is what the
+ *       store keeps (its share at vendor price, less settled refunds), with
+ *       `grossAmount` and `refundedAmount` alongside.
+ *
+ *       `statusLabel` uses the widget's wording — `paid` reads "Successful"
+ *       here, "Paid" in the full table; `status` is the same token in both.
+ *     tags: [Stores]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 5, minimum: 1, maximum: 20 }
+ *     responses:
+ *       200:
+ *         description: Recent earnings
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     currency: { type: string, example: NGN }
+ *                     earnings:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id: { type: string, description: Order id }
+ *                           orderNumber: { type: string, example: "#WM1201" }
+ *                           type: { type: string, enum: [sale] }
+ *                           title: { type: string, example: Sales, description: The row heading }
+ *                           amount: { type: number, description: What the store keeps from this order (naira) }
+ *                           grossAmount: { type: number, description: The store's share before refunds }
+ *                           refundedAmount: { type: number, description: Given back through settled refunds }
+ *                           currency: { type: string, example: NGN }
+ *                           earnedAt: { type: string, format: date-time, description: When the payment was received — the row's date and time }
+ *                           status: { type: string, enum: [paid, partially_refunded, refunded] }
+ *                           statusLabel: { type: string, enum: [Successful, Partially refunded, Refunded] }
+ *             example:
+ *               success: true
+ *               data:
+ *                 currency: NGN
+ *                 earnings:
+ *                   - id: "66fd1c2e9b1e8a0012ab34cd"
+ *                     orderNumber: "#WM1201"
+ *                     type: sale
+ *                     title: Sales
+ *                     amount: 10000
+ *                     grossAmount: 10000
+ *                     refundedAmount: 0
+ *                     currency: NGN
+ *                     earnedAt: "2025-06-05T09:00:00.000Z"
+ *                     status: paid
+ *                     statusLabel: Successful
+ *       403:
+ *         description: Not a seller
+ *       404:
+ *         description: No store found for this account
+ */
+router.get("/earnings/recent", authMiddleware, isSeller, getRecentEarnings);
+
+/**
+ * @swagger
+ * /api/store/refund-requests:
+ *   get:
+ *     summary: Refund requests buyers have sent this store
+ *     description: |
+ *       Buyers ask the seller — not the platform — for refunds, because the
+ *       seller already holds the money. Each request covers this store's items
+ *       in one order. Requests awaiting a response (`status=requested`) carry
+ *       `allowedActions: [approve, reject]`; the seller has until `respondBy`
+ *       (3 days) before the buyer may escalate to WigoMarket.
+ *
+ *       `vendorAmount` is what approving will take back out of the seller's
+ *       wallet; `amount` is what the buyer receives (the platform returns its
+ *       own margin, `platformAmount`).
+ *     tags: [Refunds]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema: { type: string }
+ *         description: One or more comma-separated raw statuses, e.g. `requested`
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20, maximum: 100 }
+ *     responses:
+ *       200:
+ *         description: Refund requests
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     refunds:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/RefundRequest'
+ *                     pagination:
+ *                       $ref: '#/components/schemas/RefundPagination'
+ *                     counts:
+ *                       type: object
+ *                       properties:
+ *                         awaitingResponse: { type: integer, description: Requests waiting on this seller, for a badge }
+ *       400:
+ *         description: Invalid status
+ *       404:
+ *         description: No store found for this account
+ */
+router.get("/refund-requests", authMiddleware, isSeller, listStoreRefundRequests);
+
+/**
+ * @swagger
+ * /api/store/refund-requests/{id}:
+ *   get:
+ *     summary: One refund request for this store
+ *     tags: [Refunds]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: The refund request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     refund:
+ *                       $ref: '#/components/schemas/RefundRequest'
+ *       404:
+ *         description: Not found, or not this store's
+ */
+router.get("/refund-requests/:id", authMiddleware, isSeller, getStoreRefundRequest);
+
+/**
+ * @swagger
+ * /api/store/refund-requests/{id}/approve:
+ *   post:
+ *     summary: Approve a refund request
+ *     description: |
+ *       Sends `amount` back to the buyer's card through Flutterwave and takes
+ *       `vendorAmount` out of the seller's wallet. The response's
+ *       `statusLabel` is "Refunded" when it completed straight away, or
+ *       "Refund in progress" while the payout finishes (it is retried
+ *       automatically). If the wallet no longer holds the full share (it was
+ *       withdrawn), the buyer is still refunded and the difference is recorded
+ *       as owed by the seller.
+ *     tags: [Refunds]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               note: { type: string }
+ *     responses:
+ *       200:
+ *         description: Approved
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     refund:
+ *                       $ref: '#/components/schemas/RefundRequest'
+ *       404:
+ *         description: Not found, or not this store's
+ *       409:
+ *         description: Not awaiting a response (already answered, escalated or withdrawn)
+ */
+router.post("/refund-requests/:id/approve", authMiddleware, isSeller, approveRefundRequest);
+
+/**
+ * @swagger
+ * /api/store/refund-requests/{id}/reject:
+ *   post:
+ *     summary: Reject a refund request
+ *     description: A reason is required and is shown to the buyer, who may then escalate to WigoMarket.
+ *     tags: [Refunds]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [reason]
+ *             properties:
+ *               reason: { type: string, example: "The item was delivered sealed and undamaged." }
+ *     responses:
+ *       200:
+ *         description: Rejected
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     refund:
+ *                       $ref: '#/components/schemas/RefundRequest'
+ *       400:
+ *         description: Reason missing
+ *       404:
+ *         description: Not found, or not this store's
+ *       409:
+ *         description: Not awaiting a response
+ */
+router.post("/refund-requests/:id/reject", authMiddleware, isSeller, rejectRefundRequest);
+
+/**
+ * @swagger
  * /api/store/orders:
  *   get:
  *     summary: List the logged-in seller's store orders (paginated, filterable)
@@ -404,6 +926,18 @@ router.get("/analytics", authMiddleware, isSeller, getBusinessAnalytics);
  *
  *       Each row carries `allowedActions`, so the table's "Update Status" menu
  *       needs no extra call to the order detail.
+ *
+ *       **This store's part only.** `itemsCount` and `amount` cover the seller's
+ *       own items in each order (what the customer paid for them) — not other
+ *       sellers' items in the same order, and not the delivery fee. These match
+ *       the Recent Orders widget. `sortBy=amount` still orders by the whole
+ *       order's total, so in multi-seller orders the sort can differ slightly
+ *       from the `amount` shown.
+ *
+ *       **Unpaid card/bank orders are hidden.** A card or bank order appears
+ *       only once its payment has gone through, so sellers never prepare an
+ *       abandoned checkout. Cash orders (paid on delivery) appear as soon as
+ *       they are placed. Tab `counts` use the same rule.
  *     tags: [Stores]
  *     security:
  *       - bearerAuth: []
@@ -443,10 +977,17 @@ router.get("/analytics", authMiddleware, isSeller, getBusinessAnalytics);
  *         schema: { type: string, enum: ["Pick up", "Delivery"] }
  *       - in: query
  *         name: dateFrom
- *         schema: { type: string, format: date-time }
+ *         schema: { type: string, format: date }
+ *         description: Inclusive start on order date. A bare date is the start of that day (Africa/Lagos).
+ *         example: "2026-10-01"
  *       - in: query
  *         name: dateTo
- *         schema: { type: string, format: date-time }
+ *         schema: { type: string, format: date }
+ *         description: |
+ *           Inclusive end on order date. A bare date is the **end** of that day
+ *           (Africa/Lagos), so `dateFrom=dateTo=2026-10-01` returns that whole day.
+ *           Full ISO timestamps are also accepted and used as-is.
+ *         example: "2026-10-31"
  *       - in: query
  *         name: search
  *         schema: { type: string }
@@ -545,11 +1086,124 @@ router.get("/analytics", authMiddleware, isSeller, getBusinessAnalytics);
  *                   hasMore: true
  *                 counts: { all: 42, pending: 4, ongoing: 11, history: 31 }
  *       400:
- *         description: Unknown `category` or `status` value
+ *         description: Unknown `category` or `status` value, unparseable `dateFrom`/`dateTo`, or `dateFrom` after `dateTo`
  *       404:
  *         description: No store found for this account
  */
 router.get("/orders", authMiddleware, isSeller, getStoreOrders);
+
+/**
+ * @swagger
+ * /api/store/orders/recent:
+ *   get:
+ *     summary: Newest orders, for the dashboard's Recent Orders widget
+ *     description: |
+ *       A lightweight sibling of `GET /api/store/orders` for the dashboard card:
+ *       the store's newest orders, newest first. No filters, search, tab counts
+ *       or `allowedActions` — "View all" goes to the full list for those.
+ *
+ *       `items` and `amount` cover **this store's items only**: what the
+ *       customer paid for them, excluding other sellers' items in the same
+ *       order and the delivery fee — the same figures as the full list.
+ *
+ *       Same visibility as the full list: a card or bank order appears only
+ *       once paid; cash orders appear as soon as they are placed.
+ *
+ *       **Live updates.** Open a WebSocket to `/ws/orders` (same JWT, as
+ *       `?token=<jwt>` or an `Authorization: Bearer` header) to keep the widget
+ *       current without polling. Each message is:
+ *
+ *       ```json
+ *       { "type": "order.created", "storeId": "…", "order": { …row… }, "at": "2026-10-02T10:15:00.000Z" }
+ *       ```
+ *
+ *       `order` has exactly the shape of a row below. On `order.created` — a
+ *       cash order placed, or a card order whose payment just went through —
+ *       prepend it (and drop the last row to keep the size); on
+ *       `order.updated` (status changed), replace the row with the same `id`
+ *       if it is showing. Unpaid card/bank orders produce no events. The first message after
+ *       connecting is `{ "type": "connection", "storeId": "…" }`. The socket is
+ *       closed with code 1008 if the token is missing/invalid or the user has
+ *       no store. Refetch this endpoint after a reconnect to catch anything
+ *       missed while disconnected.
+ *     tags: [Stores]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 5, minimum: 1, maximum: 20 }
+ *     responses:
+ *       200:
+ *         description: Recent orders
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     orders:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/StoreRecentOrder'
+ *                     live:
+ *                       type: object
+ *                       description: Where to subscribe for live updates
+ *                       properties:
+ *                         path: { type: string, example: /ws/orders }
+ *                         events:
+ *                           type: array
+ *                           items: { type: string }
+ *                           example: [order.created, order.updated]
+ *             example:
+ *               success: true
+ *               data:
+ *                 orders:
+ *                   - id: "66fd1c2e9b1e8a0012ab34cd"
+ *                     orderNumber: "#WM1201"
+ *                     items: 10
+ *                     amount: 10000
+ *                     currency: NGN
+ *                     orderDate: "2023-11-08T10:15:00.000Z"
+ *                     customer: { id: "66f0aa119b1e8a0012ab9999", name: "Gilbert Johnston" }
+ *                     status: pending
+ *                     statusLabel: Pending
+ *                     paymentStatus: Paid
+ *                 live: { path: /ws/orders, events: [order.created, order.updated] }
+ *       403:
+ *         description: Not a seller
+ *       404:
+ *         description: No store found for this account
+ *
+ * components:
+ *   schemas:
+ *     StoreRecentOrder:
+ *       type: object
+ *       description: One Recent Orders row; also the `order` payload of /ws/orders events
+ *       properties:
+ *         id: { type: string }
+ *         orderNumber: { type: string, example: "#WM1201" }
+ *         items: { type: integer, description: Units of this store's products in the order }
+ *         amount: { type: number, description: What the customer paid for this store's items (naira) }
+ *         currency: { type: string, example: NGN }
+ *         orderDate: { type: string, format: date-time }
+ *         customer:
+ *           type: object
+ *           properties:
+ *             id: { type: string, nullable: true }
+ *             name: { type: string, nullable: true }
+ *         status:
+ *           type: string
+ *           enum: [pending, confirmed, preparing, pickUpReady, inTransit, delivered, cancelled]
+ *         statusLabel: { type: string, example: Pending }
+ *         paymentStatus:
+ *           type: string
+ *           enum: [Unpaid, Pending, Paid, Partially Refunded, Refunded, Failed, "Not yet paid"]
+ */
+router.get("/orders/recent", authMiddleware, isSeller, getRecentOrders);
 
 /**
  * @swagger
@@ -727,9 +1381,9 @@ router.get("/orders", authMiddleware, isSeller, getStoreOrders);
  *               unitPrice:
  *                 type: number
  *                 description: >
- *                   The product's current listedPrice (falling back to price).
- *                   Unit price is not snapshotted on the order line, so this
- *                   reflects today's price, not necessarily the price paid.
+ *                   What the customer paid per unit, as captured when the
+ *                   order was placed. Orders placed before price snapshots
+ *                   existed fall back to the product's current listedPrice.
  *               subtotal: { type: number, description: unitPrice × quantity }
  *         summary:
  *           type: object
@@ -791,6 +1445,11 @@ router.get("/orders/:id", authMiddleware, isSeller, getStoreOrderDetail);
  *       - `confirmed` → `preparing` → `pickUpReady`
  *       - `pickUpReady` → `delivered` *(self_delivery / pickup orders only)*
  *       - any pre-shipment state → `cancelled`
+ *
+ *       **Cancelling a paid order refunds the customer automatically.** Stock is
+ *       restored and a refund is queued in the same step, then sent to
+ *       Flutterwave in the background. The order's `paymentStatus` stays `Paid`
+ *       until the refund has gone through, then becomes `Refunded`.
  *
  *       `preparing` is optional — the seller can skip straight from `confirmed`
  *       to `pickUpReady`. The order detail response (`GET /api/store/orders/{id}`)

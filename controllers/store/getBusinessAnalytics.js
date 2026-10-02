@@ -4,7 +4,13 @@ const { DateTime } = require("luxon");
 const Order = require("../../models/orderModel");
 const Product = require("../../models/productModel");
 const { STATUS, statusMatchValues } = require("../../utils/orderStatus");
-const { fromKobo } = require("../../utils/money");
+const {
+  LAGOS,
+  PERIOD_UNITS,
+  windowFor,
+  metric,
+  moneyMetric,
+} = require("../../utils/periodMetrics");
 
 /**
  * @function getBusinessAnalytics
@@ -32,15 +38,6 @@ const { fromKobo } = require("../../utils/money");
  * converted back to naira exactly once, via utils/money. Summing naira doubles
  * in Mongo would reintroduce the float drift utils/money exists to prevent.
  */
-
-const LAGOS = "Africa/Lagos";
-
-// period key → the luxon unit its window is anchored on.
-const PERIOD_UNITS = {
-  today: "day",
-  weekly: "week",
-  monthly: "month",
-};
 
 // UI/shorthand spellings the client may send.
 const PERIOD_ALIASES = {
@@ -82,20 +79,6 @@ const parsePeriods = (raw) => {
   }
 
   return keys.length ? { keys } : { keys: ["today"] };
-};
-
-/** Current and preceding window for a period key, as JS Dates. */
-const windowFor = (key, now) => {
-  const unit = PERIOD_UNITS[key];
-  const from = now.startOf(unit);
-  const step = { [`${unit}s`]: 1 };
-
-  return {
-    from: from.toJSDate(),
-    to: now.toJSDate(),
-    previousFrom: from.minus(step).toJSDate(),
-    previousTo: now.minus(step).toJSDate(),
-  };
 };
 
 // ── Aggregation expression helpers ───────────────────────────────────────────
@@ -143,6 +126,17 @@ const COMPLETED_AT = {
         "$updatedAt",
       ],
     },
+  ],
+};
+
+// Unit prices for one unwound line: the order's snapshot, else the product's.
+const LINE_PRICE = {
+  $ifNull: ["$products.price", { $ifNull: ["$productDoc.price", 0] }],
+};
+const LINE_LISTED_PRICE = {
+  $ifNull: [
+    "$products.listedPrice",
+    { $ifNull: ["$productDoc.listedPrice", LINE_PRICE] },
   ],
 };
 
@@ -234,15 +228,10 @@ const getBusinessAnalytics = asyncHandler(async (req, res) => {
           // net = the vendor price the store is paid (see commissionService);
           // gross = the listed price the customer paid, the difference being
           // the platform's margin.
-          netKobo: { $sum: lineKobo({ $ifNull: ["$productDoc.price", 0] }) },
-          grossKobo: {
-            $sum: lineKobo({
-              $ifNull: [
-                "$productDoc.listedPrice",
-                { $ifNull: ["$productDoc.price", 0] },
-              ],
-            }),
-          },
+          // Prefer the unit prices snapshotted on the order line; older
+          // orders fall back to the product's current price.
+          netKobo: { $sum: lineKobo(LINE_PRICE) },
+          grossKobo: { $sum: lineKobo(LINE_LISTED_PRICE) },
         },
       },
       { $group: { _id: null, ...orderAccumulators } },
@@ -297,36 +286,5 @@ const getBusinessAnalytics = asyncHandler(async (req, res) => {
 
   res.json({ success: true, data });
 });
-
-/**
- * One tile: the current figure, what it was over the comparison window, and the
- * change between them.
- *
- * A rise from zero has no defined percentage — it is reported as +100% so the
- * tile shows growth rather than a misleading 0%, with `previous: 0` there for a
- * client that wants to render "new" instead.
- */
-function metric(value, previous) {
-  return { value, previous, changePercent: changePercent(value, previous) };
-}
-
-/**
- * Same as metric(), for money. The percentage is derived from the integer kobo
- * and the naira figures are produced only at the end, so no money value is ever
- * an operand of a raw arithmetic expression.
- */
-function moneyMetric(valueKobo, previousKobo) {
-  return {
-    value: fromKobo(valueKobo),
-    previous: fromKobo(previousKobo),
-    changePercent: changePercent(valueKobo, previousKobo),
-  };
-}
-
-/** Percentage change, to one decimal place. */
-function changePercent(value, previous) {
-  if (previous === 0) return value === 0 ? 0 : 100;
-  return Math.round(((value - previous) / previous) * 1000) / 10;
-}
 
 module.exports = getBusinessAnalytics;

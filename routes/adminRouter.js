@@ -15,6 +15,7 @@ const mongoose = require("mongoose");
 const AuditLog = require("../models/auditLogModel");
 const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
 const admin = require("../controllers/admin");
+const refunds = require("../controllers/refund/admin");
 const {
   getPendingWithdrawals,
   processWithdrawal,
@@ -430,11 +431,15 @@ router.put("/stores/:id/status", admin.setStoreStatus);
  *       Platform-wide order list for the admin dashboard. Same query contract
  *       and response shape as `GET /api/store/orders`: category
  *       (all/pending/ongoing/history, `recent` = all), multi-value status,
- *       orderType, dateFrom, dateTo, search (order number or customer name),
+ *       orderType, dateFrom, dateTo (a bare date such as 2026-10-01 covers that
+ *       whole Africa/Lagos day), search (order number or customer name),
  *       sortBy, sortOrder, page, limit.
  *
  *       Each row's `allowedActions` reflects admin override power, so it can
  *       include transitions a seller or rider could not perform.
+ *
+ *       Unlike the seller list, rows show the **whole order** (`itemsCount`,
+ *       `amount` incl. delivery) and include unpaid card/bank checkouts.
  *     tags: [Admin]
  *     security:
  *       - bearerAuth: []
@@ -442,7 +447,7 @@ router.put("/stores/:id/status", admin.setStoreStatus);
  *       200:
  *         description: Paginated list of order rows with category counts
  *       400:
- *         description: Unknown `category` or `status` value
+ *         description: Unknown `category` or `status` value, unparseable `dateFrom`/`dateTo`, or `dateFrom` after `dateTo`
  */
 router.get("/orders", admin.listOrders);
 
@@ -621,6 +626,203 @@ router.put("/wallets/:id/limits", admin.updateWalletLimits);
 router.get("/withdrawals/pending", getPendingWithdrawals);
 router.post("/withdrawals/:transactionId/process", processWithdrawal);
 router.get("/withdrawals/stats", getWithdrawalStats);
+
+// ── Refund requests ─────────────────────────────────────────────────────────
+
+/**
+ * @swagger
+ * /api/admin/refund-requests:
+ *   get:
+ *     summary: Refund requests across all stores
+ *     description: |
+ *       Three queues need an admin, and `counts` gives their sizes for badges:
+ *
+ *       | `status` | What to do |
+ *       |----------|------------|
+ *       | `escalated` | The buyer escalated a rejected or ignored request. Approve or decline (`/decision`) — final. |
+ *       | `needs_review` | A payout's outcome is unknown (e.g. Flutterwave timed out). Check the Flutterwave dashboard, then `/resolve` with `refunded` or `not_refunded`. Never retried automatically, to avoid refunding twice. |
+ *       | `failed` | Flutterwave rejected the payout; no money moved. `/resolve` with `retry`. |
+ *
+ *       Admin rows include payout internals: `providerRefundId`, `lastError`,
+ *       `attempts`, `shortfalls` (seller already withdrew; `outstanding` is owed
+ *       by them) and the full `history`.
+ *     tags: [Refunds]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema: { type: string }
+ *         description: One or more comma-separated raw statuses, e.g. `escalated,needs_review,failed`
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20, maximum: 100 }
+ *     responses:
+ *       200:
+ *         description: Refund requests
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     refunds:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/RefundRequest'
+ *                     pagination:
+ *                       $ref: '#/components/schemas/RefundPagination'
+ *                     counts:
+ *                       type: object
+ *                       properties:
+ *                         escalated: { type: integer }
+ *                         needsReview: { type: integer }
+ *                         failed: { type: integer }
+ *       400:
+ *         description: Invalid status
+ */
+router.get("/refund-requests", refunds.listRefundRequests);
+
+/**
+ * @swagger
+ * /api/admin/refund-requests/{id}:
+ *   get:
+ *     summary: One refund request, with payout internals
+ *     tags: [Refunds]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: The refund request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     refund:
+ *                       $ref: '#/components/schemas/RefundRequest'
+ *       404:
+ *         description: Not found
+ */
+router.get("/refund-requests/:id", refunds.getRefundRequest);
+
+/**
+ * @swagger
+ * /api/admin/refund-requests/{id}/decision:
+ *   post:
+ *     summary: Decide an escalated refund request (final)
+ *     description: |
+ *       `approve` sends the refund to the buyer's card and takes the seller's
+ *       share out of their wallet, exactly as a seller approval would.
+ *       `decline` closes the request. Only `escalated` requests can be decided.
+ *     tags: [Refunds]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [decision]
+ *             properties:
+ *               decision: { type: string, enum: [approve, decline] }
+ *               note: { type: string, description: Shown to the buyer }
+ *     responses:
+ *       200:
+ *         description: Decided
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     refund:
+ *                       $ref: '#/components/schemas/RefundRequest'
+ *       400:
+ *         description: Invalid decision
+ *       404:
+ *         description: Not found
+ *       409:
+ *         description: Not escalated
+ */
+router.post("/refund-requests/:id/decision", refunds.decideRefundRequest);
+
+/**
+ * @swagger
+ * /api/admin/refund-requests/{id}/resolve:
+ *   post:
+ *     summary: Unstick a payout that could not complete on its own
+ *     description: |
+ *       - `needs_review` + `refunded`: the money did go out (confirmed on the
+ *         Flutterwave dashboard). Pass the Flutterwave refund id unless the
+ *         request already has one; the refund is then booked.
+ *       - `needs_review` + `not_refunded`: no money moved; becomes `failed`.
+ *       - `failed` + `retry`: send the refund to Flutterwave again.
+ *     tags: [Refunds]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [outcome]
+ *             properties:
+ *               outcome: { type: string, enum: [refunded, not_refunded, retry] }
+ *               providerRefundId: { type: string, description: Required for `refunded` when the request has none yet }
+ *               note: { type: string }
+ *     responses:
+ *       200:
+ *         description: Resolved
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     refund:
+ *                       $ref: '#/components/schemas/RefundRequest'
+ *       400:
+ *         description: Invalid outcome, or providerRefundId missing
+ *       404:
+ *         description: Not found
+ *       409:
+ *         description: Wrong state for that outcome, or Flutterwave already confirmed the refund
+ */
+router.post("/refund-requests/:id/resolve", refunds.resolveRefundRequest);
 
 // ── Audit logs ────────────────────────────────────────────────────────────────
 

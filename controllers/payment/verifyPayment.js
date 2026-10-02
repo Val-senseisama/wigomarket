@@ -1,16 +1,21 @@
 const asyncHandler = require("express-async-handler");
 const mongoose = require("mongoose");
 const Order = require("../../models/orderModel");
-const User = require("../../models/userModel");
-const Wallet = require("../../models/walletModel");
 const Transaction = require("../../models/transactionModel");
 const VATConfig = require("../../models/vatConfigModel");
 const { getFlutterwaveInstance } = require("../../config/flutterwaveClient");
 const { calculateCommissionBreakdown } = require("../../services/commissionService");
+const {
+  resolveVendorPayouts,
+  creditVendorWallets,
+  primaryVendor,
+} = require("../../services/vendorPayoutService");
+const { orderPaymentEntries } = require("../../services/orderPaymentLedger");
 const { validateMongodbId } = require("../../utils/validateMongodbId");
 const { MakeID } = require("../../Helpers/Helpers");
 const { PaymentStatus, OrderStatus } = require("../../utils/constants");
 const audit = require("../../services/auditService");
+const { publishStoreOrderEvent, EVENT } = require("../../services/storeOrderEvents");
 
 /**
  * @function verifyPayment
@@ -121,14 +126,16 @@ const verifyPayment = asyncHandler(async (req, res) => {
       commissionData = await calculateCommissionBreakdown(order);
       vatAmount = vatConfig.calculateVAT(order.paymentIntent.amount);
 
-      const vendor = await User.findById(
-        order.products[0].product.store,
-      ).session(session);
+      // One payout per store, each to that store's owner.
+      const vendorPayouts = await resolveVendorPayouts(order, session);
+      const vendor = await primaryVendor(vendorPayouts, session);
       vatResponsibility = vendor
         ? vatConfig.getVATResponsibility(vendor, order.paymentIntent.amount)
         : "platform";
 
-      const vendorId = vendor?._id ?? order.products[0].product.store;
+      // Balanced entries; VAT is a memo on `vat`, not ledger lines (see
+      // services/orderPaymentLedger).
+      const ledger = orderPaymentEntries({ order: order, payouts: vendorPayouts });
 
       // ── Ledger ──────────────────────────────────────────────────────────
       const transactionId = `PAY_${Date.now()}_${MakeID(16)}`;
@@ -137,87 +144,8 @@ const verifyPayment = asyncHandler(async (req, res) => {
           transactionId,
           reference: `Payment-${orderId}`,
           type: "order_payment",
-          totalAmount: order.paymentIntent.amount,
-          entries: [
-            {
-              account: "cash_account",
-              userId: order.orderedBy._id,
-              debit: order.paymentIntent.amount,
-              credit: 0,
-              description: `Payment for order ${orderId}`,
-            },
-            {
-              account: "accounts_receivable",
-              userId: order.orderedBy._id,
-              debit: 0,
-              credit: order.paymentIntent.amount,
-              description: "Receivable from customer",
-            },
-            {
-              account: "commission_revenue",
-              userId: null,
-              debit: commissionData.platformAmount,
-              credit: 0,
-              description: "Platform commission",
-            },
-            {
-              account: "accounts_payable",
-              userId: null,
-              debit: 0,
-              credit: commissionData.platformAmount,
-              description: "Platform commission payable",
-            },
-            {
-              account: "commission_payable",
-              userId: vendorId,
-              debit: commissionData.vendorAmount,
-              credit: 0,
-              description: "Vendor earnings",
-            },
-            {
-              account: "wallet_vendor",
-              userId: vendorId,
-              debit: 0,
-              credit: commissionData.vendorAmount,
-              description: "Vendor wallet credit",
-            },
-            ...(commissionData.dispatchAmount > 0
-              ? [
-                  {
-                    account: "commission_payable",
-                    userId: order.deliveryAgent?._id,
-                    debit: commissionData.dispatchAmount,
-                    credit: 0,
-                    description: "Dispatch earnings",
-                  },
-                  {
-                    account: "wallet_dispatch",
-                    userId: order.deliveryAgent?._id,
-                    debit: 0,
-                    credit: commissionData.dispatchAmount,
-                    description: "Dispatch wallet credit",
-                  },
-                ]
-              : []),
-            ...(vatAmount > 0
-              ? [
-                  {
-                    account: "vat_payable",
-                    userId: vatResponsibility === "platform" ? null : vendorId,
-                    debit: vatAmount,
-                    credit: 0,
-                    description: "VAT collected",
-                  },
-                  {
-                    account: "vat_revenue",
-                    userId: null,
-                    debit: 0,
-                    credit: vatAmount,
-                    description: "VAT revenue",
-                  },
-                ]
-              : []),
-          ],
+          totalAmount: ledger.totalAmount,
+          entries: ledger.entries,
           vat: {
             rate: vatConfig.rates.standard,
             amount: vatAmount,
@@ -226,9 +154,10 @@ const verifyPayment = asyncHandler(async (req, res) => {
           },
           commission: {
             platformRate: commissionData.platformRate,
-            platformAmount: commissionData.platformAmount,
+            platformAmount: ledger.platformAmount,
             vendorAmount: commissionData.vendorAmount,
-            dispatchAmount: commissionData.dispatchAmount,
+            // The delivery fee is held, not paid, at this point.
+            dispatchAmount: 0,
           },
           relatedEntity: { type: "order", id: orderId },
           status: "completed",
@@ -243,34 +172,10 @@ const verifyPayment = asyncHandler(async (req, res) => {
       );
 
       // ── Wallet credits ───────────────────────────────────────────────────
-      if (commissionData.vendorAmount > 0) {
-        let vendorWallet = await Wallet.findOne({ user: vendorId }).session(
-          session,
-        );
-        if (!vendorWallet) {
-          [vendorWallet] = await Wallet.create(
-            [{ user: vendorId, balance: 0 }],
-            { session },
-          );
-        }
-        await vendorWallet.creditEarning(commissionData.vendorAmount, session);
-      }
+      await creditVendorWallets(vendorPayouts, session);
 
-      if (commissionData.dispatchAmount > 0 && order.deliveryAgent) {
-        let dispatchWallet = await Wallet.findOne({
-          user: order.deliveryAgent._id,
-        }).session(session);
-        if (!dispatchWallet) {
-          [dispatchWallet] = await Wallet.create(
-            [{ user: order.deliveryAgent._id, balance: 0 }],
-            { session },
-          );
-        }
-        await dispatchWallet.creditEarning(
-          commissionData.dispatchAmount,
-          session,
-        );
-      }
+      // No rider credit here: the delivery fee is held in accounts_payable and
+      // paid to the rider on delivery (dispatchEarningsService).
 
       // ── Mark order paid (session-bound) ──────────────────────────────────
       updatedOrder = await Order.findByIdAndUpdate(
@@ -289,6 +194,10 @@ const verifyPayment = asyncHandler(async (req, res) => {
   } finally {
     await session.endSession();
   }
+
+  // Committed: a paid card order is new to sellers, so it arrives as
+  // order.created on their dashboards (fire-and-forget).
+  publishStoreOrderEvent(orderId, EVENT.CREATED);
 
   audit.log({
     action: "payment.verified",
