@@ -94,7 +94,7 @@ const options = {
       },
       {
         name: "Payment",
-        description: "Payment processing with Flutterwave",
+        description: "Card / transfer checkout through the active payment provider (Monnify or Flutterwave)",
       },
       {
         name: "Location Tracking",
@@ -109,8 +109,8 @@ const options = {
         description: "Rating and review system",
       },
       {
-        name: "Flutterwave",
-        description: "Flutterwave integration utilities",
+        name: "Banks",
+        description: "Bank list and account-name lookup through the active payment provider",
       },
       {
         name: "WebSocket",
@@ -160,7 +160,7 @@ const options = {
     "./routes/locationTrackingRouter.js",
     "./routes/notificationRouter.js",
     "./routes/ratingRouter.js",
-    "./routes/flutterwaveRouter.js",
+    "./routes/bankRouter.js",
     "./routes/walletRouter.js",
     "./routes/websocketRouter.js",
     "./routes/wishlistRouter.js",

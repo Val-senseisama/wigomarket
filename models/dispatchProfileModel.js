@@ -85,7 +85,7 @@ var dispatchProfileSchema = new mongoose.Schema(
       accountName:   { type: String, default: null },
       accountNumber: { type: String, default: null }, // 10-digit NUBAN
       bankName:      { type: String, default: null },
-      bankCode:      { type: String, default: null }, // 3-char Flutterwave code
+      bankCode:      { type: String, default: null }, // code from GET /api/banks
     },
 
     rating: {

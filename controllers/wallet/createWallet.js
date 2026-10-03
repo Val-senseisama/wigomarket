@@ -14,7 +14,7 @@ const Wallet = require("../../models/walletModel");
  * @param {string} req.body.accountNumber - Bank account number
  * @param {string} req.body.bankName - Bank name
  * @param {string} req.body.phoneNumber - Phone number linked to bank account
- * @param {string} [req.body.bankCode] - Bank code (provided by bank picker, used for Flutterwave payouts)
+ * @param {string} [req.body.bankCode] - Bank code (provided by bank picker, used for payouts)
  * @returns {Object} - Created wallet information
  */
 const createWallet = asyncHandler(async (req, res) => {

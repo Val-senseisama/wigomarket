@@ -20,14 +20,18 @@ const mongoose = require("mongoose");
  *   approved ──► processing ──► provider_succeeded ──► settled
  *                   │                  │
  *                   ├──► failed        └──► needs_review (booking kept failing)
- *                   └──► needs_review (Flutterwave outcome unknown)
+ *                   └──► needs_review (provider outcome unknown)
  *
- *   failed        Flutterwave explicitly rejected the refund; no money moved.
+ *   processing    Sent to the provider that took the charge (`provider`).
+ *                 Monnify refunds can sit here (IN_PROGRESS) for hours; the
+ *                 cron asks Monnify about `providerRefundReference` until the
+ *                 refund is final, or 24h pass.
+ *   failed        The provider explicitly rejected the refund; no money moved.
  *                 An admin may retry it.
  *   needs_review  We cannot tell whether money moved. Never retried
  *                 automatically — Flutterwave refunds take no idempotency key,
  *                 so a blind retry could pay the buyer twice. An admin checks
- *                 the Flutterwave dashboard and resolves it.
+ *                 the provider's dashboard and resolves it.
  */
 const REFUND_STATUS = {
   REQUESTED: "requested",
@@ -114,13 +118,19 @@ const refundSchema = new mongoose.Schema(
     adminDecision: decisionSchema,
     approvedBy: { type: String, enum: ["seller", "admin", null], default: null },
 
-    // Flutterwave's id for the original charge, and for the refund once made.
+    // The payment provider that took the original charge (services/payments
+    // adapter name); the refund goes back through it.
+    provider: { type: String, default: "flutterwave" },
+    // The provider's id for the original charge, and for the refund once made.
     providerTransactionId: { type: String, required: true },
+    // Our reference for the current payout attempt; lets the provider be asked
+    // how it ended.
+    providerRefundReference: { type: String, default: null },
     providerRefundId: { type: String, default: null },
     providerStatus: { type: String, default: null },
 
     processingStartedAt: { type: Date, default: null },
-    attempts: { type: Number, default: 0 }, // booking attempts after Flutterwave succeeded
+    attempts: { type: Number, default: 0 }, // booking attempts after the provider succeeded
     lastError: { type: String, default: null },
 
     settledAt: { type: Date, default: null },

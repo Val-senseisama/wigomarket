@@ -24,9 +24,9 @@ const LABELS = {
 const ADMIN_LABELS = {
   ...LABELS,
   [RS.APPROVED]: "Approved, awaiting payout",
-  [RS.PROCESSING]: "Sending to Flutterwave",
+  [RS.PROCESSING]: "Sending to payment provider",
   [RS.PROVIDER_SUCCEEDED]: "Refunded, booking pending",
-  [RS.FAILED]: "Rejected by Flutterwave",
+  [RS.FAILED]: "Rejected by the payment provider",
   [RS.NEEDS_REVIEW]: "Needs manual review",
 };
 
@@ -106,8 +106,11 @@ const serializeRefund = (refund, role) => {
   if (role === "admin") {
     Object.assign(base, {
       sellerId: r.seller,
+      provider: r.provider ?? null,
       providerTransactionId: r.providerTransactionId,
+      providerRefundReference: r.providerRefundReference ?? null,
       providerRefundId: r.providerRefundId ?? null,
+      providerStatus: r.providerStatus ?? null,
       lastError: r.lastError ?? null,
       attempts: r.attempts,
       shortfalls: r.shortfalls || [],

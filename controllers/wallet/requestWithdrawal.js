@@ -173,7 +173,10 @@ const requestWithdrawal = asyncHandler(async (req, res) => {
           transactionId,
           reference: `Withdrawal-${transactionId}`,
           type: "wallet_withdrawal",
-          totalAmount: amount,
+          // Everything that left the wallet (the ledger requires totalAmount
+          // to equal the debits). The payout itself is amount; see
+          // withdrawalPayoutService.amountsOf.
+          totalAmount: totalDeduction,
           entries: [
             {
               account: "accounts_payable",

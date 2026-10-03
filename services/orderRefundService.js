@@ -16,14 +16,16 @@
  * Paying out an approved refund, and why the steps are separate:
  *
  *   1. Claim    — `approved → processing` with a guarded update, so only one
- *                 caller ever talks to Flutterwave for a given request.
- *   2. Provider — Flutterwave is called *outside* any Mongo transaction (a
- *                 withTransaction callback retries, which would re-send a
- *                 billed refund). The outcome is persisted at once. An unknown
- *                 outcome (timeout, crash, unrecognised response) goes to
- *                 `needs_review` and is never retried automatically:
- *                 Flutterwave refunds take no idempotency key, so a blind
- *                 retry could pay the buyer twice.
+ *                 caller ever talks to the provider for a given request. The
+ *                 claim also fixes this attempt's `providerRefundReference`.
+ *   2. Provider — the provider that took the original charge is called
+ *                 *outside* any Mongo transaction (a withTransaction callback
+ *                 retries, which would re-send a billed refund). The outcome is
+ *                 persisted at once. A pending or unknown outcome is never
+ *                 re-sent: where the provider can be asked about our refund
+ *                 reference (Monnify) the cron asks until it is final; where it
+ *                 cannot (Flutterwave — no idempotency key) it goes to
+ *                 `needs_review`, since a blind retry could pay the buyer twice.
  *   3. Settle   — one Mongo transaction books it: claws the seller's share
  *                 back from their wallet, writes the balanced refund ledger and
  *                 updates the order's payment status. Internal and idempotent,
@@ -40,7 +42,7 @@ const Store = require("../models/storeModel");
 const Refund = require("../models/refundModel");
 const Transaction = require("../models/transactionModel");
 const Wallet = require("../models/walletModel");
-const { getFlutterwaveInstance } = require("../config/flutterwaveClient");
+const payments = require("./payments");
 const { PaymentStatus } = require("../utils/constants");
 const { STATUS } = require("../utils/orderStatus");
 const money = require("../utils/money");
@@ -57,6 +59,8 @@ const { REFUND_STATUS: RS, CLOSED_STATUSES, REFUND_REASONS } = Refund;
 const SELLER_RESPONSE_DAYS = 3;
 // How long after delivery a refund may be requested.
 const REFUND_WINDOW_DAYS = 7;
+// A provider refund still pending after this long goes to needs_review.
+const PROVIDER_PENDING_MAX_MS = 24 * 60 * 60 * 1000;
 // Booking attempts before a paid-out refund is dead-lettered to needs_review.
 const MAX_SETTLE_ATTEMPTS = 5;
 // A refund still `processing` after this long means the process died mid-call.
@@ -253,9 +257,10 @@ async function createRefundRequest({ orderId, buyerId, storeId, items, reason, d
   if (!store?.owner) throw new RefundError("This seller can no longer be reached; contact support", 409);
 
   const paymentTx = await findPaymentTransaction(order._id);
-  const providerTransactionId =
-    paymentTx?.metadata?.externalTransactionId ?? order.paymentIntent?.flw_ref ?? null;
-  if (!paymentTx || !providerTransactionId) {
+  const providerTransactionId = paymentTx?.metadata?.externalTransactionId ?? null;
+  // Refunds go back through whichever provider took the charge.
+  const provider = paymentTx?.metadata?.paymentMethod;
+  if (!paymentTx || !providerTransactionId || !payments.isProvider(provider)) {
     throw new RefundError("This order's payment cannot be refunded automatically; contact support", 409);
   }
 
@@ -317,6 +322,7 @@ async function createRefundRequest({ orderId, buyerId, storeId, items, reason, d
       reason,
       details,
       respondBy: new Date(Date.now() + SELLER_RESPONSE_DAYS * DAY_MS),
+      provider,
       providerTransactionId: String(providerTransactionId),
       history: [historyEntry(RS.REQUESTED, REFUND_REASONS[reason], buyerId, "buyer")],
     });
@@ -525,9 +531,9 @@ async function adminDecide(refundId, { decision, note, actor } = {}) {
 
 /**
  * Admin handling of a payout that could not complete on its own:
- *   needs_review + refunded      — the money did go out: record its Flutterwave id and book it.
+ *   needs_review + refunded      — the money did go out: record the provider's refund id and book it.
  *   needs_review + not_refunded  — no money moved: mark failed.
- *   failed       + retry         — Flutterwave rejected it earlier; send it again.
+ *   failed       + retry         — the provider rejected it earlier; send it again.
  */
 async function resolveRefund(refundId, { outcome, providerRefundId, note } = {}, actor) {
   const refund = await loadOwned(refundId, () => true);
@@ -553,7 +559,7 @@ async function resolveRefund(refundId, { outcome, providerRefundId, note } = {},
   if (outcome === "refunded") {
     const refundRef = providerRefundId || refund.providerRefundId;
     if (!refundRef) {
-      throw new RefundError("providerRefundId is required: the Flutterwave id of the refund that was made");
+      throw new RefundError("providerRefundId is required: the payment provider's id of the refund that was made");
     }
     await transition(
       refundId,
@@ -569,7 +575,7 @@ async function resolveRefund(refundId, { outcome, providerRefundId, note } = {},
 
   if (outcome === "not_refunded") {
     if (refund.providerRefundId) {
-      throw new RefundError("Flutterwave already confirmed this refund; it cannot be marked not refunded", 409);
+      throw new RefundError("The payment provider already confirmed this refund; it cannot be marked not refunded", 409);
     }
     return transition(
       refundId,
@@ -588,41 +594,29 @@ async function resolveRefund(refundId, { outcome, providerRefundId, note } = {},
 // ── Payout ───────────────────────────────────────────────────────────────────
 
 /**
- * Classify Flutterwave's refund response. Only an explicit success with a
- * refund id counts as success; only an explicit error counts as rejected;
- * anything else is unknown (fail closed).
- */
-function interpretRefundResponse(response) {
-  const dataStatus = String(response?.data?.status ?? "").toLowerCase();
-  if (response?.status === "success" && response.data?.id != null && dataStatus !== "failed") {
-    return { outcome: "succeeded", refundId: String(response.data.id), providerStatus: dataStatus || null };
-  }
-  if (response?.status === "error" || (response?.status === "success" && dataStatus === "failed")) {
-    return { outcome: "rejected", message: response?.message || "Flutterwave rejected the refund" };
-  }
-  return { outcome: "unknown", message: `Unrecognised Flutterwave response: ${JSON.stringify(response)?.slice(0, 500)}` };
-}
-
-/**
- * Send an `approved` refund to Flutterwave, then settle it. Safe to call
- * concurrently and repeatedly — only the caller that wins the
- * approved → processing claim talks to Flutterwave.
+ * Send an `approved` refund to the provider that took the charge, then settle
+ * it. Safe to call concurrently and repeatedly — only the caller that wins the
+ * approved → processing claim talks to the provider.
  */
 async function processRefund(refundId) {
-  let flw;
+  let provider;
   try {
-    flw = getFlutterwaveInstance();
+    const pending = await Refund.findById(refundId).select("provider");
+    provider = payments.getProvider(pending?.provider ?? "flutterwave");
   } catch (err) {
     // Nothing was sent; leave it approved for the cron once config is fixed.
     await Refund.updateOne({ _id: refundId, status: RS.APPROVED }, { $set: { lastError: err.message } });
     return Refund.findById(refundId);
   }
 
+  // A fresh reference per attempt: providers refuse to reuse one, and an
+  // admin retry after a rejection is a new attempt.
+  const refundReference = `RF-${refundId}-${Date.now().toString(36)}`;
   const claimed = await Refund.findOneAndUpdate(
     { _id: refundId, status: RS.APPROVED },
     {
-      $set: { status: RS.PROCESSING, processingStartedAt: new Date() },
-      $push: { history: historyEntry(RS.PROCESSING, "Sending to Flutterwave") },
+      $set: { status: RS.PROCESSING, processingStartedAt: new Date(), providerRefundReference: refundReference },
+      $push: { history: historyEntry(RS.PROCESSING, `Sending to ${provider.name}`) },
     },
     { new: true },
   );
@@ -630,14 +624,24 @@ async function processRefund(refundId) {
 
   let result;
   try {
-    const response = await flw.Transaction.refund({
-      id: claimed.providerTransactionId,
+    result = await provider.refund({
+      providerTransactionId: claimed.providerTransactionId,
       amount: claimed.amount,
+      refundReference,
+      reason: REFUND_REASONS[claimed.reason] ?? "Refund",
     });
-    result = interpretRefundResponse(response);
   } catch (err) {
-    result = { outcome: "unknown", message: `Flutterwave call failed: ${err.message}` };
+    result = { outcome: "unknown", message: `${provider.name} call failed: ${err.message}` };
   }
+  return applyProviderResult(claimed, provider, result);
+}
+
+/**
+ * Persist what the provider said about a `processing` refund and move it on.
+ * Shared by processRefund (the initiate call) and the cron (status queries).
+ */
+async function applyProviderResult(refund, provider, result) {
+  const refundId = refund._id;
 
   if (result.outcome === "succeeded") {
     await Refund.updateOne(
@@ -645,18 +649,18 @@ async function processRefund(refundId) {
       {
         $set: {
           status: RS.PROVIDER_SUCCEEDED,
-          providerRefundId: result.refundId,
+          providerRefundId: result.providerRefundId,
           providerStatus: result.providerStatus,
           lastError: null,
         },
-        $push: { history: historyEntry(RS.PROVIDER_SUCCEEDED, `Flutterwave refund ${result.refundId}`) },
+        $push: { history: historyEntry(RS.PROVIDER_SUCCEEDED, `${provider.name} refund ${result.providerRefundId}`) },
       },
     );
     audit.log({
       action: "refund.provider_succeeded",
       actor: SYSTEM_ACTOR,
-      resource: { type: "order", id: claimed.order },
-      metadata: { refundId: String(refundId), providerRefundId: result.refundId, amount: claimed.amount },
+      resource: { type: "order", id: refund.order },
+      metadata: { refundId: String(refundId), provider: provider.name, providerRefundId: result.providerRefundId, amount: refund.amount },
     });
     return settleRefund(refundId);
   }
@@ -665,25 +669,41 @@ async function processRefund(refundId) {
     await Refund.updateOne(
       { _id: refundId, status: RS.PROCESSING },
       {
-        $set: { status: RS.FAILED, lastError: result.message },
+        $set: { status: RS.FAILED, lastError: result.message, providerStatus: result.providerStatus ?? null },
         $push: { history: historyEntry(RS.FAILED, result.message) },
       },
     );
     audit.error({
       action: "refund.provider_rejected",
       actor: SYSTEM_ACTOR,
-      resource: { type: "order", id: claimed.order },
-      metadata: { refundId: String(refundId), amount: claimed.amount, error: result.message },
+      resource: { type: "order", id: refund.order },
+      metadata: { refundId: String(refundId), provider: provider.name, amount: refund.amount, error: result.message },
     });
     await notifyAdmins(
-      "Refund rejected by Flutterwave",
-      "An approved refund was rejected by Flutterwave; no money moved. Retry it via POST /api/admin/refund-requests/{id}/resolve with outcome \"retry\".",
-      { refundId: String(refundId), orderId: String(claimed.order), amount: claimed.amount, error: result.message },
+      `Refund rejected by ${provider.name}`,
+      `An approved refund was rejected by ${provider.name}; no money moved. Retry it via POST /api/admin/refund-requests/{id}/resolve with outcome "retry".`,
+      { refundId: String(refundId), orderId: String(refund.order), amount: refund.amount, error: result.message },
     ).catch(() => {});
     return Refund.findById(refundId);
   }
 
-  await markNeedsReview(refundId, RS.PROCESSING, result.message);
+  // Pending or unknown. If the provider can be asked about our reference,
+  // keep it processing and let the cron ask; otherwise a human must check.
+  if (provider.supportsRefundStatus) {
+    await Refund.updateOne(
+      { _id: refundId, status: RS.PROCESSING },
+      {
+        $set: {
+          providerStatus: result.providerStatus ?? null,
+          ...(result.providerRefundId && { providerRefundId: result.providerRefundId }),
+          lastError: result.outcome === "unknown" ? result.message : null,
+        },
+      },
+    );
+    return Refund.findById(refundId);
+  }
+
+  await markNeedsReview(refundId, RS.PROCESSING, result.message || `${provider.name} refund outcome unknown`);
   return Refund.findById(refundId);
 }
 
@@ -706,13 +726,13 @@ async function markNeedsReview(refundId, fromStatus, message) {
   });
   await notifyAdmins(
     "Refund needs manual review",
-    "A refund could not be confirmed automatically. Check the Flutterwave dashboard, then resolve it via POST /api/admin/refund-requests/{id}/resolve.",
+    "A refund could not be confirmed automatically. Check the payment provider's dashboard, then resolve it via POST /api/admin/refund-requests/{id}/resolve.",
     { refundId: String(refundId), orderId: String(refund.order), amount: refund.amount, error: message },
   ).catch(() => {});
 }
 
 /**
- * Book a refund Flutterwave has already made. Idempotent: the guarded
+ * Book a refund the provider has already made. Idempotent: the guarded
  * provider_succeeded → settled transition runs inside the same transaction as
  * the bookkeeping, so it commits exactly once.
  */
@@ -842,7 +862,7 @@ async function settleRefund(refundId) {
       await markNeedsReview(
         refundId,
         RS.PROVIDER_SUCCEEDED,
-        `Flutterwave refunded the buyer but booking it failed ${refund.attempts} times: ${err.message}`,
+        `The provider refunded the buyer but booking it failed ${refund.attempts} times: ${err.message}`,
       );
     }
     return Refund.findById(refundId);
@@ -864,14 +884,33 @@ async function settleRefund(refundId) {
 }
 
 /**
- * Cron: push every approved refund forward, and dead-letter the ones stuck
- * mid-call.
+ * Cron: push every approved refund forward, follow up refunds the provider is
+ * still working on, and dead-letter the ones stuck mid-call.
  */
 async function recoverRefunds() {
   const stuckBefore = new Date(Date.now() - STUCK_PROCESSING_MS);
-  const stuck = await Refund.find({ status: RS.PROCESSING, processingStartedAt: { $lt: stuckBefore } }).select("_id");
-  for (const { _id } of stuck) {
-    await markNeedsReview(_id, RS.PROCESSING, "Stuck in processing: the process stopped mid-call to Flutterwave");
+  const stuck = await Refund.find({ status: RS.PROCESSING, processingStartedAt: { $lt: stuckBefore } }).select(
+    "_id order amount provider providerRefundReference processingStartedAt",
+  );
+  let followedUp = 0;
+  for (const refund of stuck) {
+    const provider = payments.isProvider(refund.provider) ? payments.getProvider(refund.provider) : null;
+    if (!provider?.supportsRefundStatus || !refund.providerRefundReference) {
+      await markNeedsReview(refund._id, RS.PROCESSING, "Stuck in processing: the process stopped mid-call to the payment provider");
+      continue;
+    }
+
+    followedUp += 1;
+    const result = await provider.getRefundStatus({ refundReference: refund.providerRefundReference });
+    if (result.outcome === "succeeded" || result.outcome === "rejected") {
+      await applyProviderResult(refund, provider, result);
+    } else if (refund.processingStartedAt < new Date(Date.now() - PROVIDER_PENDING_MAX_MS)) {
+      await markNeedsReview(
+        refund._id,
+        RS.PROCESSING,
+        `${provider.name} has not finalised refund ${refund.providerRefundReference} after 24h (${result.providerStatus ?? result.message})`,
+      );
+    }
   }
 
   const approved = await Refund.find({ status: RS.APPROVED }).select("_id").limit(50);
@@ -880,7 +919,7 @@ async function recoverRefunds() {
   const unsettled = await Refund.find({ status: RS.PROVIDER_SUCCEEDED }).select("_id").limit(50);
   for (const { _id } of unsettled) await settleRefund(_id);
 
-  return { stuck: stuck.length, approved: approved.length, unsettled: unsettled.length };
+  return { stuck: stuck.length - followedUp, followedUp, approved: approved.length, unsettled: unsettled.length };
 }
 
 // ── Listing ──────────────────────────────────────────────────────────────────
@@ -929,5 +968,4 @@ module.exports = {
   settleRefund,
   recoverRefunds,
   listRefunds,
-  interpretRefundResponse,
 };

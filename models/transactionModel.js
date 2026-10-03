@@ -194,6 +194,31 @@ const transactionSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Provider payout of a wallet_withdrawal (services/withdrawalPayoutService).
+    // The transaction stays `pending` while the transfer is in transit and
+    // only becomes `completed` once the provider confirms it.
+    //   in_transit → sent (or outcome unknown); webhook / cron settle it
+    //   succeeded  → provider confirmed the money left
+    //   failed     → provider failed it; amount + fee returned to the wallet
+    //   reversed   → succeeded, then reversed by the bank; returned to the wallet
+    //   rejected   → provider refused to start it; nothing moved, admin may retry
+    payout: {
+      provider: String,
+      reference: { type: String, index: true, sparse: true },
+      providerTransferId: String,
+      status: {
+        type: String,
+        enum: ["in_transit", "succeeded", "failed", "reversed", "rejected"],
+      },
+      providerStatus: String,
+      message: String,
+      attempts: { type: Number },
+      initiatedAt: Date,
+      settledAt: Date,
+      lastCheckedAt: Date,
+      staleAlertedAt: Date,
+    },
+
     // Audit information
     audit: {
       createdBy: {

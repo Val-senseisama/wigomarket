@@ -1,31 +1,23 @@
 const asyncHandler = require("express-async-handler");
-const mongoose = require("mongoose");
 const crypto = require("crypto");
 const Order = require("../../models/orderModel");
-const Store = require("../../models/storeModel");
-const Product = require("../../models/productModel");
-const User = require("../../models/userModel");
-const Wallet = require("../../models/walletModel");
-const Transaction = require("../../models/transactionModel");
-const VATConfig = require("../../models/vatConfigModel");
-const { getFlutterwaveInstance } = require("../../config/flutterwaveClient");
-const receiptService = require("../../services/receiptService");
+const payments = require("../../services/payments");
 const { validateMongodbId } = require("../../utils/validateMongodbId");
-const { Validate } = require("../../Helpers/Validate");
-const { ThrowError, MakeID } = require("../../Helpers/Helpers");
-const appConfig = require("../../config/appConfig");
 const { PaymentStatus } = require("../../utils/constants");
 const audit = require("../../services/auditService");
-const { calculateCommissionBreakdown } = require("../../services/commissionService");
 
 /**
  * @function initializePayment
- * @description Initialize payment with Flutterwave
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
+ * @description Start a hosted checkout with the active payment provider.
+ *
+ * Each call opens a fresh checkout under a new reference
+ * (`<paymentIntent.id>-<random>`): providers refuse to reuse a reference, and
+ * a buyer who closed the tab must be able to try again. Every reference is
+ * kept on `paymentIntent.references` *before* the provider is called, so a
+ * webhook for any of them still finds the order.
+ *
  * @param {string} req.body.orderId - Order ID to pay for
- * @param {string} req.user._id - Authenticated user's ID
- * @returns {Object} - Payment initialization response
+ * @returns {Object} - { payment_url, reference, provider, orderId, amount }
  */
 const initializePayment = asyncHandler(async (req, res) => {
   const { orderId } = req.body;
@@ -40,103 +32,101 @@ const initializePayment = asyncHandler(async (req, res) => {
 
   validateMongodbId(orderId);
 
-  try {
-    // Check if user has a wallet (create if doesn't exist)
-    let userWallet = await Wallet.findOne({ user: _id });
-    if (!userWallet) {
-      console.log(`Creating wallet for user ${_id}`);
-      userWallet = await Wallet.createWallet(_id, 0);
-    }
-    // Get order details
-    const order = await Order.findById(orderId)
-      .populate("orderedBy", "fullName email mobile")
-      .populate("products.product", "title listedPrice")
-      .populate("products.store", "name");
+  const order = await Order.findById(orderId).populate("orderedBy", "fullName email mobile");
 
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found",
-      });
-    }
-
-    // Check if order belongs to user
-    if (order.orderedBy._id.toString() !== _id.toString()) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. This order doesn't belong to you.",
-      });
-    }
-
-    // Check if order is already paid
-    if (order.paymentStatus === PaymentStatus.PAID) {
-      return res.status(400).json({
-        success: false,
-        message: "Order is already paid",
-      });
-    }
-
-    const user = order.orderedBy;
-    const totalAmount = order.paymentIntent.amount;
-
-    // Prepare payment data
-    const paymentData = {
-      tx_ref: order.paymentIntent.id,
-      amount: totalAmount,
-      currency: "NGN",
-      redirect_url: `${process.env.FRONTEND_URL}/payment/callback`,
-      customer: {
-        email: user.email,
-        phonenumber: user.mobile,
-        name: user.fullName || "Customer",
-      },
-      customizations: {
-        title: "WigoMarket Payment",
-        description: `Payment for Order #${order.paymentIntent.id}`,
-        logo: process.env.LOGO_URL || "https://via.placeholder.com/150",
-      },
-      meta: {
-        orderId: orderId,
-        userId: _id,
-      },
-    };
-
-    // Initialize payment with Flutterwave
-    const flwClient = getFlutterwaveInstance();
-    const response = await flwClient.Payment.initialize(paymentData);
-
-    if (response.status === "success") {
-      // Update order with payment reference
-      await Order.findByIdAndUpdate(orderId, {
-        "paymentIntent.flw_ref": response.data.flw_ref,
-        "paymentIntent.status": PaymentStatus.PENDING,
-      });
-
-      audit.log({
-        action: "payment.initialized",
-        actor: audit.actor(req),
-        resource: { type: "order", id: orderId },
-        changes: { after: { amount: totalAmount, flw_ref: response.data.flw_ref, paymentStatus: "Pending" } },
-      });
-
-      res.json({
-        success: true,
-        message: "Payment initialized successfully",
-        data: {
-          payment_url: response.data.link,
-          flw_ref: response.data.flw_ref,
-          orderId: orderId,
-          amount: totalAmount,
-        },
-      });
-    } else {
-      throw new Error(response.message || "Payment initialization failed");
-    }
-  } catch (error) {
-    console.log(error);
-    throw new Error(error.message || "Payment initialization failed");
+  if (!order) {
+    return res.status(404).json({
+      success: false,
+      message: "Order not found",
+    });
   }
 
+  // Check if order belongs to user
+  if (order.orderedBy._id.toString() !== _id.toString()) {
+    return res.status(403).json({
+      success: false,
+      message: "Access denied. This order doesn't belong to you.",
+    });
+  }
+
+  // Check if order is already paid
+  if (order.paymentStatus === PaymentStatus.PAID) {
+    return res.status(400).json({
+      success: false,
+      message: "Order is already paid",
+    });
+  }
+
+  const provider = payments.getProvider();
+  const user = order.orderedBy;
+  const totalAmount = order.paymentIntent.amount;
+  const reference = `${order.paymentIntent.id}-${crypto.randomBytes(4).toString("hex")}`;
+
+  // Record the reference first: if we crash after the provider call, the
+  // webhook and the cron can still tie the charge to this order.
+  await Order.updateOne(
+    { _id: orderId },
+    {
+      $set: {
+        "paymentIntent.provider": provider.name,
+        "paymentIntent.reference": reference,
+        "paymentIntent.initializedAt": new Date(),
+        "paymentIntent.status": PaymentStatus.PENDING,
+      },
+      $push: { "paymentIntent.references": reference },
+    },
+  );
+
+  let checkout;
+  try {
+    checkout = await provider.initializeCheckout({
+      reference,
+      amount: totalAmount,
+      currency: order.paymentIntent.currency || "NGN",
+      customer: {
+        email: user.email,
+        phone: user.mobile,
+        name: user.fullName || "Customer",
+      },
+      description: `Payment for Order #${order.orderNumber ?? order.paymentIntent.id}`,
+      redirectUrl: `${process.env.FRONTEND_URL}/payment/callback?orderId=${orderId}`,
+      metadata: { orderId: String(orderId), userId: String(_id) },
+    });
+  } catch (err) {
+    audit.error({
+      action: "payment.initialize_failed",
+      actor: audit.actor(req),
+      resource: { type: "order", id: orderId },
+      metadata: { provider: provider.name, reference, error: err.message },
+    });
+    return res.status(502).json({
+      success: false,
+      message: "Could not start payment. Please try again.",
+    });
+  }
+
+  if (checkout.providerReference) {
+    await Order.updateOne({ _id: orderId }, { $set: { "paymentIntent.providerReference": checkout.providerReference } });
+  }
+
+  audit.log({
+    action: "payment.initialized",
+    actor: audit.actor(req),
+    resource: { type: "order", id: orderId },
+    changes: { after: { amount: totalAmount, provider: provider.name, reference, paymentStatus: "Pending" } },
+  });
+
+  res.json({
+    success: true,
+    message: "Payment initialized successfully",
+    data: {
+      payment_url: checkout.checkoutUrl,
+      reference,
+      provider: provider.name,
+      orderId: orderId,
+      amount: totalAmount,
+    },
+  });
 });
 
 module.exports = initializePayment;

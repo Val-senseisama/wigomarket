@@ -34,6 +34,7 @@ const PaymentMethod = {
   CARD: "card",
   BANK: "bank",
   FLUTTERWAVE: "flutterwave",
+  MONNIFY: "monnify",
 };
 
 const DeliveryMethod = {

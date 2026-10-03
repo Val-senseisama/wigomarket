@@ -14,7 +14,7 @@ const redisClient = require("../../config/redisClient");
  * @body {string} accountNumber  - 10-digit NUBAN (required)
  * @body {string} accountName    - Account holder name as confirmed by bank (required)
  * @body {string} bankName       - Bank display name, e.g. "Guaranty Trust Bank" (required)
- * @body {string} [bankCode]     - 3-char Flutterwave bank code, e.g. "058" (recommended)
+ * @body {string} [bankCode]     - Bank code from GET /api/banks, e.g. "058" (recommended)
  */
 const updatePaymentInfo = asyncHandler(async (req, res) => {
   const { _id } = req.user;

@@ -1439,7 +1439,9 @@ router.get("/earnings-history", authMiddleware, isDispatch, getEarningsHistory);
  *                       description: Delivery fees earned since the start of the week
  *                     pendingPayout:
  *                       type: number
- *                       description: Total of withdrawal requests still being processed
+ *                       description: |
+ *                         Withdrawals requested or in transit, as the amount the bank
+ *                         will receive (fees excluded; bill payments are not counted)
  *                     totalEarnings:
  *                       type: number
  *                       description: Lifetime delivery earnings

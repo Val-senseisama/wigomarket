@@ -823,7 +823,8 @@ router.get("/refund-requests/:id", authMiddleware, isSeller, getStoreRefundReque
  *   post:
  *     summary: Approve a refund request
  *     description: |
- *       Sends `amount` back to the buyer's card through Flutterwave and takes
+ *       Sends `amount` back to the buyer through the payment provider that
+ *       took the charge (Monnify or Flutterwave) and takes
  *       `vendorAmount` out of the seller's wallet. The response's
  *       `statusLabel` is "Refunded" when it completed straight away, or
  *       "Refund in progress" while the payout finishes (it is retried
@@ -1284,7 +1285,7 @@ router.get("/orders/recent", authMiddleware, isSeller, getRecentOrders);
  *                     payment:
  *                       method: card
  *                       status: Paid
- *                       transactionId: "FLW-REF-8891233"
+ *                       transactionId: "MNFY|20|20260805091422|000123"
  *                       payoutStatus: Awaiting
  *                     timeline:
  *                       - { status: pending, label: "Order received", completed: true, at: "2026-08-05T09:14:22.000Z" }
@@ -1448,7 +1449,7 @@ router.get("/orders/:id", authMiddleware, isSeller, getStoreOrderDetail);
  *
  *       **Cancelling a paid order refunds the customer automatically.** Stock is
  *       restored and a refund is queued in the same step, then sent to
- *       Flutterwave in the background. The order's `paymentStatus` stays `Paid`
+ *       the payment provider in the background. The order's `paymentStatus` stays `Paid`
  *       until the refund has gone through, then becomes `Refunded`.
  *
  *       `preparing` is optional — the seller can skip straight from `confirmed`

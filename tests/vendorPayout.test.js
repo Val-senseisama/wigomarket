@@ -1,7 +1,7 @@
 /**
  * Vendor payout tests: who gets paid the vendor share of an order.
  *
- * Runs processWebhookPayload end-to-end (it needs the replica-set test DB for
+ * Runs settleOrderPayment end-to-end (it needs the replica-set test DB for
  * its transaction) and the pure helpers behind every settlement path.
  */
 
@@ -11,7 +11,7 @@ const Store = require("../models/storeModel");
 const Product = require("../models/productModel");
 const Wallet = require("../models/walletModel");
 const Transaction = require("../models/transactionModel");
-const { processWebhookPayload } = require("../services/webhookPaymentProcessor");
+const { settleOrderPayment } = require("../services/orderPaymentSettlement");
 const { calculateCommissionBreakdown, vendorShares } = require("../services/commissionService");
 const {
   orderPaymentEntries,
@@ -73,15 +73,20 @@ const makeOrder = async (customer, lines) => {
   });
 };
 
-const webhookFor = (order) => ({
-  event: "charge.completed",
-  data: {
-    status: "successful",
-    tx_ref: order.paymentIntent.id,
-    id: `${Date.now()}${++seq}`,
-    amount: order.paymentIntent.amount,
-  },
-});
+const pay = (order) =>
+  settleOrderPayment({
+    orderId: order._id,
+    provider: "monnify",
+    charge: {
+      status: "succeeded",
+      reference: order.paymentIntent.id,
+      providerTransactionId: `MNFY|${Date.now()}|${++seq}`,
+      amount: order.paymentIntent.amount,
+      currency: "NGN",
+    },
+    source: "test",
+    actor: { userId: null, role: "system", ip: "test" },
+  });
 
 const balanceOf = async (userId) => (await Wallet.findOne({ user: userId }))?.balance ?? null;
 
@@ -97,7 +102,7 @@ describe("vendor payouts on payment", () => {
       { product: beans, store: b.store, count: 2 },
     ]);
 
-    await processWebhookPayload(webhookFor(order));
+    await pay(order);
 
     expect(await balanceOf(a.user._id)).toBe(3000);
     expect(await balanceOf(b.user._id)).toBe(2000);
@@ -133,7 +138,7 @@ describe("vendor payouts on payment", () => {
     const order = await makeOrder(customer, [{ product, store: seller.store }]);
 
     await Product.updateOne({ _id: product._id }, { price: 9999, listedPrice: 12000 });
-    await processWebhookPayload(webhookFor(order));
+    await pay(order);
 
     expect(await balanceOf(seller.user._id)).toBe(4000);
   });
@@ -145,7 +150,7 @@ describe("vendor payouts on payment", () => {
     const order = await makeOrder(customer, [{ product, store: seller.store }]);
     await Store.collection.updateOne({ _id: seller.store._id }, { $unset: { owner: "" } });
 
-    await expect(processWebhookPayload(webhookFor(order))).rejects.toThrow(/has no owner/);
+    await expect(pay(order)).rejects.toThrow(/has no owner/);
 
     expect(await balanceOf(seller.user._id)).toBeNull();
     expect((await Order.findById(order._id)).paymentStatus).toBe("Unpaid");

@@ -1,7 +1,8 @@
 /**
  * @file pendingPaymentCron.js
- * @description Cron job that runs every 5 minutes to recover pending Flutterwave
- * transactions that were never confirmed (e.g. user's browser crashed after payment).
+ * @description Cron job that runs every 5 minutes to recover card payments that
+ * were never confirmed (e.g. the buyer's browser closed after paying and the
+ * webhook was lost). Works with whichever provider the order checked out with.
  *
  * RACE-CONDITION SAFETY:
  *   Each order is locked atomically with findOneAndUpdate({ processingLock: false })
@@ -9,175 +10,29 @@
  *   server instances running simultaneously (e.g. PM2 cluster).
  *
  * IDEMPOTENCY:
- *   Before crediting any wallet, we check whether a completed Transaction already
- *   exists for the order reference. Duplicate runs are a no-op.
+ *   Booking goes through services/orderPaymentSettlement, which books each
+ *   provider charge exactly once across the cron, the webhook and the verify
+ *   endpoint. Duplicate runs are a no-op.
  */
 
 const cron = require("node-cron");
 const mongoose = require("mongoose");
-const Flutterwave = require("flutterwave-node-v3");
 const Order = require("../models/orderModel");
 const Wallet = require("../models/walletModel");
 const Transaction = require("../models/transactionModel");
-const VATConfig = require("../models/vatConfigModel");
 const BillPayment = require("../models/billPaymentModel");
 const ledgerService = require("./billPaymentLedgerService");
-const appConfig = require("../config/appConfig");
-const { PaymentStatus, OrderStatus } = require("../utils/constants");
-const { MakeID } = require("../Helpers/Helpers");
+const { PaymentStatus } = require("../utils/constants");
 const audit = require("./auditService");
-const { publishStoreOrderEvent, EVENT } = require("./storeOrderEvents");
-const { calculateCommissionBreakdown } = require("./commissionService");
-const {
-  resolveVendorPayouts,
-  creditVendorWallets,
-  primaryVendor,
-} = require("./vendorPayoutService");
-const { orderPaymentEntries } = require("./orderPaymentLedger");
+const { settleOrderPayment, findOrderCharge, SettlementError } = require("./orderPaymentSettlement");
 const vtpass = require("./vtpassService");
 
-// Lazy FLW instance
-let flw = null;
-const getFlw = () => {
-  if (!flw) {
-    const cfg = appConfig.payment.flutterwave;
-    if (!cfg.validate()) throw new Error("Flutterwave not configured");
-    flw = new Flutterwave(cfg.publicKey, cfg.secretKey);
-  }
-  return flw;
-};
-
-// Commission calculation is provided by services/commissionService.js
+// Checkouts older than this are abandoned; providers expire them well before.
+const PENDING_PAYMENT_WINDOW_MS = 48 * 60 * 60 * 1000;
 
 /**
- * Process a single confirmed-paid order: credit wallets + write ledger.
- * Wrapped in a MongoDB transaction for atomicity.
- * @param {object} vatConfig - Pre-fetched VAT config (avoid per-order DB query)
- */
-async function processConfirmedPayment(order, externalTxId, vatConfig) {
-  // Idempotency guard: bail out if a completed transaction already exists
-  const existing = await Transaction.findOne({
-    reference: `Payment-${order._id}`,
-    type: "order_payment",
-    status: "completed",
-  });
-  if (existing) {
-    console.log(`[Cron] ⚡ Already processed: order ${order._id} — skipping`);
-    return;
-  }
-
-  const session = await mongoose.startSession();
-  try {
-    await session.withTransaction(async () => {
-      const fullOrder = await Order.findById(order._id)
-        .populate("orderedBy", "fullName email mobile")
-        .populate("products.product", "title listedPrice price store")
-        .populate("products.store", "name")
-        .populate("deliveryAgent", "fullName email mobile")
-        .session(session);
-
-      if (!fullOrder)
-        throw new Error(`Order ${order._id} not found in session`);
-
-      const commission = calculateCommissionBreakdown(fullOrder);
-
-      const vatAmount = vatConfig
-        ? vatConfig.calculateVAT(fullOrder.paymentIntent.amount)
-        : 0;
-
-      // One payout per store, each to that store's owner.
-      const vendorPayouts = await resolveVendorPayouts(fullOrder, session);
-      const vendor = await primaryVendor(vendorPayouts, session);
-
-      let vatResponsibility = "platform";
-      if (vatConfig && vendor) {
-        vatResponsibility = vatConfig.getVATResponsibility(
-          vendor,
-          fullOrder.paymentIntent.amount,
-        );
-      }
-
-      // Balanced entries; VAT is a memo on `vat`, not ledger lines (see
-      // services/orderPaymentLedger).
-      const ledger = orderPaymentEntries({ order: fullOrder, payouts: vendorPayouts });
-
-      // ── Double-entry ledger ───────────────────────────────────────────────
-      const txId = `PAY_CRON_${Date.now()}_${MakeID(16)}`;
-      await Transaction.createTransaction(
-        {
-          transactionId: txId,
-          reference: `Payment-${fullOrder._id}`,
-          type: "order_payment",
-          totalAmount: ledger.totalAmount,
-          entries: ledger.entries,
-          vat: {
-            rate: vatConfig?.rates?.standard || 7.5,
-            amount: vatAmount,
-            responsibility: vatResponsibility,
-            collected: true,
-          },
-          commission: {
-            platformRate: commission.platformRate,
-            platformAmount: ledger.platformAmount,
-            vendorAmount: commission.vendorAmount,
-            dispatchAmount: 0,
-          },
-          relatedEntity: { type: "order", id: fullOrder._id },
-          status: "completed",
-          metadata: {
-            paymentMethod: "flutterwave",
-            externalTransactionId: externalTxId,
-            externalEventId: `FLW_CRON_${externalTxId}`, // Database-level idempotency guard
-            notes: "Recovered by 5-min pending-payment cron",
-          },
-        },
-        session,
-      );
-
-      // ── Credit wallets ────────────────────────────────────────────────────
-      await creditVendorWallets(vendorPayouts, session);
-
-      // No rider credit here: the delivery fee is held in accounts_payable and
-      // paid to the rider on delivery (dispatchEarningsService).
-
-      // ── Mark order paid ───────────────────────────────────────────────────
-      await Order.findByIdAndUpdate(
-        fullOrder._id,
-        {
-          paymentStatus: PaymentStatus.PAID,
-          "paymentIntent.status": "paid",
-          "paymentIntent.flw_ref": externalTxId,
-          "paymentIntent.paid_at": new Date(),
-          "paymentIntent.transaction_id": txId,
-          orderStatus: OrderStatus.PENDING,
-          processingLock: false,
-        },
-        { session },
-      );
-
-      console.log(`[Cron] ✅ Recovered payment for order ${fullOrder._id}`);
-    });
-
-    // Committed: a paid card order is new to sellers, so it arrives as
-    // order.created on their dashboards (fire-and-forget).
-    publishStoreOrderEvent(order._id, EVENT.CREATED);
-
-    audit.log({
-      action: "payment.verified",
-      actor: { userId: null, role: "system", ip: "cron" },
-      resource: { type: "order", id: order._id },
-      changes: {
-        after: { paymentStatus: "Paid", recoveredBy: "pending-payment-cron" },
-      },
-      metadata: { externalTransactionId: externalTxId },
-    });
-  } finally {
-    await session.endSession();
-  }
-}
-
-/**
- * Main cron tick: find pending orders, lock them one by one, verify with FLW.
+ * Main cron tick: find recent unpaid checkouts, lock them one by one, ask
+ * their provider, and book the ones it confirms.
  */
 async function runPendingPaymentCheck() {
   console.log("[Cron] 🕐 Checking pending payments...");
@@ -186,12 +41,12 @@ async function runPendingPaymentCheck() {
   try {
     pendingOrders = await Order.find({
       paymentStatus: { $in: [PaymentStatus.UNPAID, PaymentStatus.PENDING] },
-      "paymentIntent.flw_ref": { $exists: true, $ne: null }, // Only if FLW was at least initialised
+      "paymentIntent.provider": { $exists: true, $ne: null }, // checkout was at least started
+      "paymentIntent.initializedAt": { $gte: new Date(Date.now() - PENDING_PAYMENT_WINDOW_MS) },
       processingLock: { $ne: true }, // Skip already-locked ones
     })
-      .select(
-        "_id paymentIntent processingLock deliveryAgent deliveryFee products",
-      )
+      .select("_id paymentIntent processingLock")
+      .sort({ "paymentIntent.initializedAt": -1 })
       .limit(50); // safety cap per run
   } catch (err) {
     console.error("[Cron] Failed to fetch pending orders:", err.message);
@@ -205,8 +60,7 @@ async function runPendingPaymentCheck() {
 
   console.log(`[Cron] Found ${pendingOrders.length} pending order(s) to check`);
 
-  // Fetch VAT config once — shared across all orders this run
-  const vatConfig = await VATConfig.getActiveConfig();
+  const actor = { userId: null, role: "system", ip: "cron" };
 
   for (const order of pendingOrders) {
     // ── Atomic lock: only proceed if we won the race ──────────────────────
@@ -224,70 +78,42 @@ async function runPendingPaymentCheck() {
       continue;
     }
 
-    // Log the start of an attempt
     audit.log({
       action: "payment.recovery_attempt",
-      actor: { userId: null, role: "system", ip: "cron" },
+      actor,
       resource: { type: "order", id: order._id },
-      metadata: { flw_ref: order.paymentIntent.flw_ref },
+      metadata: { provider: locked.paymentIntent.provider, reference: locked.paymentIntent.reference },
     });
 
     try {
-      const flwClient = getFlw();
-      const response = await flwClient.Transaction.verify({
-        id: order.paymentIntent.flw_ref, // the transaction_id Flutterwave gave us
-      });
-
-      if (
-        response.status === "success" &&
-        response.data.status === "successful" &&
-        response.data.tx_ref === order.paymentIntent.id
-      ) {
-        // Verify the amount matches — safety against amount-swapping attacks
-        const expectedAmount = order.paymentIntent.amount;
-        const paidAmount = response.data.amount;
-        if (Math.abs(paidAmount - expectedAmount) > 1) {
-          console.warn(
-            `[Cron] ⚠️  Amount mismatch for order ${order._id}: expected ${expectedAmount}, got ${paidAmount}`,
-          );
-          await Order.updateOne(
-            { _id: order._id },
-            { $set: { processingLock: false } },
-          );
-          continue;
-        }
-
-        await processConfirmedPayment(order, response.data.id, vatConfig);
+      const found = await findOrderCharge(locked);
+      if (found?.charge.status === "succeeded") {
+        // settleOrderPayment releases the lock in the same write that marks it paid.
+        await settleOrderPayment({ orderId: order._id, provider: found.provider, charge: found.charge, source: "cron", actor });
       } else {
-        // Not yet paid — unlock so next run can try again
+        // Not yet paid — the next run tries again.
         audit.log({
           action: "payment.recovery_skipped",
-          actor: { userId: null, role: "system", ip: "cron" },
+          actor,
           resource: { type: "order", id: order._id },
-          metadata: {
-            flw_status: response.data.status,
-            response: response.status,
-          },
+          metadata: { provider: found?.provider, status: found?.charge.status, providerStatus: found?.charge.providerStatus },
           status: "success", // The check succeeded even if the payment is still pending
         });
-        await Order.updateOne(
-          { _id: order._id },
-          { $set: { processingLock: false } },
-        );
       }
     } catch (err) {
-      console.error(`[Cron] Error processing order ${order._id}:`, err.message);
-      audit.error({
-        action: "payment.recovery_failed",
-        actor: { userId: null, role: "system", ip: "cron" },
-        resource: { type: "order", id: order._id },
-        metadata: { error: err.message },
-      });
-      // Release lock so it retries next run
-      await Order.updateOne(
-        { _id: order._id },
-        { $set: { processingLock: false } },
-      );
+      // SettlementErrors (amount / reference mismatch) are already alerted.
+      if (!(err instanceof SettlementError)) {
+        console.error(`[Cron] Error processing order ${order._id}:`, err.message);
+        audit.error({
+          action: "payment.recovery_failed",
+          actor,
+          resource: { type: "order", id: order._id },
+          metadata: { error: err.message },
+        });
+      }
+    } finally {
+      // Release the lock unless settlement already did.
+      await Order.updateOne({ _id: order._id, processingLock: true }, { $set: { processingLock: false } });
     }
   }
 
@@ -430,6 +256,7 @@ async function runWalletReconciliation() {
  *
  *   Every  5 min  — recover pending payments
  *   Every  5 min  — push refunds forward (see orderRefundService.recoverRefunds)
+ *   Every  5 min  — confirm withdrawal payouts in transit (withdrawalPayoutService.recoverPayouts)
  *   Every 15 min  — clean up stuck 'processing' transactions
  *   Daily  02:00  — wallet health reconciliation
  */
@@ -460,6 +287,10 @@ function startCron() {
     wrap("refund-recovery", () => require("./orderRefundService").recoverRefunds()),
   );
   cron.schedule(
+    "*/5 * * * *",
+    wrap("payout-recovery", () => require("./withdrawalPayoutService").recoverPayouts()),
+  );
+  cron.schedule(
     "*/15 * * * *",
     wrap("stuck-transaction-cleanup", cleanupStuckTransactions),
   );
@@ -469,7 +300,7 @@ function startCron() {
   );
 
   console.log(
-    "⏰ Crons scheduled: payment-check (5m), refund-recovery (5m), bill-check (10m), stuck-cleanup (15m), reconciliation (02:00)",
+    "⏰ Crons scheduled: payment-check (5m), refund-recovery (5m), payout-recovery (5m), bill-check (10m), stuck-cleanup (15m), reconciliation (02:00)",
   );
 }
 

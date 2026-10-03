@@ -27,6 +27,7 @@ const receiptService = require("../services/receiptService");
 const Transaction = require("../models/transactionModel");
 const User = require("../models/userModel");
 const Wallet = require("../models/walletModel");
+const { WITHDRAWAL, amountsOf } = require("../services/withdrawalPayoutService");
 const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
 
 /**
@@ -156,7 +157,7 @@ const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
  *                 type: string
  *         totalAmount:
  *           type: number
- *           description: Total transaction amount
+ *           description: Total transaction amount (sum of debits). For a wallet withdrawal this is amount + fee — everything that left the wallet.
  *         currency:
  *           type: string
  *           enum: [NGN, USD, EUR]
@@ -187,13 +188,64 @@ const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
  *               type: number
  *         status:
  *           type: string
- *           enum: [pending, completed, failed, cancelled, reversed]
+ *           enum: [pending, processing, completed, failed, cancelled, reversed, abandoned]
+ *         payout:
+ *           $ref: '#/components/schemas/WithdrawalPayout'
  *         createdAt:
  *           type: string
  *           format: date
  *         updatedAt:
  *           type: string
  *           format: date
+ *
+ *     WithdrawalPayout:
+ *       type: object
+ *       description: |
+ *         Provider transfer for a wallet withdrawal; absent until an admin approves it.
+ *         The withdrawal stays `pending` while `status` is `in_transit`.
+ *       properties:
+ *         status:
+ *           type: string
+ *           enum: [in_transit, succeeded, failed, reversed, rejected]
+ *           description: |
+ *             `in_transit` — sent, awaiting the provider's confirmation;
+ *             `succeeded` — paid; `failed` / `reversed` — amount + fee returned to the wallet;
+ *             `rejected` — the provider refused to start it, nothing moved
+ *         provider:
+ *           type: string
+ *           enum: [monnify, flutterwave]
+ *         reference:
+ *           type: string
+ *           description: Our payout reference, `WD_<transactionId>` (`…_R<n>` on a retry)
+ *         providerStatus:
+ *           type: string
+ *           nullable: true
+ *         message:
+ *           type: string
+ *           nullable: true
+ *         attempts:
+ *           type: integer
+ *         initiatedAt:
+ *           type: string
+ *           format: date-time
+ *         settledAt:
+ *           type: string
+ *           format: date-time
+ *
+ *     WithdrawalHistoryItem:
+ *       allOf:
+ *         - $ref: '#/components/schemas/Transaction'
+ *         - type: object
+ *           properties:
+ *             amount:
+ *               type: number
+ *               description: What the bank account receives
+ *             fee:
+ *               type: number
+ *               description: Withdrawal fee kept by the platform
+ *             totalDeduction:
+ *               type: number
+ *               description: amount + fee — what left the wallet (equals totalAmount)
  *     
  *     BankAccount:
  *       type: object
@@ -864,6 +916,10 @@ router.post("/wallet/withdraw", authMiddleware, requestWithdrawal);
  *   get:
  *     tags: [Wallet]
  *     summary: Get user's withdrawal history
+ *     description: |
+ *       Bank withdrawals only (bill payments are not listed). A withdrawal stays
+ *       `pending` until its payout is confirmed; `payout.status` says whether it
+ *       is awaiting approval (absent / `rejected`) or in transit.
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -895,7 +951,7 @@ router.post("/wallet/withdraw", authMiddleware, requestWithdrawal);
  *                     withdrawals:
  *                       type: array
  *                       items:
- *                         $ref: '#/components/schemas/Transaction'
+ *                         $ref: '#/components/schemas/WithdrawalHistoryItem'
  *                     pagination:
  *                       type: object
  *                       properties:
@@ -948,6 +1004,34 @@ router.get("/wallet/stats", authMiddleware, getWalletStats);
  *     responses:
  *       200:
  *         description: Earnings overview retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     today:
+ *                       type: number
+ *                       description: Earnings credited since midnight (Africa/Lagos)
+ *                     thisWeek:
+ *                       type: number
+ *                       description: Earnings credited since the start of the week
+ *                     total:
+ *                       type: number
+ *                       description: Lifetime earnings
+ *                     pending:
+ *                       type: number
+ *                       description: |
+ *                         Withdrawals requested or in transit, as the amount the bank
+ *                         will receive (fees excluded; bill payments are not counted)
+ *                     currentBalance:
+ *                       type: number
+ *       404:
+ *         description: Wallet not found
  */
 router.get("/wallet/earnings-overview", authMiddleware, getEarningsOverview);
 
@@ -1180,6 +1264,26 @@ router.post("/transactions/:transactionId/reverse", authMiddleware, isAdmin, rev
  *                           createdAt:
  *                             type: string
  *                             format: date
+ *                           payout:
+ *                             type: object
+ *                             nullable: true
+ *                             description: |
+ *                               Set when an earlier approval's transfer was refused by the
+ *                               provider (`status: rejected`, see `message`); nothing moved and
+ *                               the withdrawal can be approved again or rejected. Withdrawals
+ *                               whose payout is in transit are not listed.
+ *                             properties:
+ *                               status:
+ *                                 type: string
+ *                                 enum: [rejected]
+ *                               provider:
+ *                                 type: string
+ *                               reference:
+ *                                 type: string
+ *                               message:
+ *                                 type: string
+ *                               attempts:
+ *                                 type: integer
  *                     pagination:
  *                       type: object
  *                       properties:
@@ -1202,6 +1306,15 @@ router.post("/transactions/:transactionId/reverse", authMiddleware, isAdmin, rev
  *   post:
  *     tags: [Transactions]
  *     summary: Process withdrawal request (admin only)
+ *     description: |
+ *       `reject` returns amount + fee to the wallet. `approve` sends the transfer
+ *       through the active payment provider. The withdrawal only becomes
+ *       `completed` once the provider confirms the transfer — immediately (200)
+ *       or later via its disbursement webhook / a 5-minute requery (202, status
+ *       stays `pending` with `payoutStatus: in_transit`). A payout the provider
+ *       later fails or reverses returns amount + fee to the wallet and alerts admins.
+ *       If the provider refuses to start the transfer, nothing moves (502) and the
+ *       withdrawal can be approved again (under a new reference) or rejected.
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -1229,7 +1342,7 @@ router.post("/transactions/:transactionId/reverse", authMiddleware, isAdmin, rev
  *                 description: Reason for the action (required for reject)
  *     responses:
  *       200:
- *         description: Withdrawal processed successfully
+ *         description: Rejected and refunded, or approved and confirmed paid by the provider
  *         content:
  *           application/json:
  *             schema:
@@ -1248,23 +1361,43 @@ router.post("/transactions/:transactionId/reverse", authMiddleware, isAdmin, rev
  *                       type: number
  *                     status:
  *                       type: string
- *                     flwReference:
+ *                       enum: [completed, pending, cancelled]
+ *                       description: Ledger status — `pending` while an approved payout is in transit
+ *                     payoutStatus:
  *                       type: string
- *                       description: Flutterwave transfer reference (for approved withdrawals)
+ *                       enum: [succeeded, in_transit]
+ *                       description: Where the transfer stands (for approved withdrawals)
+ *                     provider:
+ *                       type: string
+ *                       enum: [monnify, flutterwave]
+ *                       description: Payment provider that sent the payout (for approved withdrawals)
+ *                     providerReference:
+ *                       type: string
+ *                       description: Payout reference, `WD_<transactionId>` (`…_R<n>` on a retry) (for approved withdrawals)
+ *                     providerStatus:
+ *                       type: string
+ *                       nullable: true
+ *                       description: The provider's transfer status at approval, e.g. SUCCESS, PENDING or PENDING_AUTHORIZATION (for approved withdrawals)
  *                     refundAmount:
  *                       type: number
  *                       description: Refund amount (for rejected withdrawals)
  *                     reversalTransactionId:
  *                       type: string
  *                       description: Reversal transaction ID (for rejected withdrawals)
+ *       202:
+ *         description: Approved; the transfer is in transit (or the provider did not answer in time) and will be confirmed automatically. Same body as 200.
  *       400:
- *         description: Invalid action or withdrawal already processed
+ *         description: Invalid action, or the wallet has no default bank account
  *       401:
  *         description: Unauthorized
  *       403:
  *         description: Admin access required
  *       404:
- *         description: Withdrawal transaction not found
+ *         description: Withdrawal not found or no longer pending
+ *       409:
+ *         description: The payout is already in transit, or another request is processing it
+ *       502:
+ *         description: The provider refused to start the transfer; nothing moved
  */
 // Moved to routes/adminRouter.js → POST /api/admin/withdrawals/:transactionId/process
 
@@ -1274,6 +1407,11 @@ router.post("/transactions/:transactionId/reverse", authMiddleware, isAdmin, rev
  *   get:
  *     tags: [Transactions]
  *     summary: Get withdrawal statistics (admin only)
+ *     description: |
+ *       Bank withdrawals only (bill payments excluded). Each figure is split into
+ *       `totalAmount` (what the banks receive), `totalFees` (kept by the platform)
+ *       and `totalDeduction` (both — what left the wallets). `pending` includes
+ *       withdrawals whose payout is still in transit.
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -1318,11 +1456,17 @@ router.post("/transactions/:transactionId/reverse", authMiddleware, isAdmin, rev
  *                         properties:
  *                           _id:
  *                             type: string
- *                             enum: [pending, completed, cancelled, failed]
+ *                             enum: [pending, completed, cancelled, failed, reversed]
  *                           count:
  *                             type: number
  *                           totalAmount:
  *                             type: number
+ *                             description: Paid (or to be paid) to bank accounts
+ *                           totalFees:
+ *                             type: number
+ *                           totalDeduction:
+ *                             type: number
+ *                             description: totalAmount + totalFees
  *                     totals:
  *                       type: object
  *                       properties:
@@ -1330,8 +1474,12 @@ router.post("/transactions/:transactionId/reverse", authMiddleware, isAdmin, rev
  *                           type: number
  *                         totalAmount:
  *                           type: number
+ *                           description: Paid (or to be paid) to bank accounts
  *                         totalFees:
  *                           type: number
+ *                         totalDeduction:
+ *                           type: number
+ *                           description: totalAmount + totalFees
  *       401:
  *         description: Unauthorized
  *       403:
@@ -1426,8 +1574,8 @@ router.get("/wallet/withdrawal-receipt/:transactionId", authMiddleware, async (r
   try {
     // Get withdrawal transaction
     const transaction = await Transaction.findOne({
+      ...WITHDRAWAL,
       transactionId,
-      type: 'wallet_withdrawal',
       "entries.userId": _id
     });
     
@@ -1471,9 +1619,7 @@ router.get("/wallet/withdrawal-receipt/:transactionId", authMiddleware, async (r
       
       // Withdrawal details
       withdrawal: {
-        amount: transaction.totalAmount,
-        fee: transaction.entries.find(e => e.account === 'bank_transfer_fees')?.debit || 0,
-        totalDeduction: transaction.totalAmount + (transaction.entries.find(e => e.account === 'bank_transfer_fees')?.debit || 0),
+        ...amountsOf(transaction),
         bankAccount: wallet.defaultBankAccount,
         status: transaction.status,
         processedAt: transaction.audit.approvedAt || transaction.createdAt

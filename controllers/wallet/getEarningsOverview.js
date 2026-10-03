@@ -3,6 +3,8 @@ const asyncHandler = require("express-async-handler");
 const Wallet = require("../../models/walletModel");
 const Transaction = require("../../models/transactionModel");
 const { DateTime } = require("luxon");
+const money = require("../../utils/money");
+const { WITHDRAWAL, AMOUNT_EXPR } = require("../../services/withdrawalPayoutService");
 
 /**
  * @function getEarningsOverview
@@ -58,16 +60,17 @@ const getEarningsOverview = asyncHandler(async (req, res) => {
   const todayEarnings = await getAggregatedEarnings(startOfToday);
   const weekEarnings = await getAggregatedEarnings(startOfWeek);
 
-  // Pending payouts (pending withdrawals)
+  // Pending payouts: requested or in-transit withdrawals, as the amount the
+  // bank will receive (fees excluded; bill payments are not withdrawals).
   const pendingPayouts = await Transaction.aggregate([
     { 
       $match: { 
+        ...WITHDRAWAL,
         "entries.userId": userObjectId,
-        type: "wallet_withdrawal",
         status: "pending"
       } 
     },
-    { $group: { _id: null, total: { $sum: "$totalAmount" } } }
+    { $group: { _id: null, total: { $sum: AMOUNT_EXPR } } }
   ]);
 
   res.json({
@@ -76,7 +79,7 @@ const getEarningsOverview = asyncHandler(async (req, res) => {
       today: todayEarnings,
       thisWeek: weekEarnings,
       total: wallet.metadata.totalEarnings || 0,
-      pending: pendingPayouts[0]?.total || 0,
+      pending: money.round(pendingPayouts[0]?.total || 0),
       currentBalance: wallet.balance
     }
   });

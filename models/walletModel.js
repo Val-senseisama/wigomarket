@@ -71,7 +71,7 @@ const walletSchema = new mongoose.Schema(
           accountName: { type: String, required: true },
           accountNumber: { type: String, required: true },
           bankName: { type: String, required: true },
-          // bankCode is stored internally for Flutterwave payouts.
+          // bankCode is stored internally for payouts (GET /api/banks codes).
           // The mobile bank picker returns it along with bankName — users
           // never type it manually, so it does not appear as a UI field.
           bankCode: { type: String },

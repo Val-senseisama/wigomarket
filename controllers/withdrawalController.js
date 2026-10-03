@@ -2,9 +2,9 @@ const asyncHandler = require("express-async-handler");
 const mongoose = require("mongoose");
 const Transaction = require("../models/transactionModel");
 const Wallet = require("../models/walletModel");
-const { getFlutterwaveInstance } = require("../config/flutterwaveClient");
-const { MakeID } = require("../Helpers/Helpers");
+const payoutService = require("../services/withdrawalPayoutService");
 const audit = require("../services/auditService");
+const money = require("../utils/money");
 
 /**
  * @function processWithdrawal
@@ -28,10 +28,9 @@ const processWithdrawal = asyncHandler(async (req, res) => {
     });
   }
 
-  // ── Step 1: Fetch transaction & wallet BEFORE opening a session ───────────
   const transaction = await Transaction.findOne({
+    ...payoutService.WITHDRAWAL,
     transactionId,
-    type: "wallet_withdrawal",
     status: "pending",
   });
   if (!transaction) {
@@ -51,10 +50,15 @@ const processWithdrawal = asyncHandler(async (req, res) => {
       .json({ success: false, message: "User wallet not found" });
   }
 
-  // ── Step 2: If approving, call FLW OUTSIDE any MongoDB session ───────────
-  let transferResponse;
+  // Money may be moving: it settles through the payout webhook / cron.
+  if (transaction.payout?.status === "in_transit") {
+    return res.status(409).json({
+      success: false,
+      message: "This withdrawal is already being paid out",
+    });
+  }
+
   if (action === "approve") {
-    const flw = getFlutterwaveInstance();
     const defaultBank = wallet.defaultBankAccount;
     if (!defaultBank) {
       return res.status(400).json({
@@ -62,142 +66,98 @@ const processWithdrawal = asyncHandler(async (req, res) => {
         message: "User wallet has no configured bank account",
       });
     }
-    transferResponse = await flw.Transfer.initiate({
-      account_bank: defaultBank.bankCode,
-      account_number: defaultBank.accountNumber,
-      amount: transaction.totalAmount,
-      narration: `Withdrawal from WigoMarket wallet - ${transactionId}`,
-      currency: "NGN",
-      reference: `WD_${transactionId}`,
-      callback_url: `${process.env.API_URL}/api/webhooks/transfer`,
-      debit_currency: "NGN",
+
+    const { outcome, transaction: txn, transfer } = await payoutService.startPayout({
+      transactionId,
+      bank: defaultBank,
+      adminId,
+      actor: audit.actor(req),
     });
-    if (transferResponse.status !== "success") {
-      audit.error({
-        action: "wallet.withdrawal_api_failed",
-        actor: audit.actor(req),
-        resource: { type: "transaction", id: transactionId },
-        metadata: {
-          error: transferResponse.message,
-          code: transferResponse.status,
-        },
+
+    if (outcome === "conflict") {
+      return res.status(409).json({
+        success: false,
+        message: "Withdrawal already processed or being paid out by another request",
       });
-      throw new Error(transferResponse.message || "Transfer initiation failed");
     }
+    if (outcome === "rejected") {
+      return res.status(502).json({
+        success: false,
+        message: transfer.message || "Transfer initiation failed",
+      });
+    }
+
+    audit.log({
+      action: "wallet.withdrawal_approved",
+      actor: audit.actor(req),
+      resource: { type: "transaction", id: transactionId },
+      changes: { after: { action, reason: reason || null, status: txn.status, payoutStatus: txn.payout.status } },
+    });
+
+    const completed = outcome === "completed";
+    return res.status(completed ? 200 : 202).json({
+      success: true,
+      message: completed
+        ? "Withdrawal approved and paid out"
+        : outcome === "unknown"
+          ? "Withdrawal approved; the provider did not answer in time. The payout will be confirmed automatically."
+          : "Withdrawal approved; the transfer is in progress and will be confirmed automatically.",
+      data: {
+        transactionId: txn.transactionId,
+        amount: payoutService.amountsOf(txn).amount,
+        provider: txn.payout.provider,
+        providerReference: txn.payout.reference,
+        providerStatus: txn.payout.providerStatus ?? null,
+        payoutStatus: txn.payout.status,
+        status: txn.status,
+      },
+    });
   }
 
-  // ── Step 3: All DB writes in one atomic session ───────────────────────────
+  // ── Reject: return the deducted amount + fee to the wallet atomically ─────
   const session = await mongoose.startSession();
   let result;
   try {
     await session.withTransaction(async () => {
-      // Re-fetch inside session to lock the document
+      // Re-fetch inside the session; a payout in transit cannot be rejected.
       const txn = await Transaction.findOne({
+        ...payoutService.WITHDRAWAL,
         transactionId,
-        type: "wallet_withdrawal",
         status: "pending",
+        "payout.status": { $ne: "in_transit" },
       }).session(session);
       if (!txn)
-        throw new Error("Withdrawal already processed by another request");
+        throw new Error("Withdrawal already processed or being paid out by another request");
 
-      const w = await Wallet.findOne({ user: walletUserId }).session(session);
-      if (!w) throw new Error("User wallet not found");
+      const note = `Refund for rejected withdrawal: ${reason || "No reason provided"}`;
+      const { refundAmount, reversalTransactionId } = await payoutService.returnToWallet(txn, session, note);
 
-      if (action === "approve") {
-        txn.status = "completed";
-        txn.audit.approvedBy = adminId;
-        txn.audit.approvedAt = new Date();
-        txn.metadata.externalTransactionId = transferResponse.data.reference;
-        txn.metadata.notes =
-          "Withdrawal approved and processed via Flutterwave";
-        await txn.save({ session });
+      txn.status = "cancelled";
+      txn.audit.approvedBy = adminId;
+      txn.audit.approvedAt = new Date();
+      txn.metadata.notes = `Withdrawal rejected: ${reason || "No reason provided"}`;
+      await txn.save({ session });
 
-        result = {
-          message: "Withdrawal approved and processed successfully",
-          data: {
-            transactionId: txn.transactionId,
-            amount: txn.totalAmount,
-            flwReference: transferResponse.data.reference,
-            status: "completed",
-          },
-        };
-      } else {
-        // Reject — refund the deducted amount back to wallet
-        const withdrawalFee =
-          txn.entries.find((e) => e.account === "bank_transfer_fees")?.debit ||
-          0;
-        const refundAmount = txn.totalAmount + withdrawalFee;
-
-        await w.addFunds(refundAmount, "refund", session);
-
-        const reversalTransactionId = `REV_${Date.now()}_${MakeID(16)}`;
-        await Transaction.createTransaction(
-          {
-            transactionId: reversalTransactionId,
-            reference: `Reversal-${transactionId}`,
-            type: "wallet_deposit",
-            totalAmount: refundAmount,
-            entries: [
-              {
-                account: "wallet_vendor",
-                userId: w.user,
-                debit: 0,
-                credit: refundAmount,
-                description: `Refund for rejected withdrawal ${transactionId}`,
-              },
-              {
-                account: "cash_account",
-                userId: w.user,
-                debit: refundAmount,
-                credit: 0,
-                description: "Refund payment",
-              },
-            ],
-            relatedEntity: { type: "withdrawal", id: txn._id },
-            status: "completed",
-            metadata: {
-              paymentMethod: "refund",
-              notes: `Refund for rejected withdrawal: ${reason || "No reason provided"}`,
-              originalTransactionId: transactionId,
-            },
-          },
-          session,
-        );
-
-        txn.status = "cancelled";
-        txn.audit.approvedBy = adminId;
-        txn.audit.approvedAt = new Date();
-        txn.metadata.notes = `Withdrawal rejected: ${reason || "No reason provided"}`;
-        await txn.save({ session });
-
-        result = {
-          message: "Withdrawal rejected and refunded successfully",
-          data: {
-            transactionId: txn.transactionId,
-            refundAmount,
-            status: "cancelled",
-            reversalTransactionId,
-          },
-        };
-      }
+      result = {
+        message: "Withdrawal rejected and refunded successfully",
+        data: {
+          transactionId: txn.transactionId,
+          refundAmount,
+          status: "cancelled",
+          reversalTransactionId,
+        },
+      };
     });
   } finally {
     await session.endSession();
   }
 
   audit.log({
-    action:
-      action === "approve"
-        ? "wallet.withdrawal_approved"
-        : "wallet.withdrawal_rejected",
+    action: "wallet.withdrawal_rejected",
     actor: audit.actor(req),
     resource: { type: "transaction", id: transactionId },
     changes: {
-      after: {
-        action,
-        reason: reason || null,
-        status: action === "approve" ? "completed" : "cancelled",
-      },
+      after: { action, reason: reason || null, status: "cancelled" },
     },
   });
 
@@ -216,7 +176,8 @@ const getPendingWithdrawals = asyncHandler(async (req, res) => {
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
   const skip = (page - 1) * limit;
 
-  const query = { type: "wallet_withdrawal", status: "pending" };
+  // Payouts already in transit are no longer awaiting a decision.
+  const query = { ...payoutService.WITHDRAWAL, status: "pending", "payout.status": { $ne: "in_transit" } };
 
   const [withdrawals, total] = await Promise.all([
     Transaction.find(query)
@@ -229,17 +190,18 @@ const getPendingWithdrawals = asyncHandler(async (req, res) => {
 
   const formatted = withdrawals.map((w) => {
     const user = w.entries.find((e) => e.account === "wallet_vendor")?.userId;
-    const fee =
-      w.entries.find((e) => e.account === "bank_transfer_fees")?.debit || 0;
+    const { amount, fee, totalDeduction } = payoutService.amountsOf(w);
     return {
       transactionId: w.transactionId,
       reference: w.reference,
       user,
-      amount: w.totalAmount,
+      amount,
       fee,
-      totalDeduction: w.totalAmount + fee,
+      totalDeduction,
       createdAt: w.createdAt,
       metadata: w.metadata,
+      // Set when an earlier payout attempt was refused by the provider.
+      payout: w.payout?.status ? w.payout : null,
     };
   });
 
@@ -272,66 +234,35 @@ const getWithdrawalStats = asyncHandler(async (req, res) => {
       : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const end = endDate ? new Date(endDate) : new Date();
 
-    const stats = await Transaction.aggregate([
-      {
-        $match: {
-          type: "wallet_withdrawal",
-          createdAt: { $gte: start, $lte: end },
-        },
-      },
-      {
-        $group: {
-          _id: "$status",
-          count: { $sum: 1 },
-          totalAmount: { $sum: "$totalAmount" },
-        },
-      },
-    ]);
+    // totalAmount is what the banks receive; totalFees is what we kept;
+    // totalDeduction is both (what left the wallets).
+    const sums = {
+      count: { $sum: 1 },
+      totalAmount: { $sum: payoutService.AMOUNT_EXPR },
+      totalFees: { $sum: payoutService.FEE_EXPR },
+      totalDeduction: { $sum: "$totalAmount" },
+    };
+    const match = { $match: { ...payoutService.WITHDRAWAL, createdAt: { $gte: start, $lte: end } } };
+    const rounded = ({ count, totalAmount, totalFees, totalDeduction, ...rest }) => ({
+      ...rest,
+      count,
+      totalAmount: money.round(totalAmount),
+      totalFees: money.round(totalFees),
+      totalDeduction: money.round(totalDeduction),
+    });
 
-    const totalStats = await Transaction.aggregate([
-      {
-        $match: {
-          type: "wallet_withdrawal",
-          createdAt: { $gte: start, $lte: end },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalCount: { $sum: 1 },
-          totalAmount: { $sum: "$totalAmount" },
-          // $filter selects fee entries, then $sum adds their debit values
-          totalFees: {
-            $sum: {
-              $sum: {
-                $map: {
-                  input: {
-                    $filter: {
-                      input: "$entries",
-                      as: "entry",
-                      cond: { $eq: ["$$entry.account", "bank_transfer_fees"] },
-                    },
-                  },
-                  as: "feeEntry",
-                  in: "$$feeEntry.debit",
-                },
-              },
-            },
-          },
-        },
-      },
+    const [stats, totalStats] = await Promise.all([
+      Transaction.aggregate([match, { $group: { _id: "$status", ...sums } }]),
+      Transaction.aggregate([match, { $group: { _id: null, ...sums } }]),
     ]);
+    const { _id, count, ...totals } = totalStats[0] ? rounded(totalStats[0]) : { count: 0, totalAmount: 0, totalFees: 0, totalDeduction: 0 };
 
     res.json({
       success: true,
       data: {
         period: { startDate: start, endDate: end },
-        statusBreakdown: stats,
-        totals: totalStats[0] || {
-          totalCount: 0,
-          totalAmount: 0,
-          totalFees: 0,
-        },
+        statusBreakdown: stats.map(rounded),
+        totals: { totalCount: count, ...totals },
       },
     });
   } catch (error) {

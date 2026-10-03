@@ -17,7 +17,7 @@ const orderRouter = require("./routes/orderRouter");
 const locationTrackingRouter = require("./routes/locationTrackingRouter");
 const ratingRouter = require("./routes/ratingRouter");
 const notificationRouter = require("./routes/notificationRouter");
-const flutterwaveRouter = require("./routes/flutterwaveRouter");
+const bankRouter = require("./routes/bankRouter");
 const walletRouter = require("./routes/walletRouter");
 const wishlistRouter = require("./routes/wishlistRouter");
 const sellerDiscoveryRouter = require("./routes/sellerDiscoveryRouter");
@@ -76,7 +76,14 @@ app.use(
   }),
 );
 
-app.use(bodyParser.json());
+// Keep the raw bytes: payment webhooks are signed over the exact body.
+app.use(
+  bodyParser.json({
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    },
+  }),
+);
 app.use(bodyParser.urlencoded({ extended: false }));
 
 // HTTP request logging — pipe morgan through Winston so it goes to all transports
@@ -101,7 +108,8 @@ app.use("/api/order", orderRouter);
 app.use("/api/location", locationTrackingRouter);
 app.use("/api/rating", ratingRouter);
 app.use("/api/notifications", notificationRouter);
-app.use("/api/flutterwave", flutterwaveRouter);
+app.use("/api/banks", bankRouter);
+app.use("/api/flutterwave", bankRouter); // deprecated alias of /api/banks
 app.use("/api", walletRouter);
 app.use("/api/wishlist", wishlistRouter);
 app.use("/api/sellers", sellerDiscoveryRouter);

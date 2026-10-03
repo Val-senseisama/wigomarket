@@ -42,6 +42,61 @@ router.use(authMiddleware, isAdmin);
  *     responses:
  *       200:
  *         description: Success
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     users:
+ *                       type: object
+ *                       properties:
+ *                         byStatus:
+ *                           type: array
+ *                           items: { type: object, properties: { _id: { type: string }, count: { type: integer } } }
+ *                         byRole:
+ *                           type: array
+ *                           items: { type: object, properties: { _id: { type: string }, count: { type: integer } } }
+ *                     dispatchProfiles:
+ *                       type: object
+ *                       properties:
+ *                         byStatus:
+ *                           type: array
+ *                           items: { type: object, properties: { _id: { type: string }, count: { type: integer } } }
+ *                     stores:
+ *                       type: object
+ *                       properties:
+ *                         byStatus:
+ *                           type: array
+ *                           items: { type: object, properties: { _id: { type: string }, count: { type: integer } } }
+ *                     orders:
+ *                       type: object
+ *                       properties:
+ *                         byStatus:
+ *                           type: array
+ *                           items: { type: object, properties: { _id: { type: string }, count: { type: integer } } }
+ *                         today:
+ *                           type: integer
+ *                     withdrawals:
+ *                       type: object
+ *                       description: |
+ *                         Unsettled bank withdrawals (bill payments excluded). Amounts are
+ *                         what the bank accounts will receive, fees excluded.
+ *                       properties:
+ *                         pending:
+ *                           type: integer
+ *                           description: Awaiting an admin decision (GET /api/admin/withdrawals/pending)
+ *                         pendingAmount:
+ *                           type: number
+ *                         inTransit:
+ *                           type: integer
+ *                           description: Approved; payout sent and awaiting the provider's confirmation
+ *                         inTransitAmount:
+ *                           type: number
  *       401:
  *         description: Not authenticated
  *       403:
@@ -640,10 +695,13 @@ router.get("/withdrawals/stats", getWithdrawalStats);
  *       | `status` | What to do |
  *       |----------|------------|
  *       | `escalated` | The buyer escalated a rejected or ignored request. Approve or decline (`/decision`) — final. |
- *       | `needs_review` | A payout's outcome is unknown (e.g. Flutterwave timed out). Check the Flutterwave dashboard, then `/resolve` with `refunded` or `not_refunded`. Never retried automatically, to avoid refunding twice. |
- *       | `failed` | Flutterwave rejected the payout; no money moved. `/resolve` with `retry`. |
+ *       | `needs_review` | A payout's outcome is unknown (e.g. Flutterwave timed out, or Monnify had not finalised it after 24h). Check the provider's dashboard, then `/resolve` with `refunded` or `not_refunded`. Never retried automatically, to avoid refunding twice. |
+ *       | `failed` | The payment provider rejected the payout; no money moved. `/resolve` with `retry`. |
  *
- *       Admin rows include payout internals: `providerRefundId`, `lastError`,
+ *       Admin rows include payout internals: `provider` (who took the charge
+ *       and pays the refund), `providerRefundReference` (our reference for
+ *       the current attempt — search the provider's dashboard by it),
+ *       `providerRefundId`, `providerStatus`, `lastError`,
  *       `attempts`, `shortfalls` (seller already withdrew; `outstanding` is owed
  *       by them) and the full `history`.
  *     tags: [Refunds]
@@ -778,10 +836,10 @@ router.post("/refund-requests/:id/decision", refunds.decideRefundRequest);
  *     summary: Unstick a payout that could not complete on its own
  *     description: |
  *       - `needs_review` + `refunded`: the money did go out (confirmed on the
- *         Flutterwave dashboard). Pass the Flutterwave refund id unless the
+ *         provider's dashboard). Pass the provider's refund id unless the
  *         request already has one; the refund is then booked.
  *       - `needs_review` + `not_refunded`: no money moved; becomes `failed`.
- *       - `failed` + `retry`: send the refund to Flutterwave again.
+ *       - `failed` + `retry`: send the refund to the payment provider again (under a new reference).
  *     tags: [Refunds]
  *     security:
  *       - bearerAuth: []
@@ -820,7 +878,7 @@ router.post("/refund-requests/:id/decision", refunds.decideRefundRequest);
  *       404:
  *         description: Not found
  *       409:
- *         description: Wrong state for that outcome, or Flutterwave already confirmed the refund
+ *         description: Wrong state for that outcome, or the payment provider already confirmed the refund
  */
 router.post("/refund-requests/:id/resolve", refunds.resolveRefundRequest);
 

@@ -5,7 +5,7 @@
  * DESIGN:
  *   When Redis is available, webhook events are enqueued as BullMQ jobs and
  *   processed asynchronously by a background Worker. This lets the webhook
- *   endpoint acknowledge Flutterwave immediately (< 200 ms) while heavy DB
+ *   endpoint acknowledge the provider immediately (< 200 ms) while heavy DB
  *   work happens in the background with automatic retries.
  *
  *   When Redis is unavailable (or PAYMENT_QUEUE_ENABLED=false), jobs are
@@ -99,10 +99,8 @@ async function init() {
       QUEUE_NAME,
       async (job) => {
         if (job.name === "webhook.payment") {
-          const {
-            processWebhookPayload,
-          } = require("./webhookPaymentProcessor");
-          await processWebhookPayload(job.data.payload, job.data.sourceIp);
+          const { processWebhookEvent } = require("./webhookPaymentProcessor");
+          await processWebhookEvent(job.data);
         }
       },
       { connection: getConnectionConfig() },
@@ -144,18 +142,25 @@ async function init() {
 }
 
 /**
- * Enqueue a verified Flutterwave webhook payload for background processing.
+ * Enqueue a signature-checked, parsed webhook event for background processing.
  * Falls back to in-process setImmediate execution if the queue is unavailable.
  *
- * @param {Object} payload   - Verified Flutterwave webhook body.
+ * @param {string} provider  - Adapter name the webhook came from.
+ * @param {Object} event     - provider.parseWebhook() result.
  * @param {string} sourceIp  - Originating IP (for audit logs).
  */
-async function enqueueWebhookPayment(payload, sourceIp) {
+async function enqueueWebhookPayment(provider, event, sourceIp) {
+  const data = { provider, event, sourceIp };
   if (isAvailable && queue) {
     try {
-      // jobId deduplication: Flutterwave may retry the same event
-      const jobId = `webhook_${payload.data?.id ?? Date.now()}`;
-      await queue.add("webhook.payment", { payload, sourceIp }, { jobId });
+      // jobId deduplication: providers retry the same event. A payout can
+      // legitimately report twice (success, then a reversal), so its status
+      // is part of the key.
+      const jobId =
+        event.type === "transfer.updated"
+          ? `webhook_${provider}_transfer_${event.reference}_${event.providerStatus}`
+          : `webhook_${provider}_${event.providerTransactionId ?? event.reference}`;
+      await queue.add("webhook.payment", data, { jobId });
       return;
     } catch (err) {
       console.error(
@@ -169,8 +174,8 @@ async function enqueueWebhookPayment(payload, sourceIp) {
   // is sent before we start doing database work
   setImmediate(async () => {
     try {
-      const { processWebhookPayload } = require("./webhookPaymentProcessor");
-      await processWebhookPayload(payload, sourceIp);
+      const { processWebhookEvent } = require("./webhookPaymentProcessor");
+      await processWebhookEvent(data);
     } catch (err) {
       console.error("[PaymentQueue] In-process fallback failed:", err.message);
       try {
@@ -178,7 +183,7 @@ async function enqueueWebhookPayment(payload, sourceIp) {
         audit.error({
           action: "webhook.processing_failed",
           actor: { userId: null, role: "system", ip: sourceIp },
-          metadata: { error: err.message },
+          metadata: { provider, reference: event.reference, error: err.message },
         });
       } catch {}
     }

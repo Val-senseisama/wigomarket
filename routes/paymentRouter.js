@@ -8,9 +8,7 @@ const {
   generateTransactionStatement,
   generateVATReport,
 } = require("../controllers/payment");
-const {
-  handleFlutterwaveWebhook,
-} = require("../controllers/webhookController");
+const { handlePaymentWebhook } = require("../controllers/webhookController");
 const { runPendingPaymentCheck } = require("../services/pendingPaymentCron");
 const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
 const rateLimit = require("express-rate-limit");
@@ -36,12 +34,37 @@ const paymentInitLimiter = rateLimit({
 
 /**
  * @swagger
- * /api/payment/webhook:
+ * /api/payment/webhook/{provider}:
  *   post:
- *     summary: Flutterwave Webhook Handler
- *     description: Securely handle Flutterwave webhook events with signature verification
+ *     summary: Payment provider webhook
+ *     description: |
+ *       Receives payment events from a payment provider. Configure each
+ *       provider's dashboard to call its own URL:
+ *
+ *       - Monnify: `/api/payment/webhook/monnify` — signed with `monnify-signature`
+ *         (HMAC-SHA512 of the raw body, keyed with the Monnify secret key).
+ *         Acts on `SUCCESSFUL_TRANSACTION` (order payments) and
+ *         `SUCCESSFUL_DISBURSEMENT` / `FAILED_DISBURSEMENT` /
+ *         `REVERSED_DISBURSEMENT` (withdrawal payouts).
+ *       - Flutterwave: `/api/payment/webhook/flutterwave` (or the legacy
+ *         `/api/payment/webhook`) — `verif-hash` must equal `FLW_WEBHOOK_SECRET_HASH`.
+ *         Acts on `charge.completed` and `transfer.completed`.
+ *
+ *       The endpoint acknowledges at once and processes in the background.
+ *       Every event is re-verified with the provider's API by our own
+ *       reference before anything is booked: each charge marks its order paid
+ *       exactly once, and each payout completes its withdrawal — or, if it
+ *       failed or was reversed, returns amount + fee to the wallet — exactly
+ *       once, however many times the event is delivered.
  *     tags:
  *       - Payment
+ *     parameters:
+ *       - in: path
+ *         name: provider
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [monnify, flutterwave]
  *     requestBody:
  *       required: true
  *       content:
@@ -53,15 +76,24 @@ const paymentInitLimiter = rateLimit({
  *         description: Webhook received
  *       401:
  *         description: Invalid signature
+ *       404:
+ *         description: Unknown provider
  */
-router.post("/webhook", handleFlutterwaveWebhook);
+router.post("/webhook/:provider", handlePaymentWebhook);
+router.post("/webhook", handlePaymentWebhook); // legacy Flutterwave URL
 
 /**
  * @swagger
  * /api/payment/initialize:
  *   post:
- *     summary: Initialize payment with Flutterwave
- *     description: Initialize payment for an order using Flutterwave
+ *     summary: Start checkout for an order
+ *     description: |
+ *       Opens a hosted checkout with the active payment provider (Monnify by
+ *       default) and returns its URL. Each call opens a fresh checkout under a
+ *       new `reference`, so a buyer who closed the tab can call it again.
+ *       After paying, the buyer is sent to
+ *       `FRONTEND_URL/payment/callback?orderId=<orderId>`; the client then
+ *       calls `POST /api/payment/verify`.
  *     tags:
  *       - Payment
  *     security:
@@ -95,16 +127,25 @@ router.post("/webhook", handleFlutterwaveWebhook);
  *                   properties:
  *                     payment_url:
  *                       type: string
- *                     flw_ref:
+ *                       description: Hosted checkout page to send the buyer to
+ *                     reference:
  *                       type: string
+ *                       description: Our reference for this checkout attempt
+ *                     provider:
+ *                       type: string
+ *                       enum: [monnify, flutterwave]
  *                     orderId:
  *                       type: string
  *                     amount:
  *                       type: number
  *       400:
  *         description: Invalid request or order already paid
+ *       403:
+ *         description: Order belongs to another user
  *       404:
  *         description: Order not found
+ *       502:
+ *         description: The payment provider could not start checkout
  */
 router.post("/initialize", authMiddleware, paymentInitLimiter, initializePayment);
 
@@ -113,7 +154,11 @@ router.post("/initialize", authMiddleware, paymentInitLimiter, initializePayment
  * /api/payment/verify:
  *   post:
  *     summary: Verify payment status
- *     description: Verify payment status with Flutterwave after payment
+ *     description: |
+ *       Asks the order's payment provider about the order's own checkout
+ *       references and, if the charge succeeded, marks the order paid and
+ *       credits sellers (exactly once, shared with the webhook and the cron).
+ *       Safe to call repeatedly.
  *     tags:
  *       - Payment
  *     requestBody:
@@ -123,15 +168,15 @@ router.post("/initialize", authMiddleware, paymentInitLimiter, initializePayment
  *           schema:
  *             type: object
  *             required:
- *               - transaction_id
  *               - orderId
  *             properties:
- *               transaction_id:
- *                 type: string
- *                 description: Flutterwave transaction ID
  *               orderId:
  *                 type: string
  *                 description: Order ID
+ *               transaction_id:
+ *                 type: string
+ *                 deprecated: true
+ *                 description: Ignored. The charge is looked up by the order's own references.
  *     responses:
  *       200:
  *         description: Payment verified successfully
@@ -152,7 +197,13 @@ router.post("/initialize", authMiddleware, paymentInitLimiter, initializePayment
  *                     payment:
  *                       type: object
  *                       properties:
+ *                         provider:
+ *                           type: string
+ *                           enum: [monnify, flutterwave]
  *                         transaction_id:
+ *                           type: string
+ *                           description: The provider's id for the charge
+ *                         reference:
  *                           type: string
  *                         amount:
  *                           type: number
@@ -164,7 +215,29 @@ router.post("/initialize", authMiddleware, paymentInitLimiter, initializePayment
  *                           type: string
  *                           format: date-time
  *       400:
- *         description: Payment verification failed
+ *         description: Checkout not started, payment not complete yet, or payment failed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     status:
+ *                       type: string
+ *                       enum: [pending, failed]
+ *                     providerStatus:
+ *                       type: string
+ *       404:
+ *         description: Order not found
+ *       409:
+ *         description: Payment received but it does not match this order (amount or reference); admins are alerted
  */
 router.post("/verify", verifyPayment);
 
@@ -477,8 +550,9 @@ router.get("/vat-report", authMiddleware, isAdmin, generateVATReport);
  *   post:
  *     summary: Manually trigger pending payment recovery (Admin only)
  *     description: |
- *       Runs the same logic as the 5-minute cron — verifies all pending Flutterwave
- *       transactions and credits wallets for any that are now confirmed paid.
+ *       Runs the same logic as the 5-minute cron — asks the payment provider
+ *       about every unpaid checkout started in the last 48 hours and books any
+ *       that are now confirmed paid.
  *       Idempotent and race-condition safe.
  *     tags:
  *       - Payment

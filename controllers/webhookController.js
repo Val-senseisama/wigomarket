@@ -1,70 +1,51 @@
 /**
  * @file webhookController.js
- * @description Flutterwave webhook receiver.
+ * @description Payment provider webhook receiver: POST /api/payment/webhook/:provider
+ * (and the legacy POST /api/payment/webhook, which is Flutterwave's).
  *
  * DESIGN:
- *   1. Verify the HMAC-SHA256 signature immediately. Reject on failure.
- *   2. Respond HTTP 200 right away — Flutterwave expects a fast acknowledgement
- *      and will retry if it doesn't receive one in time.
- *   3. Hand the payload off to the payment queue (BullMQ when Redis is available,
- *      or a setImmediate fallback when it is not). All DB work happens there.
+ *   1. Check the provider's signature over the raw body. Reject on failure.
+ *   2. Respond HTTP 200 right away — providers expect a fast acknowledgement
+ *      and retry if they don't get one in time.
+ *   3. Hand the parsed event to the payment queue (BullMQ when Redis is
+ *      available, or a setImmediate fallback when it is not). The processor
+ *      re-verifies the charge with the provider before booking anything.
  *
- * The actual payment processing logic lives in services/webhookPaymentProcessor.js.
+ * The processing logic lives in services/webhookPaymentProcessor.js.
  */
 
 const asyncHandler = require("express-async-handler");
-const crypto = require("crypto");
-const appConfig = require("../config/appConfig");
+const payments = require("../services/payments");
 const audit = require("../services/auditService");
 const { enqueueWebhookPayment } = require("../services/paymentQueue");
 
-const handleFlutterwaveWebhook = asyncHandler(async (req, res) => {
-  const signature =
-    req.headers["verif-hash"] || req.headers["x-flw-signature"];
-  const payload = req.body;
-
-  // ── Signature verification ─────────────────────────────────────────────────
-  const secretHash = appConfig.payment.flutterwave.webhookSecretHash;
-  if (!secretHash) {
-    audit.error({
-      action: "webhook.unconfigured_secret",
-      actor: { userId: null, role: "system", ip: req.ip },
-      metadata: { error: "FLW_WEBHOOK_SECRET_HASH not configured" },
-    });
-    return res
-      .status(401)
-      .json({ success: false, message: "Webhook configuration error" });
+const handlePaymentWebhook = asyncHandler(async (req, res) => {
+  const providerName = String(req.params.provider || "flutterwave").toLowerCase();
+  if (!payments.isProvider(providerName)) {
+    return res.status(404).json({ success: false, message: "Unknown payment provider" });
   }
+  const provider = payments.getProvider(providerName);
 
-  const hash = crypto
-    .createHmac("sha256", secretHash)
-    .update(JSON.stringify(payload))
-    .digest("hex");
-
-  // Timing-safe comparison prevents timing-attack signature probing
-  const hashBuf = Buffer.from(hash, "utf8");
-  const sigBuf = Buffer.from(signature || "", "utf8");
-  const signatureValid =
-    hashBuf.length === sigBuf.length &&
-    crypto.timingSafeEqual(hashBuf, sigBuf);
-
+  const signatureValid = provider.verifyWebhookSignature({ headers: req.headers, rawBody: req.rawBody });
   if (!signatureValid) {
     audit.error({
       action: "webhook.invalid_signature",
       actor: { userId: null, role: "system", ip: req.ip },
-      metadata: { event: payload.event, signature },
+      metadata: { provider: providerName, event: req.body?.event ?? req.body?.eventType },
     });
     return res.status(401).json({ success: false, message: "Invalid signature" });
   }
 
   // ── Acknowledge immediately ────────────────────────────────────────────────
-  // Flutterwave requires a quick response; heavy DB work runs in the background.
   res.status(200).json({ success: true, message: "Webhook received" });
 
+  const event = provider.parseWebhook(req.body);
+  if (!event) return; // an event type we don't act on
+
   // ── Enqueue for async processing ───────────────────────────────────────────
-  enqueueWebhookPayment(payload, req.ip).catch((err) => {
+  enqueueWebhookPayment(providerName, event, req.ip).catch((err) => {
     console.error("[Webhook] Enqueue error:", err.message);
   });
 });
 
-module.exports = { handleFlutterwaveWebhook };
+module.exports = { handlePaymentWebhook };

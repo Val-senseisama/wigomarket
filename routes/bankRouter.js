@@ -4,26 +4,27 @@ const {
   resolveAccountName,
   getBankByCode,
   clearBanksCache,
-  getCacheStats
-} = require("../controllers/flutterwaveController");
+  getCacheStats,
+} = require("../controllers/bankController");
 const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
 const router = express.Router();
 
+// Mounted at /api/banks, and at /api/flutterwave as a deprecated alias for
+// older clients (same handlers, same responses).
+
 /**
  * @swagger
- * /api/flutterwave/flutterwave/banks:
+ * /api/banks:
  *   get:
  *     summary: Get list of banks
- *     description: Get list of banks from Flutterwave with caching
+ *     description: |
+ *       Nigerian banks supported by the active payment provider (Monnify by
+ *       default). Use a bank's `code` as `bankCode` / `account_bank` elsewhere.
+ *       Cached for 24 hours per provider.
+ *
+ *       Also served at the deprecated `GET /api/flutterwave/banks`.
  *     tags:
- *       - Flutterwave
- *     parameters:
- *       - in: query
- *         name: country
- *         schema:
- *           type: string
- *           default: NG
- *         description: Country code
+ *       - Banks
  *     responses:
  *       200:
  *         description: Banks list retrieved successfully
@@ -41,42 +42,47 @@ const router = express.Router();
  *                   items:
  *                     type: object
  *                     properties:
- *                       id:
- *                         type: number
  *                       code:
  *                         type: string
+ *                         example: "058"
  *                       name:
  *                         type: string
+ *                         example: "Guaranty Trust Bank"
  *                 cached:
  *                   type: boolean
+ *                 provider:
+ *                   type: string
+ *                   example: monnify
  *                 timestamp:
  *                   type: string
  *                   format: date-time
- *       400:
- *         description: Invalid request
- *       500:
- *         description: Server error
+ *       502:
+ *         description: The payment provider could not be reached and nothing is cached
  */
-router.get("/banks", getBanksList);
+router.get("/", getBanksList);
+router.get("/banks", getBanksList); // legacy path under /api/flutterwave
 
 /**
  * @swagger
- * /api/flutterwave/flutterwave/banks/{bankCode}:
+ * /api/banks/{bankCode}:
  *   get:
- *     summary: Get bank details by code
- *     description: Get specific bank details by bank code
+ *     summary: Get bank by code
+ *     description: |
+ *       One bank from the active provider's list.
+ *
+ *       Also served at the deprecated `GET /api/flutterwave/banks/{bankCode}`.
  *     tags:
- *       - Flutterwave
+ *       - Banks
  *     parameters:
  *       - in: path
  *         name: bankCode
  *         required: true
  *         schema:
  *           type: string
- *         description: Bank code
+ *         example: "058"
  *     responses:
  *       200:
- *         description: Bank details retrieved successfully
+ *         description: Bank found
  *         content:
  *           application/json:
  *             schema:
@@ -84,37 +90,32 @@ router.get("/banks", getBanksList);
  *               properties:
  *                 success:
  *                   type: boolean
- *                 message:
- *                   type: string
  *                 data:
  *                   type: object
  *                   properties:
- *                     id:
- *                       type: number
  *                     code:
  *                       type: string
  *                     name:
  *                       type: string
- *                 cached:
- *                   type: boolean
- *                 timestamp:
- *                   type: string
- *                   format: date-time
  *       404:
- *         description: Bank not found
- *       500:
- *         description: Server error
+ *         description: No bank with that code
+ *       502:
+ *         description: The payment provider could not be reached and nothing is cached
  */
-router.get("/banks/:bankCode", getBankByCode);
+router.get("/banks/:bankCode", getBankByCode); // legacy path under /api/flutterwave
 
 /**
  * @swagger
- * /api/flutterwave/flutterwave/accounts/resolve:
+ * /api/banks/accounts/resolve:
  *   post:
  *     summary: Resolve account name
- *     description: Resolve account name from bank account number and bank code
+ *     description: |
+ *       Look up the account holder's name for a bank account through the
+ *       active payment provider. Cached for 1 hour.
+ *
+ *       Also served at the deprecated `POST /api/flutterwave/accounts/resolve`.
  *     tags:
- *       - Flutterwave
+ *       - Banks
  *     requestBody:
  *       required: true
  *       content:
@@ -127,11 +128,11 @@ router.get("/banks/:bankCode", getBankByCode);
  *             properties:
  *               account_number:
  *                 type: string
- *                 description: Bank account number
+ *                 description: 10-digit NUBAN
  *                 example: "0123456789"
  *               account_bank:
  *                 type: string
- *                 description: Bank code
+ *                 description: Bank code from GET /api/banks
  *                 example: "044"
  *     responses:
  *       200:
@@ -154,33 +155,32 @@ router.get("/banks/:bankCode", getBankByCode);
  *                       type: string
  *                     bank_code:
  *                       type: string
- *                     bank_name:
- *                       type: string
  *                 cached:
  *                   type: boolean
  *                 timestamp:
  *                   type: string
  *                   format: date-time
  *       400:
- *         description: Invalid request or account not found
- *       500:
- *         description: Server error
+ *         description: Invalid input, or the provider could not resolve the account
  */
 router.post("/accounts/resolve", resolveAccountName);
 
 /**
  * @swagger
- * /api/flutterwave/flutterwave/cache/clear:
+ * /api/banks/cache/clear:
  *   post:
  *     summary: Clear banks cache
- *     description: Clear all banks and account resolution cache (Admin only)
+ *     description: |
+ *       Clear cached bank lists and account lookups (admin only).
+ *
+ *       Also served at the deprecated `POST /api/flutterwave/cache/clear`.
  *     tags:
- *       - Flutterwave
+ *       - Banks
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       200:
- *         description: Cache cleared successfully
+ *         description: Cache cleared
  *         content:
  *           application/json:
  *             schema:
@@ -202,25 +202,26 @@ router.post("/accounts/resolve", resolveAccountName);
  *       401:
  *         description: Unauthorized
  *       403:
- *         description: Forbidden - Admin only
- *       500:
- *         description: Server error
+ *         description: Admin access required
  */
 router.post("/cache/clear", authMiddleware, isAdmin, clearBanksCache);
 
 /**
  * @swagger
- * /api/flutterwave/flutterwave/cache/stats:
+ * /api/banks/cache/stats:
  *   get:
- *     summary: Get cache statistics
- *     description: Get cache statistics for banks and account resolution (Admin only)
+ *     summary: Get banks cache statistics
+ *     description: |
+ *       Counts of cached bank lists and account lookups (admin only).
+ *
+ *       Also served at the deprecated `GET /api/flutterwave/cache/stats`.
  *     tags:
- *       - Flutterwave
+ *       - Banks
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       200:
- *         description: Cache statistics retrieved successfully
+ *         description: Cache statistics
  *         content:
  *           application/json:
  *             schema:
@@ -228,8 +229,6 @@ router.post("/cache/clear", authMiddleware, isAdmin, clearBanksCache);
  *               properties:
  *                 success:
  *                   type: boolean
- *                 message:
- *                   type: string
  *                 data:
  *                   type: object
  *                   properties:
@@ -237,32 +236,16 @@ router.post("/cache/clear", authMiddleware, isAdmin, clearBanksCache);
  *                       type: number
  *                     accountResolveCache:
  *                       type: number
- *                     bankDetailsCache:
- *                       type: number
  *                     totalCacheEntries:
  *                       type: number
- *                     cacheKeys:
- *                       type: object
- *                       properties:
- *                         banks:
- *                           type: array
- *                           items:
- *                             type: string
- *                         accounts:
- *                           type: array
- *                           items:
- *                             type: string
- *                         bankDetails:
- *                           type: array
- *                           items:
- *                             type: string
  *       401:
  *         description: Unauthorized
  *       403:
- *         description: Forbidden - Admin only
- *       500:
- *         description: Server error
+ *         description: Admin access required
  */
 router.get("/cache/stats", authMiddleware, isAdmin, getCacheStats);
+
+// Declared last so it doesn't shadow /cache/* and /accounts/*.
+router.get("/:bankCode", getBankByCode);
 
 module.exports = router;

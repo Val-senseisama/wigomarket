@@ -5,13 +5,16 @@ const Order = require("../../models/orderModel");
 const DispatchProfile = require("../../models/dispatchProfileModel");
 const Wallet = require("../../models/walletModel");
 const Transaction = require("../../models/transactionModel");
+const money = require("../../utils/money");
+const { WITHDRAWAL, AMOUNT_EXPR } = require("../../services/withdrawalPayoutService");
 
 /**
  * @function getEarningsOverview
  * @description The four headline figures shown on the rider earnings screen:
  *                • today        — delivery fees earned since midnight (Lagos)
  *                • thisWeek     — delivery fees earned since the start of the week
- *                • pendingPayout— withdrawal requests still being processed
+ *                • pendingPayout— withdrawals requested or in transit, as the
+ *                                 amount the bank will receive (fees excluded)
  *                • totalEarnings— lifetime delivery earnings
  *              Also returns the currently withdrawable wallet balance.
  *
@@ -58,12 +61,12 @@ const getEarningsOverview = asyncHandler(async (req, res) => {
       Transaction.aggregate([
         {
           $match: {
+            ...WITHDRAWAL,
             "entries.userId": agentId,
-            type: "wallet_withdrawal",
             status: "pending",
           },
         },
-        { $group: { _id: null, total: { $sum: "$totalAmount" } } },
+        { $group: { _id: null, total: { $sum: AMOUNT_EXPR } } },
       ]),
     ]);
 
@@ -72,7 +75,7 @@ const getEarningsOverview = asyncHandler(async (req, res) => {
     data: {
       today,
       thisWeek,
-      pendingPayout: pendingPayoutAgg[0]?.total || 0,
+      pendingPayout: money.round(pendingPayoutAgg[0]?.total || 0),
       totalEarnings: dispatchProfile?.earnings?.totalEarnings || 0,
       availableBalance: wallet?.balance || 0,
       totalDeliveries: dispatchProfile?.earnings?.totalDeliveries || 0,

@@ -2,14 +2,15 @@ const Store = require("../../models/storeModel");
 const asyncHandler = require("express-async-handler");
 const { Validate } = require("../../Helpers/Validate");
 const { ThrowError } = require("../../Helpers/Helpers");
-const { getFlutterwaveInstance } = require("../../config/flutterwaveClient");
+const payments = require("../../services/payments");
 const { storeAccountUpdateSuccessTemplate } = require("../../templates/Emails");
 const sendEmail = require("../emailController");
 const audit = require("../../services/auditService");
 
 /**
  * @function updateBankDetails
- * @description Update store's bank details and create subaccount
+ * @description Update store's bank details after checking the account exists
+ *              with the payment provider.
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  * @param {string} req.user._id - User ID
@@ -42,33 +43,19 @@ const updateBankDetails = asyncHandler(async (req, res) => {
   }
 
   try {
-    const myStore = await Store.findOne({ owner: _id }, { _id: 1, name: 1,mobile: 1, email: 1, subAccountDetails: 1 });
+    const myStore = await Store.findOne({ owner: _id }, { _id: 1, name: 1, mobile: 1, email: 1 });
 
     if(!myStore){
       ThrowError("Store not found");
     }
 
-    const flw = getFlutterwaveInstance();
-
-    if (myStore.subAccountDetails?.id) {
-      await flw.Subaccount.delete({ id: myStore.subAccountDetails.id });
+    // Sellers are paid from their wallet by transfer, so the account only has
+    // to exist; a typo here would send a payout nowhere.
+    try {
+      await payments.getProvider().resolveAccount({ accountNumber, bankCode });
+    } catch (err) {
+      ThrowError("Could not verify this bank account. Check the account number and bank.");
     }
-
-    const details = {
-      account_bank: bankCode,
-      account_number: accountNumber,
-      business_name: myStore.name,
-      business_mobile: myStore.mobile,
-      business_email: myStore.email ?? req.user.email,
-      country: "NG",
-      split_type: "percentage",
-      split_value: 0.05
-      };
-     const subAccount = await flw.Subaccount.create(details)
-      
-      if(!subAccount || subAccount.status !== "success") {
-        ThrowError("Unable to create subaccount");
-      }
 
       const updatedStore = await Store.findOneAndUpdate(
         { owner: _id },
@@ -80,7 +67,6 @@ const updateBankDetails = asyncHandler(async (req, res) => {
               bankCode: bankCode,
               bankName: bankName,
             },
-            subAccountDetails: subAccount.data
           },
         },
         { new: true }

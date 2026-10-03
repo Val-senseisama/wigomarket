@@ -4,6 +4,8 @@ const Store = require("../../models/storeModel");
 const DispatchProfile = require("../../models/dispatchProfileModel");
 const Order = require("../../models/orderModel");
 const Transaction = require("../../models/transactionModel");
+const money = require("../../utils/money");
+const { WITHDRAWAL, AMOUNT_EXPR } = require("../../services/withdrawalPayoutService");
 
 /**
  * @function getOverview
@@ -34,17 +36,22 @@ const getOverview = asyncHandler(async (req, res) => {
     Store.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
     Order.aggregate([{ $group: { _id: "$orderStatus", count: { $sum: 1 } } }]),
     Order.countDocuments({ createdAt: { $gte: startOfDay } }),
+    // Unsettled withdrawals, split into those awaiting a decision and those
+    // whose payout is in transit. Amounts are what the banks will receive.
     Transaction.aggregate([
-      { $match: { type: "wallet_withdrawal", status: "pending" } },
+      { $match: { ...WITHDRAWAL, status: "pending" } },
       {
         $group: {
-          _id: null,
+          _id: { $eq: ["$payout.status", "in_transit"] },
           count: { $sum: 1 },
-          totalAmount: { $sum: "$totalAmount" },
+          totalAmount: { $sum: AMOUNT_EXPR },
         },
       },
     ]),
   ]);
+
+  const awaiting = pendingWithdrawals.find((g) => g._id === false);
+  const inTransit = pendingWithdrawals.find((g) => g._id === true);
 
   res.json({
     success: true,
@@ -54,8 +61,10 @@ const getOverview = asyncHandler(async (req, res) => {
       stores: { byStatus: storesByStatus },
       orders: { byStatus: ordersByStatus, today: ordersToday },
       withdrawals: {
-        pending: pendingWithdrawals[0]?.count || 0,
-        pendingAmount: pendingWithdrawals[0]?.totalAmount || 0,
+        pending: awaiting?.count || 0,
+        pendingAmount: money.round(awaiting?.totalAmount || 0),
+        inTransit: inTransit?.count || 0,
+        inTransitAmount: money.round(inTransit?.totalAmount || 0),
       },
     },
   });

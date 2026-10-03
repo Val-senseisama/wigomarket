@@ -1,5 +1,6 @@
 const asyncHandler = require("express-async-handler");
 const Transaction = require("../../models/transactionModel");
+const { WITHDRAWAL, amountsOf } = require("../../services/withdrawalPayoutService");
 
 /**
  * @function getWithdrawalHistory
@@ -16,17 +17,19 @@ const getWithdrawalHistory = asyncHandler(async (req, res) => {
   const skip = (page - 1) * limit;
 
   const [withdrawals, total] = await Promise.all([
-    Transaction.find({ "entries.userId": _id, type: "wallet_withdrawal" })
+    Transaction.find({ ...WITHDRAWAL, "entries.userId": _id })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit),
-    Transaction.countDocuments({ "entries.userId": _id, type: "wallet_withdrawal" }),
+    Transaction.countDocuments({ ...WITHDRAWAL, "entries.userId": _id }),
   ]);
 
   res.json({
     success: true,
     data: {
-      withdrawals,
+      // totalAmount on the row is amount + fee (what left the wallet);
+      // amount is what the bank receives.
+      withdrawals: withdrawals.map((w) => ({ ...w.toObject(), ...amountsOf(w) })),
       pagination: {
         currentPage: page,
         totalTransactions: total,

@@ -1,15 +1,22 @@
 /**
  * Buyer → seller refund request tests (services/orderRefundService).
  *
- * Flutterwave, push notifications and admin emails are mocked; everything
- * else is real — orders are paid through processWebhookPayload so each refund
- * claws back from wallets that were genuinely credited.
+ * Flutterwave's HTTP API, push notifications and admin emails are mocked;
+ * everything else is real, including the Flutterwave adapter — orders are paid
+ * through settleOrderPayment so each refund claws back from wallets that were
+ * genuinely credited.
  */
 
+// Stands in for Flutterwave's refund endpoint: called with { id, amount },
+// returns Flutterwave's response body (or rejects like a network failure).
 const mockRefund = jest.fn();
-jest.mock("../config/flutterwaveClient", () => ({
-  getFlutterwaveInstance: () => ({ Transaction: { refund: mockRefund } }),
-}));
+jest.mock("axios", () =>
+  jest.fn(async (req) => {
+    const m = req.url.match(/\/transactions\/([^/]+)\/refund$/);
+    if (!m) throw new Error(`Unexpected HTTP call in test: ${req.method} ${req.url}`);
+    return { status: 200, data: await mockRefund({ id: decodeURIComponent(m[1]), amount: req.data.amount }) };
+  }),
+);
 jest.mock("../services/alertService", () => ({
   notifyAdmins: jest.fn().mockResolvedValue(undefined),
 }));
@@ -35,7 +42,9 @@ const Refund = require("../models/refundModel");
 const Notification = require("../models/notificationModel");
 const Transaction = require("../models/transactionModel");
 const { notifyAdmins } = require("../services/alertService");
-const { processWebhookPayload } = require("../services/webhookPaymentProcessor");
+const { settleOrderPayment } = require("../services/orderPaymentSettlement");
+const appConfig = require("../config/appConfig");
+const flutterwave = require("../services/payments/flutterwaveProvider");
 const { transitionOrder } = require("../services/orderTransitionService");
 const svc = require("../services/orderRefundService");
 const { serializeRefund } = require("../utils/refundSerializer");
@@ -101,9 +110,12 @@ const paidOrder = async () => {
     paymentIntent: { id: `tx-${flwId()}`, amount: 7700, currency: "NGN" },
   });
   const chargeId = flwId();
-  await processWebhookPayload({
-    event: "charge.completed",
-    data: { status: "successful", tx_ref: order.paymentIntent.id, id: chargeId, amount: 7700 },
+  await settleOrderPayment({
+    orderId: order._id,
+    provider: "flutterwave",
+    charge: { status: "succeeded", reference: order.paymentIntent.id, providerTransactionId: chargeId, amount: 7700, currency: "NGN" },
+    source: "test",
+    actor: { userId: null, role: "system", ip: "test" },
   });
   return { order: await Order.findById(order._id), buyer, a, b, rice, beans, chargeId };
 };
@@ -129,6 +141,10 @@ const requestRice = (ctx, extra = {}) =>
 
 const pastDeadline = (refund) =>
   Refund.updateOne({ _id: refund._id }, { $set: { respondBy: new Date(Date.now() - 1000) } });
+
+beforeAll(() => {
+  appConfig.payment.flutterwave.secretKey = "FLWSECK_TEST-refund-tests";
+});
 
 beforeEach(() => {
   mockRefund.mockReset();
@@ -434,7 +450,7 @@ describe("payout failures", () => {
     expect(mockRefund).toHaveBeenCalledTimes(1);
   });
 
-  it("the cron dead-letters a payout stuck mid-call without calling Flutterwave", async () => {
+  it("the cron dead-letters a Flutterwave payout stuck mid-call without calling Flutterwave", async () => {
     const ctx = await paidOrder();
     const request = await requestRice(ctx);
     await Refund.updateOne(
@@ -559,13 +575,16 @@ describe("HTTP endpoints", () => {
   });
 });
 
-describe("interpretRefundResponse", () => {
-  it("only trusts an explicit success with a refund id", () => {
-    const o = (r) => svc.interpretRefundResponse(r).outcome;
-    expect(o({ status: "success", data: { id: 7, status: "completed" } })).toBe("succeeded");
-    expect(o({ status: "success", data: { id: 7, status: "failed" } })).toBe("rejected");
-    expect(o({ status: "error", message: "nope" })).toBe("rejected");
-    expect(o({ status: "success", data: {} })).toBe("unknown");
-    expect(o(undefined)).toBe("unknown");
+describe("Flutterwave refund response handling", () => {
+  it("only trusts an explicit success with a refund id", async () => {
+    const o = async (body) => {
+      mockRefund.mockResolvedValueOnce(body);
+      return (await flutterwave.refund({ providerTransactionId: "1", amount: 100 })).outcome;
+    };
+    expect(await o({ status: "success", data: { id: 7, status: "completed" } })).toBe("succeeded");
+    expect(await o({ status: "success", data: { id: 7, status: "failed" } })).toBe("rejected");
+    expect(await o({ status: "error", message: "nope" })).toBe("rejected");
+    expect(await o({ status: "success", data: {} })).toBe("unknown");
+    expect(await o(undefined)).toBe("unknown");
   });
 });

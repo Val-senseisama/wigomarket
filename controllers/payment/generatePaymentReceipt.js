@@ -8,7 +8,6 @@ const User = require("../../models/userModel");
 const Wallet = require("../../models/walletModel");
 const Transaction = require("../../models/transactionModel");
 const VATConfig = require("../../models/vatConfigModel");
-const Flutterwave = require("flutterwave-node-v3");
 const receiptService = require("../../services/receiptService");
 const { validateMongodbId } = require("../../utils/validateMongodbId");
 const { Validate } = require("../../Helpers/Validate");
