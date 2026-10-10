@@ -14,6 +14,8 @@ const getBusinessAnalytics = require('./getBusinessAnalytics');
 const getStoreEarnings = require('./getStoreEarnings');
 const getRecentEarnings = require('./getRecentEarnings');
 const getRecentOrders = require('./getRecentOrders');
+const updateMyStore = require('./updateMyStore');
+const { getStoreSettings, updateStoreSettings } = require('./storeSettings');
 
 module.exports = {
   createStore,
@@ -31,5 +33,8 @@ module.exports = {
   getBusinessAnalytics,
   getStoreEarnings,
   getRecentEarnings,
-  getRecentOrders
+  getRecentOrders,
+  updateMyStore,
+  getStoreSettings,
+  updateStoreSettings
 };

@@ -1,41 +1,29 @@
 const asyncHandler = require("express-async-handler");
-const Notification = require("../../models/notificationModel");
 const NotificationPreferences = require("../../models/notificationPreferencesModel");
-const User = require("../../models/userModel");
-const { validateMongodbId } = require("../../utils/validateMongodbId");
-const { Validate } = require("../../Helpers/Validate");
-const { ThrowError } = require("../../Helpers/Helpers");
-const firebaseNotificationService = require("../../services/firebaseNotificationService");
-const Redis = require("ioredis");
+const { serializePreferences } = require("../../utils/notificationPreferences");
 
 /**
  * @function getNotificationPreferences
- * @description Get user's notification preferences
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- * @param {string} req.user._id - Authenticated user's ID
- * @returns {Object} - Notification preferences
+ * @description The authenticated user's notification settings — the data behind
+ *              the "Notification settings" screen for buyers, sellers and riders
+ *              alike. A user who has never saved preferences gets the defaults,
+ *              persisted on first read so the send path sees the same values.
  */
 const getNotificationPreferences = asyncHandler(async (req, res) => {
   const { _id } = req.user;
 
-  try {
-    let preferences = await NotificationPreferences.findOne({ user: _id });
+  // Atomic upsert rather than findOne + create, so two concurrent first reads
+  // cannot race into a duplicate-key error on the unique `user` index.
+  const preferences = await NotificationPreferences.findOneAndUpdate(
+    { user: _id },
+    { $setOnInsert: { user: _id } },
+    { new: true, upsert: true, setDefaultsOnInsert: true },
+  );
 
-    if (!preferences) {
-      // Create default preferences
-      preferences = await NotificationPreferences.create({ user: _id });
-    }
-
-    res.json({
-      success: true,
-      data: preferences
-    });
-  } catch (error) {
-    console.log(error);
-    throw new Error(error.message || "Failed to get notification preferences");
-  }
-
+  res.json({
+    success: true,
+    data: serializePreferences(preferences),
+  });
 });
 
 module.exports = getNotificationPreferences;

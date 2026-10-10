@@ -122,6 +122,36 @@ router.get(
  *         required: true
  *         schema:
  *           type: number
+ *     responses:
+ *       200:
+ *         description: Address for the coordinates
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     formattedAddress:
+ *                       type: string
+ *                     placeId:
+ *                       type: string
+ *                     components:
+ *                       type: object
+ *                       description: Address parts by type (locality, administrative_area_level_1, country, postal_code, route, plus raw Mapbox context keys)
+ *                       additionalProperties:
+ *                         type: string
+ *       400:
+ *         description: lat and lng are required
+ *       401:
+ *         description: Unauthorized
+ *       503:
+ *         description: Maps service is not configured
+ *       404:
+ *         description: Could not resolve coordinates to an address
  */
 router.get(
   "/reverse-geocode",
@@ -183,6 +213,39 @@ router.get(
  *           UUID session token. Strongly recommended — Mapbox groups billing for
  *           autocomplete + place details per session, and the returned placeId can
  *           only be resolved by /places/details using this same token.
+ *     responses:
+ *       200:
+ *         description: Address suggestions (possibly empty)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 count:
+ *                   type: integer
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       description:
+ *                         type: string
+ *                         example: "Allen Avenue, Ikeja, Lagos"
+ *                       placeId:
+ *                         type: string
+ *                         description: Pass to /places/details with the same sessiontoken
+ *                       mainText:
+ *                         type: string
+ *                       secondaryText:
+ *                         type: string
+ *       400:
+ *         description: input is required
+ *       401:
+ *         description: Unauthorized
+ *       503:
+ *         description: Maps service is not configured
  */
 router.get(
   "/places/autocomplete",
@@ -238,6 +301,35 @@ router.get(
  *         schema:
  *           type: string
  *         description: The same UUID session token passed to /places/autocomplete
+ *     responses:
+ *       200:
+ *         description: Coordinates for the place
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     lat:
+ *                       type: number
+ *                     lng:
+ *                       type: number
+ *                     formattedAddress:
+ *                       type: string
+ *                     placeId:
+ *                       type: string
+ *       400:
+ *         description: placeId is required
+ *       401:
+ *         description: Unauthorized
+ *       503:
+ *         description: Maps service is not configured
+ *       404:
+ *         description: Place not found (or the sessiontoken does not match the autocomplete call)
  */
 router.get(
   "/places/details",
@@ -301,6 +393,37 @@ router.get(
  *         required: true
  *         schema:
  *           type: number
+ *     responses:
+ *       200:
+ *         description: Road distance and drive time
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     distanceMeters:
+ *                       type: number
+ *                     durationSeconds:
+ *                       type: number
+ *                     distanceText:
+ *                       type: string
+ *                       example: "5.0 km"
+ *                     durationText:
+ *                       type: string
+ *                       example: "15 mins"
+ *       400:
+ *         description: originLat, originLng, destLat and destLng are all required
+ *       401:
+ *         description: Unauthorized
+ *       503:
+ *         description: Maps service is not configured
+ *       404:
+ *         description: Could not calculate distance between the points
  */
 router.get(
   "/distance",

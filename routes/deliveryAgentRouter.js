@@ -116,7 +116,7 @@ router.get("/orders", authMiddleware, isDispatch, getOrdersFeed);
 
 /**
  * @swagger
- * /api/delivery-agent/delivery-agent/orders/available:
+ * /api/delivery-agent/orders/available:
  *   get:
  *     summary: Get orders available for delivery agent assignment
  *     description: Get orders that are pending assignment to delivery agents
@@ -182,7 +182,7 @@ router.get("/orders/available", authMiddleware, isDispatch, getAvailableOrders);
 
 /**
  * @swagger
- * /api/delivery-agent/delivery-agent/orders/select:
+ * /api/delivery-agent/orders/select:
  *   post:
  *     summary: Select an order for delivery
  *     description: Delivery agent selects an available order for delivery
@@ -273,7 +273,7 @@ router.post("/orders/take", authMiddleware, isDispatch, selectOrder);
 
 /**
  * @swagger
- * /api/delivery-agent/delivery-agent/orders/status:
+ * /api/delivery-agent/orders/status:
  *   put:
  *     summary: Update delivery status
  *     description: Update the delivery status of an assigned order
@@ -326,7 +326,7 @@ router.put("/orders/status", authMiddleware, isDispatch, updateDeliveryStatus);
 
 /**
  * @swagger
- * /api/delivery-agent/delivery-agent/orders/my-deliveries:
+ * /api/delivery-agent/orders/my-deliveries:
  *   get:
  *     summary: Get my deliveries (rider's own orders, by tab)
  *     description: |
@@ -404,7 +404,7 @@ router.get(
 
 /**
  * @swagger
- * /api/delivery-agent/delivery-agent/orders/counts:
+ * /api/delivery-agent/orders/counts:
  *   get:
  *     summary: Get rider order tab badge counts
  *     description: |
@@ -509,7 +509,7 @@ router.get("/orders/recent", authMiddleware, isDispatch, getRecentDeliveries);
 
 /**
  * @swagger
- * /api/delivery-agent/delivery-agent/availability:
+ * /api/delivery-agent/availability:
  *   put:
  *     summary: Update availability status
  *     description: Update delivery agent's availability status
@@ -668,9 +668,10 @@ router.post(
  *                   type: object
  *                   properties:
  *                     order:
- *                       oneOf:
+ *                       nullable: true
+ *                       description: The active delivery, or null when there is none
+ *                       allOf:
  *                         - $ref: '#/components/schemas/DeliveryOrder'
- *                         - type: 'null'
  */
 router.get("/orders/active", authMiddleware, isDispatch, getActiveOrder);
 
@@ -707,7 +708,7 @@ router.get("/orders/:orderId", authMiddleware, isDispatch, getOrderById);
 // Dispatch Profile Management Routes
 /**
  * @swagger
- * /api/delivery-agent/delivery-agent/profile:
+ * /api/delivery-agent/profile:
  *   post:
  *     summary: Create dispatch profile
  *     description: |
@@ -858,7 +859,7 @@ router.post("/profile", authMiddleware, isDispatch, createDispatchProfile);
 
 /**
  * @swagger
- * /api/delivery-agent/delivery-agent/profile:
+ * /api/delivery-agent/profile:
  *   get:
  *     summary: Get dispatch profile
  *     description: |
@@ -938,7 +939,7 @@ router.get("/profile", authMiddleware, isDispatch, getDispatchProfile);
 
 /**
  * @swagger
- * /api/delivery-agent/delivery-agent/profile:
+ * /api/delivery-agent/profile:
  *   put:
  *     summary: Update dispatch profile
  *     description: |
@@ -1163,20 +1164,40 @@ router.put("/profile", authMiddleware, isDispatch, updateDispatchProfile);
  *   delete:
  *     summary: Delete rider account
  *     description: |
- *       Lets the agent delete their own account. Blocked while there are active
- *       deliveries or an unwithdrawn wallet balance, so parcels and funds are never
- *       stranded. Removes the user and dispatch profile; the wallet record is closed
- *       (not hard-deleted) for audit purposes.
+ *       Same flow as `DELETE /api/user/me` — see that endpoint for the full
+ *       description. Confirm with `password` (or a fresh Google `idToken`).
+ *       Refused (409, reasons in `data.blockers`) while you have unfinished
+ *       deliveries or orders, open refunds, a wallet balance or a pending
+ *       withdrawal. On success your details are erased, all sessions end, the
+ *       rider profile is suspended and the wallet closed; delivered orders keep
+ *       an anonymised reference to you.
  *     tags: [Delivery Agent]
  *     security:
  *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               password:
+ *                 type: string
+ *               idToken:
+ *                 type: string
+ *                 description: Fresh Firebase ID token (Google sign-in accounts)
+ *               reason:
+ *                 type: string
+ *                 maxLength: 500
  *     responses:
  *       200:
- *         description: Account deleted successfully
- *       400:
- *         description: Active deliveries or remaining balance prevent deletion
+ *         description: Account deleted
+ *       401:
+ *         description: Missing or incorrect password / Google token
  *       403:
  *         description: Access denied - delivery agent only
+ *       409:
+ *         description: Something is still outstanding (see data.blockers)
  */
 router.put("/account", authMiddleware, isDispatch, updateRiderAccount);
 router.delete("/account", authMiddleware, isDispatch, deleteRiderAccount);
@@ -1184,7 +1205,7 @@ router.delete("/account", authMiddleware, isDispatch, deleteRiderAccount);
 // Earnings and Analytics Routes
 /**
  * @swagger
- * /api/delivery-agent/delivery-agent/earnings:
+ * /api/delivery-agent/earnings:
  *   get:
  *     summary: Get earnings and analytics
  *     description: Get delivery agent earnings and analytics
@@ -1457,7 +1478,7 @@ router.get("/earnings/overview", authMiddleware, isDispatch, getEarningsOverview
 
 /**
  * @swagger
- * /api/delivery-agent/delivery-agent/dashboard:
+ * /api/delivery-agent/dashboard:
  *   get:
  *     summary: Get dashboard statistics
  *     description: Get dashboard statistics for delivery agent
@@ -1475,7 +1496,7 @@ router.get("/dashboard", authMiddleware, isDispatch, getDashboardStats);
 // Notification Routes
 /**
  * @swagger
- * /api/delivery-agent/delivery-agent/notifications:
+ * /api/delivery-agent/notifications:
  *   get:
  *     summary: Get notifications
  *     description: Get notifications for delivery agent
@@ -1514,7 +1535,7 @@ router.get("/notifications", authMiddleware, isDispatch, getNotifications);
 
 /**
  * @swagger
- * /api/delivery-agent/delivery-agent/notifications/read:
+ * /api/delivery-agent/notifications/read:
  *   post:
  *     summary: Mark notification as read
  *     description: Mark a specific notification as read
@@ -1543,7 +1564,7 @@ router.post("/notifications/read", authMiddleware, isDispatch, markAsRead);
 
 /**
  * @swagger
- * /api/delivery-agent/delivery-agent/notifications/read-all:
+ * /api/delivery-agent/notifications/read-all:
  *   post:
  *     summary: Mark all notifications as read
  *     description: Mark all notifications as read for the delivery agent
@@ -1563,7 +1584,7 @@ router.post(
 
 /**
  * @swagger
- * /api/delivery-agent/delivery-agent/notifications/{notificationId}:
+ * /api/delivery-agent/notifications/{notificationId}:
  *   delete:
  *     summary: Delete notification
  *     description: Delete a specific notification
@@ -1592,7 +1613,7 @@ router.delete(
 
 /**
  * @swagger
- * /api/delivery-agent/delivery-agent/notifications/unread-count:
+ * /api/delivery-agent/notifications/unread-count:
  *   get:
  *     summary: Get unread notification count
  *     description: Get count of unread notifications for delivery agent

@@ -24,7 +24,7 @@ const getOrderById = asyncHandler(async (req, res) => {
     const order = await Order.findById(id)
       .populate("products.product")
       .populate("orderedBy", "fullName email mobile")
-      .populate("deliveryAgent");
+      .populate("deliveryAgent", "fullName firstname lastname mobile image modeOfTransport");
 
     if (!order) {
       return res

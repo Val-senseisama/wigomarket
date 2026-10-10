@@ -243,29 +243,46 @@ async function refreshPayout(txn, { source, actor = SYSTEM, providerTransferId }
 async function startPayout({ transactionId, bank, adminId, actor }) {
   const provider = payments.getProvider();
   const now = new Date();
+  // One write claims the withdrawal and records the attempt's reference, so a
+  // claimed payout can always be looked up. Pipeline form so the reference
+  // can be built from the incremented attempt count (payoutReference).
+  const attempt = { $add: [{ $ifNull: ["$payout.attempts", 0] }, 1] };
   const claimed = await Transaction.findOneAndUpdate(
     { ...WITHDRAWAL, transactionId, status: "pending", "payout.status": { $ne: "in_transit" } },
-    {
-      $set: {
-        "payout.status": "in_transit",
-        "payout.provider": provider.name,
-        "payout.initiatedAt": now,
-        "payout.message": null,
-        "payout.providerStatus": null,
-        "payout.providerTransferId": null,
-        "audit.approvedBy": adminId,
-        "audit.approvedAt": now,
-        "metadata.paymentMethod": provider.name,
+    [
+      {
+        $set: {
+          payout: {
+            $mergeObjects: [
+              "$payout",
+              {
+                status: "in_transit",
+                provider: provider.name,
+                initiatedAt: now,
+                message: null,
+                providerStatus: null,
+                providerTransferId: null,
+                attempts: attempt,
+                reference: {
+                  $cond: [
+                    { $gt: [attempt, 1] },
+                    { $concat: ["WD_", "$transactionId", "_R", { $toString: attempt }] },
+                    { $concat: ["WD_", "$transactionId"] },
+                  ],
+                },
+              },
+            ],
+          },
+          "audit.approvedBy": adminId,
+          "audit.approvedAt": now,
+          "metadata.paymentMethod": provider.name,
+        },
       },
-      $inc: { "payout.attempts": 1 },
-    },
+    ],
     { new: true },
   );
   if (!claimed) return { outcome: "conflict" };
-
-  const reference = payoutReference(claimed, claimed.payout.attempts);
-  await Transaction.updateOne({ _id: claimed._id }, { $set: { "payout.reference": reference } });
-  claimed.payout.reference = reference;
+  const reference = claimed.payout.reference;
 
   let transfer;
   try {

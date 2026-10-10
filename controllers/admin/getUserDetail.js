@@ -13,7 +13,7 @@ const getUserDetail = asyncHandler(async (req, res) => {
   validateMongodbId(id);
 
   const user = await User.findById(id)
-    .select("-password -refreshToken")
+    .select(User.SECRET_FIELDS_EXCLUSION)
     .populate("store")
     .populate("dispatchProfile")
     .lean();

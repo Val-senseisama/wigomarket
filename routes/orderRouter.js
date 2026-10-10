@@ -31,6 +31,12 @@ const router = express.Router();
  * /api/order/create:
  *   post:
  *     summary: Create a new order
+ *     description: |
+ *       Builds the order from the buyer's cart. Refused (400) when any shop in
+ *       the cart is hidden by its seller or suspended, or does not offer the
+ *       chosen `deliveryMethod` — `delivery_agent` needs the shop's
+ *       fulfilmentOptions to include `delivery`, `self_delivery` needs `pickup`
+ *       (see PUT /api/store/settings). Shop opening hours do not block orders.
  *     tags: [Orders]
  *     security:
  *       - bearerAuth: []
@@ -49,6 +55,8 @@ const router = express.Router();
  *                 type: string
  *               deliveryMethod:
  *                 type: string
+ *                 enum: [delivery_agent, self_delivery]
+ *                 description: delivery_agent = rider delivery, self_delivery = buyer pickup
  *               deliveryAddress:
  *                 type: object
  *               deliveryNotes:
@@ -57,7 +65,7 @@ const router = express.Router();
  *       200:
  *         description: Order created successfully
  *       400:
- *         description: Bad request
+ *         description: Bad request — empty cart, invalid method, insufficient stock, a shop not taking orders, or a shop that does not offer the chosen delivery method
  */
 router.post("/create", authMiddleware, createOrder);
 
@@ -383,7 +391,7 @@ router.post("/refund-requests/:requestId/withdraw", authMiddleware, withdrawRefu
  *                   properties:
  *                     orderId: { type: string }
  *                     eligible: { type: boolean, description: Whether the order can be refunded at all right now }
- *                     reason: { type: string, nullable: true, description: Why not, when eligible is false }
+ *                     reason: { type: string, nullable: true, description: "Why not, when eligible is false" }
  *                     refundWindowDays: { type: integer, example: 7 }
  *                     reasons:
  *                       type: array

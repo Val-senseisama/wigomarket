@@ -12,6 +12,11 @@ const appConfig = require("../../config/appConfig");
 const deliveryFeeService = require("../../services/deliveryFeeService");
 const mapboxService = require("../../services/mapboxService");
 const audit = require("../../services/auditService");
+const { isStorePublic } = require("../../utils/storeVisibility");
+const {
+  FULFILMENT_OPTIONS,
+  FULFILMENT_FOR_DELIVERY_METHOD,
+} = require("../../utils/storeSettings");
 const {
   publishStoreOrderEvent,
   EVENT: ORDER_EVENT,
@@ -119,6 +124,36 @@ const createOrder = asyncHandler(async (req, res) => {
 
       if (!cartForPricing || cartForPricing.products.length === 0) {
         throw new Error("Cart is empty");
+      }
+
+      // Every shop in the cart must be open to buyers and offer the chosen
+      // fulfilment (delivery_agent → "delivery", self_delivery → "pickup").
+      const cartStoreIds = [
+        ...new Set(
+          cartForPricing.products
+            .map((item) => String(item.store ?? item.product?.store ?? ""))
+            .filter(Boolean),
+        ),
+      ];
+      const cartStores = await Store.find(
+        { _id: { $in: cartStoreIds } },
+        "name isVisible status fulfilmentOptions",
+      ).lean();
+      const wanted = FULFILMENT_FOR_DELIVERY_METHOD[deliveryMethod];
+      for (const store of cartStores) {
+        if (!isStorePublic(store)) {
+          throw new Error(
+            `${store.name} is not taking orders right now. Remove its items from your cart to continue.`,
+          );
+        }
+        const offered = store.fulfilmentOptions?.length
+          ? store.fulfilmentOptions
+          : FULFILMENT_OPTIONS;
+        if (!offered.includes(wanted)) {
+          throw new Error(
+            `${store.name} does not offer ${wanted}. Available: ${offered.join(", ")}.`,
+          );
+        }
       }
 
       // Holds a resolved Place Details lookup so it is only paid for once,

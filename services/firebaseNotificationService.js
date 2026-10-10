@@ -88,12 +88,13 @@ const sendNotificationToUser = async (
       throw new Error("User not found");
     }
 
-    const preferences = await NotificationPreferences.findOne({ user: userId });
-    if (!preferences) {
-      // Create default preferences if none exist
-      await NotificationPreferences.create({ user: userId });
-      return { success: false, message: "No notification preferences found" };
-    }
+    // A user who has never opened notification settings has no document yet —
+    // create it with defaults and carry on, rather than dropping the message.
+    const preferences = await NotificationPreferences.findOneAndUpdate(
+      { user: userId },
+      { $setOnInsert: { user: userId } },
+      { new: true, upsert: true, setDefaultsOnInsert: true },
+    );
 
     // Check if user wants to receive this type of notification
     const shouldReceivePush = preferences.shouldReceiveNotification(

@@ -24,7 +24,7 @@ All amounts are naira Numbers. `reference` is always **ours** (the order's
 | `refund({ providerTransactionId, amount, refundReference, reason })` | `{ outcome, providerRefundId, providerStatus, message }` — `outcome` is `succeeded` \| `pending` \| `rejected` \| `unknown` |
 | `getRefundStatus({ refundReference, providerRefundId })` | same shape as `refund`, or `null` when the provider cannot be asked |
 | `transfer({ amount, reference, narration, bankCode, accountNumber, accountName })` | `{ outcome, reference, providerTransferId, providerStatus, message }` — `outcome` is `succeeded` \| `pending` \| `failed`; `failed` means nothing moved |
-| `getTransferStatus({ reference, providerTransferId })` | same shape as `transfer`, with `outcome` also `not_found`; or `null` when the provider cannot be asked (Flutterwave without its id) |
+| `getTransferStatus({ reference, providerTransferId })` | same shape as `transfer`, with `outcome` also `not_found` (a 404 only — any other refusal throws); or `null` when the provider cannot be asked (Flutterwave without its id) |
 | `listBanks()` | `[{ code, name }]` |
 | `resolveAccount({ accountNumber, bankCode })` | `{ accountNumber, accountName, bankCode }` |
 

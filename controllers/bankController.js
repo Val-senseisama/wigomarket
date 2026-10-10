@@ -1,5 +1,6 @@
 const asyncHandler = require("express-async-handler");
 const redisClient = require("../config/redisClient");
+const { scanKeys, deleteByPatterns } = require("../utils/redisKeys");
 const { Validate } = require("../Helpers/Validate");
 const payments = require("../services/payments");
 
@@ -144,15 +145,13 @@ const resolveAccountName = asyncHandler(async (req, res) => {
   });
 });
 
-const cacheKeys = async () => (await Promise.all(CACHE_PATTERNS.map((p) => redisClient.keys(p)))).flat();
 
 /**
  * @function clearBanksCache
  * @description Clear cached banks and account lookups (admin only).
  */
 const clearBanksCache = asyncHandler(async (req, res) => {
-  const keys = await cacheKeys();
-  if (keys.length > 0) await redisClient.del(...keys);
+  const keys = await deleteByPatterns(CACHE_PATTERNS);
   res.json({
     success: true,
     message: `Cleared ${keys.length} cache entries`,
@@ -165,7 +164,7 @@ const clearBanksCache = asyncHandler(async (req, res) => {
  * @description Counts of cached banks lists and account lookups (admin only).
  */
 const getCacheStats = asyncHandler(async (req, res) => {
-  const [banks, accounts] = await Promise.all(CACHE_PATTERNS.map((p) => redisClient.keys(p)));
+  const [banks, accounts] = await Promise.all(CACHE_PATTERNS.map(scanKeys));
   res.json({
     success: true,
     message: "Cache statistics retrieved successfully",

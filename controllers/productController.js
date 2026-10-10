@@ -30,6 +30,7 @@ const {
 const PRODUCT_STATUSES = ["active", "hidden"];
 const Store = require("../models/storeModel");
 const { listProducts } = require("../services/productQueryService");
+const { withVisibleStores, isStorePublic } = require("../utils/storeVisibility");
 const { serializeProductDetail } = require("../utils/productSerializer");
 const Wishlist = require("../models/wishlistModel");
 
@@ -218,16 +219,17 @@ const updateProductCategory = asyncHandler(async (req, res) => {
 });
 
 const getProductsByCategory = asyncHandler(async (req, res) => {
-  const { categoryId } = req.body;
+  // A GET body is dropped by most HTTP clients, so the query string is the
+  // documented input; the body is kept for clients already sending it.
+  const categoryId = req.query.categoryId ?? req.body?.categoryId;
   // Validate the category ID
   validateMongodbId(categoryId);
 
   try {
     // Public listing — a hidden product is off the storefront entirely.
-    const products = await Product.find({
-      category: categoryId,
-      status: { $ne: "hidden" },
-    }).populate("store", "name image mobile address"); // Find products by category ID
+    const products = await Product.find(
+      await withVisibleStores({ category: categoryId, status: { $ne: "hidden" } }),
+    ).populate("store", "name image mobile address"); // Find products by category ID
     res.json(products);
   } catch (error) {
     throw new Error(error);
@@ -1081,7 +1083,7 @@ const getAProduct = asyncHandler(async (req, res) => {
   validateMongodbId(id);
 
   const product = await Product.findById(id)
-    .populate("store", "name image mobile address")
+    .populate("store", "name image mobile address isVisible status")
     // The parent comes too, for the "Fashion > Men's Clothing" breadcrumb.
     .populate({ path: "category", select: "name parent", populate: { path: "parent", select: "name" } })
     .select("-__v")
@@ -1102,8 +1104,13 @@ const getAProduct = asyncHandler(async (req, res) => {
     Boolean(ownStore) &&
     String(product.store?._id || product.store) === String(ownStore._id);
 
-  if (product.status === "hidden" && !isOwner) {
+  // Same for every product of a hidden or suspended shop.
+  if (!isOwner && (product.status === "hidden" || (product.store && !isStorePublic(product.store)))) {
     return res.status(404).json({ success: false, message: "Product not found" });
+  }
+  if (product.store && typeof product.store === "object") {
+    delete product.store.isVisible;
+    delete product.store.status;
   }
 
   const productObjId = new mongoose.Types.ObjectId(id);
@@ -1279,7 +1286,7 @@ const getProducts = asyncHandler(async (req, res) => {
 
     // Build filter object. Hidden products are excluded from every public
     // listing; sellers see their own through GET /api/product/get-products?mine=true.
-    const filters = { status: { $ne: "hidden" } };
+    let filters = { status: { $ne: "hidden" } };
     if (category) {
       validateMongodbId(category);
       filters.category = category;
@@ -1333,6 +1340,9 @@ const getProducts = asyncHandler(async (req, res) => {
 
     // Execute query with pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
+    // Products of hidden or suspended shops are excluded from all of it.
+    filters = await withVisibleStores(filters);
+
     const products = await Product.find(filters)
       .populate("category", "name")
       .populate("store", "name address mobile image")
@@ -1485,7 +1495,7 @@ const getPersonalizedSuggestions = asyncHandler(async (req, res) => {
         }
       }
 
-      suggestions = await Product.find(suggestionFilters)
+      suggestions = await Product.find(await withVisibleStores(suggestionFilters))
         .populate("category", "name")
         .populate("store", "name address")
         .sort({ "rating.average": -1, sold: -1 })
@@ -1494,10 +1504,9 @@ const getPersonalizedSuggestions = asyncHandler(async (req, res) => {
 
     // If no personalized suggestions, get trending products
     if (suggestions.length === 0) {
-      suggestions = await Product.find({
-        quantity: { $gt: 0 },
-        status: { $ne: "hidden" },
-      })
+      suggestions = await Product.find(
+        await withVisibleStores({ quantity: { $gt: 0 }, status: { $ne: "hidden" } }),
+      )
         .populate("category", "name")
         .populate("store", "name address")
         .sort({ sold: -1, views: -1 })
@@ -1560,11 +1569,13 @@ const getTrendingProducts = asyncHandler(async (req, res) => {
         break;
     }
 
-    const trending = await Product.find({
-      ...dateFilter,
-      quantity: { $gt: 0 },
-      status: { $ne: "hidden" },
-    })
+    const trending = await Product.find(
+      await withVisibleStores({
+        ...dateFilter,
+        quantity: { $gt: 0 },
+        status: { $ne: "hidden" },
+      }),
+    )
       .populate("category", "name")
       .populate("store", "name address")
       .sort({ sold: -1, views: -1, "rating.average": -1 })
@@ -1618,11 +1629,13 @@ const getCategorySuggestions = asyncHandler(async (req, res) => {
     }
 
     // Get products in this category
-    const suggestions = await Product.find({
-      category: categoryId,
-      quantity: { $gt: 0 },
-      status: { $ne: "hidden" },
-    })
+    const suggestions = await Product.find(
+      await withVisibleStores({
+        category: categoryId,
+        quantity: { $gt: 0 },
+        status: { $ne: "hidden" },
+      }),
+    )
       .populate("category", "name")
       .populate("store", "name address")
       .sort({ "rating.average": -1, sold: -1, views: -1 })

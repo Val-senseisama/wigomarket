@@ -31,11 +31,11 @@ const ACCESS_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 1 day
 const loginUser = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   if (!Validate.email(email)) {
-    ThrowError("Invalid Email");
+    return res.status(400).json({ success: false, message: "Invalid Email" });
   }
 
   if (!Validate.string(password)) {
-    ThrowError("Invalid Password");
+    return res.status(400).json({ success: false, message: "Invalid Password" });
   }
 
   // Check if user exists
@@ -44,8 +44,9 @@ const loginUser = asyncHandler(async (req, res) => {
     { password: 1, status: 1, isBlocked: 1, role: 1, activeRole: 1, _id: 1 },
   );
 
+  // 401, not a thrown error: the global handler reported this as a 500.
   if (!findUser || !(await findUser.isPasswordMatched(password))) {
-    throw new Error("Invalid Credentials");
+    return res.status(401).json({ success: false, message: "Invalid Credentials" });
   }
 
   if (findUser.isBlocked) {

@@ -85,7 +85,8 @@ describe("Auth - Login (POST /api/user/login)", () => {
       password: "WrongPassword!",
     });
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(401);
+    expect(res.body.message).toBe("Invalid Credentials");
   });
 
   it("rejects non-existent user", async () => {
@@ -94,7 +95,7 @@ describe("Auth - Login (POST /api/user/login)", () => {
       password: "AnyPassword123!",
     });
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(401);
   });
 
   it("rejects blocked user", async () => {

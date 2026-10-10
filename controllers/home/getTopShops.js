@@ -28,7 +28,8 @@ const getTopShops = asyncHandler(async (req, res) => {
 
   // ── DB query ──────────────────────────────────────────────────────────────
   const shops = await Store.aggregate([
-    { $match: { status: "active" } },
+    // Seller-hidden shops are off every public listing (utils/storeVisibility).
+    { $match: { status: "active", isVisible: { $ne: false } } },
 
     {
       $lookup: {

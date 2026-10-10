@@ -36,6 +36,13 @@ const verifyPayment = asyncHandler(async (req, res) => {
     return res.status(404).json({ success: false, message: "Order not found" });
   }
 
+  // The response carries the whole order (buyer details, address), so only
+  // its buyer — or an admin in their admin role — may verify it.
+  const isOwner = String(order.orderedBy) === String(req.user._id);
+  if (!isOwner && req.user.activeRole !== "admin") {
+    return res.status(403).json({ success: false, message: "You are not authorized to verify this order" });
+  }
+
   if (order.paymentStatus === PaymentStatus.PAID) {
     return res.status(200).json({
       success: true,

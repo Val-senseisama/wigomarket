@@ -54,6 +54,7 @@ const getPopularVendors = asyncHandler(async (req, res) => {
         spherical: true,
         query: {
           status: "active",
+          isVisible: { $ne: false },
           "location.coordinates": { $exists: true, $ne: [] },
         },
       },
@@ -61,7 +62,7 @@ const getPopularVendors = asyncHandler(async (req, res) => {
     // After $geoNear, also include active stores without a set location
     // (they won't have distanceM, which is fine — travelTimeMin will be omitted)
   } else {
-    pipeline.push({ $match: { status: "active" } });
+    pipeline.push({ $match: { status: "active", isVisible: { $ne: false } } });
   }
 
   pipeline.push(

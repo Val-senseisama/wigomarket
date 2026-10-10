@@ -23,6 +23,10 @@ const Store = require("../models/storeModel");
 const Category = require("../models/categoryModel");
 const SearchHistory = require("../models/searchHistoryModel");
 const redisClient = require("../config/redisClient");
+const {
+  PUBLIC_STORE_MATCH,
+  visibleStoreProductFilter,
+} = require("../utils/storeVisibility");
 
 const ANALYTICS_KEY = "search_analytics";
 const ANALYTICS_CAP = 1000; // keep the most recent N entries; older ones are trimmed
@@ -98,7 +102,9 @@ function buildAtlasFilters(filters) {
   return atlasFilters;
 }
 
-function buildAtlasProductPipeline(query, skip, limit, filters) {
+// `shopFilter` (from visibleStoreProductFilter) drops products of hidden or
+// suspended shops.
+function buildAtlasProductPipeline(query, skip, limit, filters, shopFilter = {}) {
   const atlasFilters = buildAtlasFilters(filters);
   const brandRegex = filters.brand
     ? new RegExp(filters.brand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
@@ -154,6 +160,7 @@ function buildAtlasProductPipeline(query, skip, limit, filters) {
       $match: {
         quantity: { $gt: 0 },
         status: { $ne: "hidden" },
+        ...shopFilter,
         ...(brandRegex && { brand: brandRegex }),
       },
     },
@@ -211,7 +218,7 @@ function buildAtlasProductPipeline(query, skip, limit, filters) {
   ];
 }
 
-function buildAtlasCountPipeline(query, filters) {
+function buildAtlasCountPipeline(query, filters, shopFilter = {}) {
   const atlasFilters = buildAtlasFilters(filters);
   const brandRegex = filters.brand
     ? new RegExp(filters.brand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
@@ -236,6 +243,7 @@ function buildAtlasCountPipeline(query, filters) {
       $match: {
         quantity: { $gt: 0 },
         status: { $ne: "hidden" },
+        ...shopFilter,
         ...(brandRegex && { brand: brandRegex }),
       },
     },
@@ -255,6 +263,7 @@ function buildAtlasStorePipeline(query, limit) {
         },
       },
     },
+    { $match: PUBLIC_STORE_MATCH },
     { $addFields: { searchScore: { $meta: "searchScore" } } },
     { $sort: { searchScore: -1 } },
     { $limit: limit },
@@ -340,13 +349,14 @@ const globalSearch = asyncHandler(async (req, res) => {
   let stores = [];
   let totalProducts = 0;
   let searchMode = "atlas";
+  const shopFilter = await visibleStoreProductFilter();
 
   try {
     // ── Tier 1: Atlas Search ─────────────────────────────────────────────
     const [atlasProducts, atlasStores, countResult] = await Promise.all([
-      Product.aggregate(buildAtlasProductPipeline(query, skip, limitNum, filters)),
+      Product.aggregate(buildAtlasProductPipeline(query, skip, limitNum, filters, shopFilter)),
       Store.aggregate(buildAtlasStorePipeline(query, 5)),
-      Product.aggregate(buildAtlasCountPipeline(query, filters)),
+      Product.aggregate(buildAtlasCountPipeline(query, filters, shopFilter)),
     ]);
 
     products = atlasProducts;
@@ -372,6 +382,7 @@ const globalSearch = asyncHandler(async (req, res) => {
       quantity: { $gt: 0 },
       // Hidden products are off the storefront and out of search.
       status: { $ne: "hidden" },
+      ...shopFilter,
       $or: [
         { title: regex },
         { description: regex },
@@ -391,7 +402,7 @@ const globalSearch = asyncHandler(async (req, res) => {
         .limit(limitNum)
         .lean(),
       Product.countDocuments(productFilter),
-      Store.find({ $or: [{ name: regex }, { address: regex }] })
+      Store.find({ ...PUBLIC_STORE_MATCH, $or: [{ name: regex }, { address: regex }] })
         .select("name image address location.formattedAddress")
         .limit(5)
         .lean(),
@@ -497,6 +508,7 @@ const getSuggestions = asyncHandler(async (req, res) => {
 
   let productTitles = [];
   let storeNames = [];
+  const shopFilter = await visibleStoreProductFilter();
 
   try {
     // ── Tier 1: Atlas autocomplete ───────────────────────────────────────
@@ -515,7 +527,7 @@ const getSuggestions = asyncHandler(async (req, res) => {
             },
           },
         },
-        { $match: { quantity: { $gt: 0 }, status: { $ne: "hidden" } } },
+        { $match: { quantity: { $gt: 0 }, status: { $ne: "hidden" }, ...shopFilter } },
         { $limit: 5 },
         { $project: { title: 1 } },
       ]),
@@ -530,6 +542,7 @@ const getSuggestions = asyncHandler(async (req, res) => {
             },
           },
         },
+        { $match: PUBLIC_STORE_MATCH },
         { $limit: 3 },
         { $project: { name: 1 } },
       ]),
@@ -540,11 +553,11 @@ const getSuggestions = asyncHandler(async (req, res) => {
     // "pho" → "smartphone", "samsung phone", etc.
     const regex = buildContainsRegex(query);
     [productTitles, storeNames] = await Promise.all([
-      Product.find({ title: regex, quantity: { $gt: 0 }, status: { $ne: "hidden" } })
+      Product.find({ title: regex, quantity: { $gt: 0 }, status: { $ne: "hidden" }, ...shopFilter })
         .select("title")
         .limit(5)
         .lean(),
-      Store.find({ name: regex }).select("name").limit(3).lean(),
+      Store.find({ ...PUBLIC_STORE_MATCH, name: regex }).select("name").limit(3).lean(),
     ]);
   }
 

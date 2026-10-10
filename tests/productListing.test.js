@@ -426,3 +426,19 @@ describe("getAProduct — hidden products", () => {
     expect(res.statusCode).toBe(200);
   });
 });
+
+describe("GET /api/product/products/category", () => {
+  it("accepts categoryId as a query parameter", async () => {
+    // Through the real route: the point is that a GET without a body works.
+    const request = require("supertest");
+    const app = require("../app");
+    const { createTestSeller, createTestProduct, getOrCreateCategory } = require("./helpers");
+    const { store } = await createTestSeller();
+    const category = await getOrCreateCategory();
+    const product = await createTestProduct(store._id);
+
+    const res = await request(app).get(`/api/product/products/category?categoryId=${category._id}`);
+    expect(res.status).toBe(200);
+    expect(res.body.map((p) => String(p._id))).toContain(String(product._id));
+  });
+});

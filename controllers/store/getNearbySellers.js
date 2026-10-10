@@ -1,5 +1,6 @@
 const Store = require("../../models/storeModel");
 const asyncHandler = require("express-async-handler");
+const { PUBLIC_STORE_MATCH } = require("../../utils/storeVisibility");
 const { ThrowError } = require("../../Helpers/Helpers");
 
 /**
@@ -37,7 +38,7 @@ const getNearbySellers = asyncHandler(async (req, res) => {
           distanceField: "distance",
           maxDistance: radiusNum * 1000, // km → metres
           distanceMultiplier: 0.001, // metres → km
-          query: { "location.coordinates": { $exists: true } },
+          query: { ...PUBLIC_STORE_MATCH, "location.coordinates": { $exists: true } },
           spherical: true,
         }
       },

@@ -7,6 +7,8 @@ const getAllUsers = require("./getAllUsers");
 const getAUser = require("./getAUser");
 const deleteAUser = require("./deleteAUser");
 const updateAUser = require("./updateAUser");
+const deleteMyAccount = require("./deleteMyAccount");
+const verifyEmailChange = require("./verifyEmailChange");
 const blockUser = require("./blockUser");
 const unblockUser = require("./unblockUser");
 const handleRefreshToken = require("./handleRefreshToken");
@@ -36,6 +38,8 @@ module.exports = {
   getAUser,
   deleteAUser,
   updateAUser,
+  deleteMyAccount,
+  verifyEmailChange,
   blockUser,
   unblockUser,
   handleRefreshToken,

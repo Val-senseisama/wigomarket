@@ -1,24 +1,25 @@
 const Store = require("../../models/storeModel");
 const asyncHandler = require("express-async-handler");
 const validateMongodbId = require("../../utils/validateMongodbId");
+const { isStorePublic } = require("../../utils/storeVisibility");
+const { serializePublicStore } = require("../../utils/storeSettings");
 
 /**
  * @function getAStore
- * @description Get a single store by ID
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- * @param {string} req.body.id - Store ID (required)
- * @returns {Object} - Store information
- * @throws {Error} - Throws error if store not found or retrieval fails
+ * @description Public storefront view of a single store. A hidden or suspended
+ * shop is 404 (its owner uses GET /api/store/my-store). Owner-only fields —
+ * NIN, bank and payout details, balance — are never included.
+ * @param {string} req.params.id - Store ID (required)
+ * @returns {Object} - Store information, plus openingHours, isOpenNow and fulfilmentOptions
  */
 const getAStore = asyncHandler(async (req, res) => {
   const { id } = req.params;
   validateMongodbId(id);
-  const store = await Store.findById(id);
-  if (!store) {
+  const store = await Store.findById(id).lean();
+  if (!isStorePublic(store)) {
     return res.status(404).json({ success: false, message: "Store not found" });
   }
-  res.json(store);
+  res.json(serializePublicStore(store));
 });
 
 module.exports = getAStore;

@@ -158,9 +158,12 @@ router.post("/initialize", authMiddleware, paymentInitLimiter, initializePayment
  *       Asks the order's payment provider about the order's own checkout
  *       references and, if the charge succeeded, marks the order paid and
  *       credits sellers (exactly once, shared with the webhook and the cron).
- *       Safe to call repeatedly.
+ *       Safe to call repeatedly. Only the buyer who placed the order (or an
+ *       admin acting in their admin role) may call it.
  *     tags:
  *       - Payment
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -234,12 +237,16 @@ router.post("/initialize", authMiddleware, paymentInitLimiter, initializePayment
  *                       enum: [pending, failed]
  *                     providerStatus:
  *                       type: string
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: The order belongs to another user
  *       404:
  *         description: Order not found
  *       409:
- *         description: Payment received but it does not match this order (amount or reference); admins are alerted
+ *         description: Payment received but it does not match this order (currency, amount or reference); admins are alerted
  */
-router.post("/verify", verifyPayment);
+router.post("/verify", authMiddleware, verifyPayment);
 
 /**
  * @swagger

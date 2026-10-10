@@ -1,6 +1,5 @@
 const asyncHandler = require("express-async-handler");
 const Notification = require("../models/notificationModel");
-const NotificationPreferences = require("../models/notificationPreferencesModel");
 const User = require("../models/userModel");
 const { validateMongodbId } = require("../utils/validateMongodbId");
 const { Validate } = require("../Helpers/Validate");
@@ -229,68 +228,10 @@ const getUnreadCount = asyncHandler(async (req, res) => {
   }
 });
 
-/**
- * @function getNotificationPreferences
- * @description Get user's notification preferences
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- * @param {string} req.user._id - Authenticated user's ID
- * @returns {Object} - Notification preferences
- */
-const getNotificationPreferences = asyncHandler(async (req, res) => {
-  const { _id } = req.user;
-
-  try {
-    let preferences = await NotificationPreferences.findOne({ user: _id });
-
-    if (!preferences) {
-      // Create default preferences
-      preferences = await NotificationPreferences.create({ user: _id });
-    }
-
-    res.json({
-      success: true,
-      data: preferences
-    });
-  } catch (error) {
-    console.log(error);
-    throw new Error(error.message || "Failed to get notification preferences");
-  }
-});
-
-/**
- * @function updateNotificationPreferences
- * @description Update user's notification preferences
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- * @param {string} req.user._id - Authenticated user's ID
- * @param {Object} req.body - Updated preferences
- * @returns {Object} - Updated preferences
- */
-const updateNotificationPreferences = asyncHandler(async (req, res) => {
-  const { _id } = req.user;
-  const updateData = req.body;
-
-  try {
-    const preferences = await NotificationPreferences.findOneAndUpdate(
-      { user: _id },
-      { 
-        ...updateData,
-        lastUpdated: new Date()
-      },
-      { new: true, upsert: true, runValidators: true }
-    );
-
-    res.json({
-      success: true,
-      message: "Notification preferences updated successfully",
-      data: preferences
-    });
-  } catch (error) {
-    console.log(error);
-    throw new Error(error.message || "Failed to update notification preferences");
-  }
-});
+// Preferences live in controllers/notification/ — re-exported below so this
+// router-facing module and the modular controllers share one implementation.
+const getNotificationPreferences = require("./notification/getNotificationPreferences");
+const updateNotificationPreferences = require("./notification/updateNotificationPreferences");
 
 /**
  * @function registerFCMToken

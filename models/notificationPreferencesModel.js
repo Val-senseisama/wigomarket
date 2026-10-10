@@ -164,22 +164,25 @@ notificationPreferencesSchema.methods.shouldReceiveNotification = function(type,
   
   // Check if quiet hours are active
   if (this.quietHours.enabled && channel === 'push') {
-    const now = new Date();
-    const currentTime = now.toLocaleTimeString('en-US', { 
-      hour12: false, 
-      timeZone: this.quietHours.timezone 
-    });
+    // "HH:mm" in the user's timezone. hourCycle h23 so midnight is "00", not
+    // "24", and the zero-padded strings compare correctly against start/end.
+    const currentTime = new Intl.DateTimeFormat('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      timeZone: this.quietHours.timezone
+    }).format(new Date());
     
     const startTime = this.quietHours.startTime;
     const endTime = this.quietHours.endTime;
     
-    // Handle overnight quiet hours (e.g., 22:00 to 08:00)
+    // Window is [start, end). Handle overnight quiet hours (e.g., 22:00 to 08:00)
     if (startTime > endTime) {
-      if (currentTime >= startTime || currentTime <= endTime) {
+      if (currentTime >= startTime || currentTime < endTime) {
         return false;
       }
     } else {
-      if (currentTime >= startTime && currentTime <= endTime) {
+      if (currentTime >= startTime && currentTime < endTime) {
         return false;
       }
     }

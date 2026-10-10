@@ -154,6 +154,8 @@ async function verifyCharge({ reference }) {
     reference: body.paymentReference,
     providerTransactionId: body.transactionReference,
     amount: body.amountPaid != null ? Number(body.amountPaid) : null,
+    // Monnify collects in NGN only, so an absent field is NGN; an explicit
+    // other currency is passed through and refused by settlement.
     currency: body.currency ?? body.currencyCode ?? "NGN",
     providerStatus: body.paymentStatus,
   };
@@ -310,9 +312,11 @@ async function transfer({ amount, reference, narration, bankCode, accountNumber,
 }
 
 /**
- * Where a payout under our reference stands. `outcome` is `not_found` when
- * Monnify has no disbursement under it (the initiating call never arrived).
- * Throws PaymentProviderError when Monnify cannot be asked.
+ * Where a payout under our reference stands. `outcome` is `not_found` only
+ * for a 404 — Monnify has no disbursement under it (the initiating call never
+ * arrived). Any other refusal (rate limit, validation) says nothing about the
+ * transfer, so it throws like a transport failure: treating it as not_found
+ * would free the payout for a retry while the original may have been paid.
  */
 async function getTransferStatus({ reference }) {
   try {
@@ -322,7 +326,7 @@ async function getTransferStatus({ reference }) {
     });
     return transferResult(body, reference);
   } catch (err) {
-    if (isDefiniteRejection(err)) {
+    if (isDefiniteRejection(err) && err.status === 404) {
       return { outcome: "not_found", reference, providerTransferId: null, providerStatus: null, message: err.body.responseMessage || err.message };
     }
     throw err;

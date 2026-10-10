@@ -1,5 +1,6 @@
 const Store = require("../../models/storeModel");
 const asyncHandler = require("express-async-handler");
+const { PUBLIC_STORE_MATCH } = require("../../utils/storeVisibility");
 
 /**
  * @function getAllStores
@@ -11,7 +12,7 @@ const asyncHandler = require("express-async-handler");
  */
 const getAllStores = asyncHandler(async (req, res) => {
   try {
-    const getStores = await Store.find().select('name image email mobile address');
+    const getStores = await Store.find(PUBLIC_STORE_MATCH).select('name image email mobile address');
     res.json(getStores);
   } catch (error) {
     throw new Error(error);

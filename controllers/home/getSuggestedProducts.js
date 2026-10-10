@@ -3,6 +3,7 @@ const Order = require("../../models/orderModel");
 const asyncHandler = require("express-async-handler");
 const jwt = require("jsonwebtoken");
 const redisClient = require("../../config/redisClient");
+const { visibleStoreProductFilter } = require("../../utils/storeVisibility");
 
 const TTL_PERSONALISED = 180;  // 3 minutes — user's taste changes with new orders
 const TTL_TRENDING     = 600;  // 10 minutes — trending scores shift slowly
@@ -70,6 +71,9 @@ const getSuggestedProducts = asyncHandler(async (req, res) => {
     // Redis unavailable — continue to DB
   }
 
+  // Excludes products of hidden or suspended shops from both paths.
+  const shopFilter = await visibleStoreProductFilter();
+
   // ── Personalised path ────────────────────────────────────────────────────────
   if (userId) {
     const recentOrders = await Order.find(
@@ -98,8 +102,8 @@ const getSuggestedProducts = asyncHandler(async (req, res) => {
             category: { $in: purchasedCategories.map((c) => require("mongoose").Types.ObjectId.createFromHexString(c)) },
             _id: { $nin: purchasedProductIds },
             quantity: { $gt: 0 },
-        status: { $ne: "hidden" },
             status: { $ne: "hidden" },
+            ...shopFilter,
           },
         },
         // Rank by rating then recency
@@ -134,6 +138,8 @@ const getSuggestedProducts = asyncHandler(async (req, res) => {
     {
       $match: {
         quantity: { $gt: 0 },
+        status: { $ne: "hidden" },
+        ...shopFilter,
         updatedAt: { $gte: THIRTY_DAYS_AGO() },
       },
     },

@@ -93,7 +93,7 @@ async function verifyCharge({ reference }) {
     reference: data.tx_ref,
     providerTransactionId: data.id != null ? String(data.id) : null,
     amount: data.amount != null ? Number(data.amount) : null,
-    currency: data.currency ?? "NGN",
+    currency: data.currency ?? null, // missing → refused by settlement, never assumed
     providerStatus: data.status ?? null,
   };
 }
@@ -232,7 +232,8 @@ async function getTransferStatus({ reference, providerTransferId }) {
   try {
     body = await send({ method: "get", url: `/transfers/${encodeURIComponent(providerTransferId)}` });
   } catch (err) {
-    if (isDefiniteRejection(err)) {
+    // Only a 404 means "no such transfer"; see monnifyProvider.getTransferStatus.
+    if (isDefiniteRejection(err) && err.status === 404) {
       return { outcome: "not_found", reference, providerTransferId, providerStatus: null, message: err.body?.message || err.message };
     }
     throw err;

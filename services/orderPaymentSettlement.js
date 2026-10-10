@@ -32,7 +32,7 @@ class SettlementError extends Error {
   constructor(message, code) {
     super(message);
     this.name = "SettlementError";
-    this.code = code; // "reference_mismatch" | "amount_mismatch" | "order_not_found"
+    this.code = code; // "reference_mismatch" | "currency_mismatch" | "amount_mismatch" | "order_not_found"
   }
 }
 
@@ -120,6 +120,16 @@ async function settleOrderPayment({ orderId, provider, charge, source, actor }) 
       if (order.paymentStatus === PaymentStatus.PAID) {
         outcome = { result: "already_paid", order, transaction: null };
         return;
+      }
+
+      // The amount check below is only meaningful in the order's currency: a
+      // 6,600 charge in another currency must not settle a ₦6,600 order.
+      const expectedCurrency = String(order.paymentIntent.currency || "NGN").toUpperCase();
+      if (!charge.currency || String(charge.currency).toUpperCase() !== expectedCurrency) {
+        throw new SettlementError(
+          `Currency mismatch: expected ${expectedCurrency}, got ${charge.currency ?? "none"}`,
+          "currency_mismatch",
+        );
       }
 
       // Guard against paying a cheap checkout and claiming a dear order.

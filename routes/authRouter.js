@@ -9,6 +9,8 @@ const {
   getAUser,
   deleteAUser,
   updateAUser,
+  deleteMyAccount,
+  verifyEmailChange,
   blockUser,
   unblockUser,
   handleRefreshToken,
@@ -995,7 +997,7 @@ router.get("/logout", logoutUser);
 router.get("/get-cart", authMiddleware, getUserCart);
 /**
  * @swagger
- * /api/user/:id:
+ * /api/user/{id}:
  *   get:
  *     summary: Get user details by ID
  *     description: Get user details by ID
@@ -1185,8 +1187,17 @@ router.get("/:id", authMiddleware, isAdmin, getAUser);
  * @swagger
  * /api/user/edit-user:
  *   put:
- *     summary: Update user profile information
- *     description: Update user profile information
+ *     summary: Update the signed-in user's profile (partial)
+ *     description: |
+ *       Send only the fields you want to change; at least one is required.
+ *       Fields not listed here (role, status, password...) are ignored — use
+ *       the dedicated endpoints for those.
+ *
+ *       **Email changes are verified.** A new `email` is not applied straight
+ *       away: it is stored as `pendingEmail` and a 6-digit code is emailed to
+ *       the new address (valid 15 minutes). The change takes effect once the
+ *       code is sent to `POST /api/user/verify-email-change`. Until then the
+ *       old email stays the login email. Sending the current email is a no-op.
  *     tags:
  *       - Users
  *     security:
@@ -1197,31 +1208,36 @@ router.get("/:id", authMiddleware, isAdmin, getAUser);
  *         application/json:
  *           schema:
  *             type: object
+ *             minProperties: 1
  *             properties:
  *               firstname:
  *                 type: string
- *                 description: User's first name
  *               lastname:
  *                 type: string
- *                 description: User's last name
+ *               fullName:
+ *                 type: string
  *               email:
  *                 type: string
- *                 description: User's email address
+ *                 format: email
+ *                 description: Starts a verified email change (see above)
  *               mobile:
  *                 type: string
- *                 description: User's mobile number
+ *                 description: Must not belong to another account
  *               address:
  *                 type: string
- *                 description: User's address
  *               image:
  *                 type: string
- *                 description: User's profile image
+ *                 description: Cloudinary URL from POST /api/upload/signature (folder profiles)
  *               nickname:
  *                 type: string
- *                 description: User's nickname
+ *           example:
+ *             nickname: "Dee"
+ *             mobile: "2348012345678"
  *     responses:
  *       200:
- *         description: Updated user information
+ *         description: |
+ *           The updated user (credentials and reset tokens are never included),
+ *           plus `emailChangePending` and `message`.
  *         content:
  *           application/json:
  *             schema:
@@ -1233,8 +1249,15 @@ router.get("/:id", authMiddleware, isAdmin, getAUser);
  *                   type: string
  *                 lastname:
  *                   type: string
+ *                 fullName:
+ *                   type: string
  *                 email:
  *                   type: string
+ *                   description: The verified email (unchanged until the code is confirmed)
+ *                 pendingEmail:
+ *                   type: string
+ *                   nullable: true
+ *                   description: New email awaiting verification
  *                 mobile:
  *                   type: string
  *                 address:
@@ -1243,10 +1266,157 @@ router.get("/:id", authMiddleware, isAdmin, getAUser);
  *                   type: string
  *                 nickname:
  *                   type: string
+ *                 emailChangePending:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
  *       400:
- *         description: Validation fails or mobile number already exists
+ *         description: No fields sent, a field is invalid, or the mobile/email is already in use
+ *       401:
+ *         description: Unauthorized
  */
 router.put("/edit-user", authMiddleware, updateAUser);
+/**
+ * @swagger
+ * /api/user/verify-email-change:
+ *   post:
+ *     summary: Confirm a pending email change
+ *     description: |
+ *       Completes the change started by `PUT /api/user/edit-user`. The code was
+ *       sent to the new address. On success `email` becomes the new address
+ *       (used for login from now on) and `pendingEmail` is cleared.
+ *     tags:
+ *       - Users
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [code]
+ *             properties:
+ *               code:
+ *                 type: string
+ *                 example: "A1B2C3"
+ *     responses:
+ *       200:
+ *         description: Email updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     email:
+ *                       type: string
+ *       400:
+ *         description: No change pending, wrong code, or code expired
+ *       401:
+ *         description: Unauthorized
+ *       409:
+ *         description: The new email was registered by someone else in the meantime; the pending change is cancelled
+ */
+router.post("/verify-email-change", authMiddleware, verifyEmailChange);
+/**
+ * @swagger
+ * /api/user/me:
+ *   delete:
+ *     summary: Delete my account
+ *     description: |
+ *       Permanently deletes the signed-in user's account. This cannot be undone.
+ *
+ *       **Confirmation.** Password accounts send `password`. Google sign-in
+ *       accounts send a fresh Firebase `idToken` (or a password if they have set one).
+ *
+ *       **Refused (409) while anything is outstanding**, with the reasons in
+ *       `data.blockers`:
+ *       - `open_orders_as_buyer` — orders you placed that are not delivered/cancelled
+ *       - `open_orders_as_seller` — your store's orders that are not delivered/cancelled
+ *       - `open_deliveries` — deliveries assigned to you that are not finished
+ *       - `open_refunds` — refund requests (yours, or against your store) still open
+ *       - `wallet_balance` — your wallet balance is above zero; withdraw it first
+ *       - `pending_withdrawal` — a withdrawal has not completed yet
+ *
+ *       **What happens.** Your name, contact details, addresses, photo, cart and
+ *       device tokens are erased and your email and phone number are released.
+ *       All sessions stop working immediately. Your store is suspended and its
+ *       products hidden; a rider profile is suspended; your wallet is closed.
+ *       Past orders and payment records are kept (anonymised), as other users
+ *       and accounting depend on them.
+ *     tags:
+ *       - Users
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               password:
+ *                 type: string
+ *                 description: Current password (password accounts)
+ *               idToken:
+ *                 type: string
+ *                 description: Fresh Firebase ID token (Google sign-in accounts)
+ *               reason:
+ *                 type: string
+ *                 maxLength: 500
+ *                 description: Optional reason, kept for internal review
+ *           example:
+ *             password: "MyPassword123!"
+ *             reason: "I no longer use the app"
+ *     responses:
+ *       200:
+ *         description: Account deleted
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                   example: Your account has been deleted
+ *       401:
+ *         description: Missing/incorrect password or Google token, or not signed in
+ *       409:
+ *         description: Something is still outstanding
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     blockers:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           code:
+ *                             type: string
+ *                             enum: [open_orders_as_buyer, open_orders_as_seller, open_deliveries, open_refunds, wallet_balance, pending_withdrawal]
+ *                           message:
+ *                             type: string
+ */
+router.delete("/me", authMiddleware, deleteMyAccount);
 /**
  * @route DELETE /delete/:id
  * @description Delete user by ID
@@ -1257,10 +1427,20 @@ router.put("/edit-user", authMiddleware, updateAUser);
  */
 /**
  * @swagger
- * /api/user/delete/:id:
+ * /api/user/delete/{id}:
  *   delete:
- *     summary: Delete user by ID
- *     description: Delete user by ID
+ *     summary: Delete a user (admin)
+ *     description: |
+ *       Same outcome as `DELETE /api/user/me`: the account is anonymised rather
+ *       than removed, so past orders and payment records still resolve. Their
+ *       details are erased, sessions end, email/mobile are released; their
+ *       shop is suspended and products hidden, rider profile suspended and
+ *       wallet closed.
+ *
+ *       Refused (409) while the user has unfinished orders or deliveries, open
+ *       refunds, a wallet balance or a pending withdrawal (codes as in
+ *       `DELETE /api/user/me`). Block the user meanwhile with
+ *       `PUT /api/user/block-user/{id}`. Requires the admin role to be active.
  *     tags:
  *       - Users
  *     security:
@@ -1274,23 +1454,32 @@ router.put("/edit-user", authMiddleware, updateAUser);
  *         description: User ID to delete
  *     responses:
  *       200:
- *         description: User deleted successfully
+ *         description: User deleted
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 message:
- *                   type: string
  *                 success:
  *                   type: boolean
- *       400:
- *         description: Invalid MongoDB ID or database operation fails
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     _id:
+ *                       type: string
+ *       403:
+ *         description: Not an admin, or admin role not active
+ *       404:
+ *         description: User not found or already deleted
+ *       409:
+ *         description: Something is still outstanding (see data.blockers)
  */
 router.delete("/delete/:id", authMiddleware, isAdmin, deleteAUser);
 /**
  * @swagger
- * /api/user/block-user/:id:
+ * /api/user/block-user/{id}:
  *   put:
  *     summary: Block user by setting their isBlocked status to true
  *     description: Block user by setting their isBlocked status to true
@@ -1333,7 +1522,7 @@ router.delete("/delete/:id", authMiddleware, isAdmin, deleteAUser);
 router.put("/block-user/:id", authMiddleware, isAdmin, blockUser);
 /**
  * @swagger
- * /api/user/unblock-user/:id:
+ * /api/user/unblock-user/{id}:
  *   put:
  *     summary: Unblock user by setting their isBlocked status to false
  *     description: Unblock user by setting their isBlocked status to false

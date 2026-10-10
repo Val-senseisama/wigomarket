@@ -3,6 +3,23 @@ const bcrypt = require("bcrypt");
 const crypto = require("crypto");
 const { normalizeVehicleType } = require("../utils/vehicleType");
 
+// Credentials and one-time secrets: never part of any response. Applies to
+// res.json(userDoc) and populated users. `.lean()` queries skip transforms, so
+// those must `.select(User.SECRET_FIELDS_EXCLUSION)` instead.
+const SECRET_FIELDS = [
+  "password",
+  "refreshToken",
+  "passwordRefreshToken",
+  "passwordResetToken",
+  "passwordResetExpires",
+  "passwordResetExpiresAt",
+];
+
+function stripSecrets(doc, ret) {
+  for (const field of SECRET_FIELDS) delete ret[field];
+  return ret;
+}
+
 // Declare the Schema of the Mongo model
 var userSchema = new mongoose.Schema(
   {
@@ -42,9 +59,12 @@ var userSchema = new mongoose.Schema(
       default: "buyer", // Default active role
     },
 
+    // Google sign-in accounts have no password (controllers/user/googleAuth).
     password: {
       type: String,
-      required: true,
+      required: function () {
+        return !this.firebaseUid;
+      },
     },
     address: {
       type: String,
@@ -90,8 +110,18 @@ var userSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["active", "pending", "blocked"],
+      enum: ["active", "pending", "blocked", "deleted"],
       default: "pending",
+    },
+    // Set when the user deletes their own account (DELETE /api/user/me). The
+    // row is kept, anonymised, so orders and ledger entries still resolve.
+    deletedAt: {
+      type: Date,
+    },
+    // A requested email change awaiting its OTP (POST /api/user/verify-email-change).
+    // `email` keeps the verified address until then.
+    pendingEmail: {
+      type: String,
     },
     isBlocked: {
       type: Boolean,
@@ -176,15 +206,22 @@ var userSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    toJSON: { transform: stripSecrets },
+    toObject: { transform: stripSecrets },
   },
 );
 
-userSchema.pre(`save`, async function (next) {
-  const salt = await bcrypt.genSaltSync(10);
+// Hash only when the password itself was set or changed. Any other save()
+// (FCM token registration, Google account linking...) used to hash the stored
+// hash again, so the user's real password stopped working.
+userSchema.pre(`save`, async function () {
+  if (!this.isModified("password") || !this.password) return;
+  const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
 });
 
 userSchema.methods.isPasswordMatched = async function (enteredPassword) {
+  if (!this.password || typeof enteredPassword !== "string") return false;
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
@@ -198,4 +235,7 @@ userSchema.methods.createPasswordResetToken = async function () {
   return resetToken;
 };
 //Export the model
-module.exports = mongoose.model("User", userSchema);
+const User = mongoose.model("User", userSchema);
+User.SECRET_FIELDS = SECRET_FIELDS;
+User.SECRET_FIELDS_EXCLUSION = SECRET_FIELDS.map((f) => `-${f}`).join(" ");
+module.exports = User;

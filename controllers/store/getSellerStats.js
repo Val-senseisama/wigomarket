@@ -2,6 +2,7 @@ const Product = require("../../models/productModel");
 const Store = require("../../models/storeModel");
 const Order = require("../../models/orderModel");
 const asyncHandler = require("express-async-handler");
+const { isStorePublic } = require("../../utils/storeVisibility");
 const validateMongodbId = require("../../utils/validateMongodbId");
 const { ThrowError } = require("../../Helpers/Helpers");
 
@@ -20,7 +21,7 @@ const getSellerStats = asyncHandler(async (req, res) => {
 
   try {
     const store = await Store.findById(storeId);
-    if (!store) {
+    if (!isStorePublic(store)) {
       ThrowError("Store not found");
     }
 

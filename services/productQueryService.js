@@ -1,6 +1,7 @@
 const Product = require("../models/productModel");
 const Category = require("../models/categoryModel");
 const { serializeProductCards } = require("../utils/productSerializer");
+const { visibleStoreProductFilter } = require("../utils/storeVisibility");
 
 /**
  * Shared query builder for product listings — the seller's "Product List" grid
@@ -120,8 +121,11 @@ const listProducts = async ({
   const limit = Math.min(100, Math.max(1, parseInt(query.limit, 10) || 30));
   const skip = (page - 1) * limit;
 
-  // A public caller never sees hidden products, whatever they ask for.
-  const visibility = includeHidden ? {} : { status: { $ne: "hidden" } };
+  // A public caller never sees hidden products, or products of a hidden or
+  // suspended shop, whatever they ask for.
+  const visibility = includeHidden
+    ? {}
+    : merge({ status: { $ne: "hidden" } }, await visibleStoreProductFilter());
 
   // No explicit status: the seller's own list shows everything, while the
   // storefront keeps its long-standing "in stock only" default.

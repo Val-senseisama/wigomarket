@@ -15,6 +15,9 @@ const {
   getStoreEarnings,
   getRecentEarnings,
   getRecentOrders,
+  updateMyStore,
+  getStoreSettings,
+  updateStoreSettings,
 } = require("../controllers/store");
 const { updateStoreLocation } = require("../controllers/storeController");
 const {
@@ -249,10 +252,207 @@ router.post("/create", authMiddleware, createStore);
  *                   type: string
  *                 address:
  *                   type: string
+ *                 isVisible:
+ *                   type: boolean
+ *                   description: false = hidden from buyers (see PUT /api/store/settings)
+ *                 openingHours:
+ *                   $ref: '#/components/schemas/StoreOpeningHours'
+ *                 isOpenNow:
+ *                   type: boolean
+ *                   nullable: true
+ *                 fulfilmentOptions:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                     enum: [delivery, pickup]
  *       400:
  *         description: Store not found or retrieval fails
  */
 router.get("/my-store", authMiddleware, isSeller, getMyStore);
+/**
+ * @swagger
+ * /api/store/my-store:
+ *   put:
+ *     summary: Edit my shop's details (partial)
+ *     description: |
+ *       Send only the fields to change; at least one is required. The address
+ *       is edited through `PUT /api/store/update-location` (it geocodes it);
+ *       NIN and bank details have their own endpoints. Other fields are ignored.
+ *       Visibility, opening hours and fulfilment options are in `PUT /api/store/settings`.
+ *     tags:
+ *       - Stores
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             minProperties: 1
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 maxLength: 80
+ *                 description: Unique across shops (case-insensitive)
+ *               description:
+ *                 type: string
+ *                 maxLength: 1000
+ *                 description: Send "" to clear
+ *               image:
+ *                 type: string
+ *                 description: Cloudinary URL from POST /api/upload/signature
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: Shop contact email, unique
+ *               mobile:
+ *                 type: string
+ *                 description: Shop contact number, unique; stored as 234XXXXXXXXXX
+ *               businessType:
+ *                 type: string
+ *               city:
+ *                 type: string
+ *               state:
+ *                 type: string
+ *           example:
+ *             description: "Fresh groceries delivered daily"
+ *             city: "Ikeja"
+ *     responses:
+ *       200:
+ *         description: Updated store (owner view)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   description: The full store document
+ *       400:
+ *         description: No fields sent, a field is invalid, or name/email/mobile already in use
+ *       403:
+ *         description: Not a seller
+ *       404:
+ *         description: The seller has no store
+ */
+router.put("/my-store", authMiddleware, isSeller, updateMyStore);
+/**
+ * @swagger
+ * /api/store/settings:
+ *   get:
+ *     summary: Get my shop's preferences
+ *     description: Visibility, opening hours (with whether the shop is open now) and fulfilment options.
+ *     tags:
+ *       - Stores
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Shop preferences
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/StoreSettingsResponse'
+ *       403:
+ *         description: Not a seller
+ *       404:
+ *         description: The seller has no store
+ *   put:
+ *     summary: Update my shop's preferences (partial)
+ *     description: |
+ *       Send any of the three; omitted ones are unchanged.
+ *
+ *       - **isVisible** — `false` hides the shop: it and all its products drop
+ *         out of every listing, search, home feed and suggestion, its page
+ *         (`GET /api/store/{id}`) and its products' pages return 404, and
+ *         checkout is refused for its items. Your own views (my-store, your
+ *         product list) are unaffected and products keep their own status, so
+ *         `true` restores everything as it was.
+ *       - **openingHours** — weekly hours, **display only**: buyers see them and
+ *         `isOpenNow`, but orders are accepted at any time. Days not listed are
+ *         closed; `isOpen: false` marks a closed day explicitly. A `close`
+ *         earlier than `open` (e.g. 18:00–02:00) runs past midnight. `null` clears.
+ *       - **fulfilmentOptions** — how buyers can receive orders: `delivery`
+ *         (rider, order deliveryMethod `delivery_agent`) and/or `pickup`
+ *         (buyer collects, deliveryMethod `self_delivery`). Enforced at checkout.
+ *         Default both.
+ *     tags:
+ *       - Stores
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             minProperties: 1
+ *             properties:
+ *               isVisible:
+ *                 type: boolean
+ *               openingHours:
+ *                 type: object
+ *                 nullable: true
+ *                 required: [days]
+ *                 properties:
+ *                   timezone:
+ *                     type: string
+ *                     description: IANA timezone, default Africa/Lagos
+ *                   days:
+ *                     type: array
+ *                     items:
+ *                       type: object
+ *                       required: [day]
+ *                       properties:
+ *                         day:
+ *                           type: string
+ *                           enum: [monday, tuesday, wednesday, thursday, friday, saturday, sunday]
+ *                         isOpen:
+ *                           type: boolean
+ *                           default: true
+ *                         open:
+ *                           type: string
+ *                           description: 24-hour HH:mm; required when isOpen
+ *                         close:
+ *                           type: string
+ *                           description: 24-hour HH:mm; required when isOpen
+ *               fulfilmentOptions:
+ *                 type: array
+ *                 minItems: 1
+ *                 items:
+ *                   type: string
+ *                   enum: [delivery, pickup]
+ *           example:
+ *             isVisible: true
+ *             openingHours:
+ *               timezone: Africa/Lagos
+ *               days:
+ *                 - { day: monday, open: "09:00", close: "18:00" }
+ *                 - { day: tuesday, open: "09:00", close: "18:00" }
+ *                 - { day: saturday, open: "10:00", close: "16:00" }
+ *                 - { day: sunday, isOpen: false }
+ *             fulfilmentOptions: [delivery, pickup]
+ *     responses:
+ *       200:
+ *         description: Updated preferences
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/StoreSettingsResponse'
+ *       400:
+ *         description: Nothing to update, or an invalid value (bad day/time/timezone, empty or unknown fulfilment option)
+ *       403:
+ *         description: Not a seller
+ *       404:
+ *         description: The seller has no store
+ */
+router.get("/settings", authMiddleware, isSeller, getStoreSettings);
+router.put("/settings", authMiddleware, isSeller, updateStoreSettings);
 
 /**
  * @swagger
@@ -633,7 +833,7 @@ router.get("/analytics", authMiddleware, isSeller, getBusinessAnalytics);
  *               title: { type: string, description: '"Deleted product" if the product no longer exists' }
  *               image: { type: string, nullable: true }
  *               quantity: { type: integer }
- *               unitPrice: { type: number, description: Vendor price per unit (naira), as captured when the order was placed }
+ *               unitPrice: { type: number, description: "Vendor price per unit (naira), as captured when the order was placed" }
  *               amount: { type: number, description: unitPrice × quantity (naira) }
  *         customer:
  *           type: object
@@ -777,7 +977,7 @@ router.get("/earnings/recent", authMiddleware, isSeller, getRecentEarnings);
  *                     counts:
  *                       type: object
  *                       properties:
- *                         awaitingResponse: { type: integer, description: Requests waiting on this seller, for a badge }
+ *                         awaitingResponse: { type: integer, description: "Requests waiting on this seller, for a badge" }
  *       400:
  *         description: Invalid status
  *       404:
@@ -1390,7 +1590,7 @@ router.get("/orders/recent", authMiddleware, isSeller, getRecentOrders);
  *           type: object
  *           properties:
  *             itemsTotal: { type: number, description: Sum of the line subtotals }
- *             deliveryFee: { type: number, description: Goes to the rider, not the store }
+ *             deliveryFee: { type: number, description: "Goes to the rider, not the store" }
  *             total:
  *               type: number
  *               description: What the customer actually paid, falling back to itemsTotal + deliveryFee
@@ -1711,6 +1911,31 @@ router.put("/update-location", authMiddleware, isSeller, updateStoreLocation);
  *       200:
  *         description: List of nearby stores with location data
  */
+/**
+ * @swagger
+ * /api/store/popular:
+ *   get:
+ *     summary: Get popular sellers (alias)
+ *     description: |
+ *       Same handler and response as `GET /api/sellers/popular` — see that
+ *       endpoint for the full response. Hidden and suspended shops are never listed.
+ *     tags:
+ *       - Stores
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *       - in: query
+ *         name: category
+ *         schema:
+ *           type: string
+ *         description: Only sellers with products in this category
+ *     responses:
+ *       200:
+ *         description: Popular sellers
+ */
 router.get("/popular", getPopularSellers);
 router.get("/nearby", getNearbySellers);
 /**
@@ -1816,10 +2041,13 @@ router.post("/bank-details", authMiddleware, isSeller, updateBankDetails);
 router.get("/all", getAllStores);
 /**
  * @swagger
- * /:id:
+ * /api/store/{id}:
  *   get:
- *     summary: Get a single store by ID
- *     description: Get a single store by ID
+ *     summary: Get a single store (public storefront view)
+ *     description: |
+ *       Public view of a shop. 404 when the shop is hidden by its seller or
+ *       suspended. Owner-only fields (ownerNIN, bankDetails, subAccountDetails,
+ *       balance, history) are never included — the owner uses GET /api/store/my-store.
  *     tags:
  *       - Stores
  *     parameters:
@@ -1841,6 +2069,10 @@ router.get("/all", getAllStores);
  *                   type: string
  *                 name:
  *                   type: string
+ *                 image:
+ *                   type: string
+ *                 description:
+ *                   type: string
  *                 mobile:
  *                   type: string
  *                 email:
@@ -1849,8 +2081,29 @@ router.get("/all", getAllStores);
  *                   type: string
  *                 address:
  *                   type: string
+ *                 city:
+ *                   type: string
+ *                 state:
+ *                   type: string
+ *                 location:
+ *                   type: object
+ *                 rating:
+ *                   type: object
+ *                 openingHours:
+ *                   $ref: '#/components/schemas/StoreOpeningHours'
+ *                 isOpenNow:
+ *                   type: boolean
+ *                   nullable: true
+ *                   description: Open right now by its own hours (display only)
+ *                 fulfilmentOptions:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                     enum: [delivery, pickup]
  *       400:
- *         description: Store not found or retrieval fails
+ *         description: Invalid store ID
+ *       404:
+ *         description: Store not found, hidden or suspended
  */
 router.get("/:id", getAStore);
 

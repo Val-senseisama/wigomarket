@@ -77,6 +77,45 @@ var storeSchema = new mongoose.Schema(
       enum: ["pending", "active", "suspended"],
       default: "pending",
     },
+    // Seller-controlled shop visibility (PUT /api/store/settings). A hidden
+    // shop and all its products are off every public listing, its page
+    // returns 404 and checkout is refused; the seller still sees everything.
+    // Independent of the admin-controlled `status` (a suspended shop is hidden
+    // too). See utils/storeVisibility.
+    isVisible: {
+      type: Boolean,
+      default: true,
+    },
+    // Weekly opening hours, for display only — orders are accepted at any time.
+    // `days` holds one entry per weekday; a day that is absent or has
+    // isOpen: false is closed. close < open means the shop closes after
+    // midnight. Unset until the seller saves hours. See utils/storeSettings.
+    openingHours: {
+      timezone: { type: String, default: "Africa/Lagos" },
+      days: {
+        type: [
+          {
+            _id: false,
+            day: {
+              type: String,
+              enum: ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
+              required: true,
+            },
+            isOpen: { type: Boolean, default: true },
+            open: { type: String }, // "HH:mm", 24-hour
+            close: { type: String },
+          },
+        ],
+        default: undefined,
+      },
+    },
+    // How buyers can receive orders from this shop. Enforced at checkout:
+    // "delivery" = rider delivery (order deliveryMethod delivery_agent),
+    // "pickup" = buyer collects (deliveryMethod self_delivery).
+    fulfilmentOptions: {
+      type: [{ type: String, enum: ["delivery", "pickup"] }],
+      default: ["delivery", "pickup"],
+    },
     balance: {
       type: Number,
       default: 0,

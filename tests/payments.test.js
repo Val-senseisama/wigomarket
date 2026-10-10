@@ -273,6 +273,12 @@ describe("Monnify adapter", () => {
     expect((await monnify.getTransferStatus({ reference: "WD_1" })).outcome).toBe("failed");
     answer.value = () => refused(404, "Could not find transfer with reference WD_1");
     expect((await monnify.getTransferStatus({ reference: "WD_1" })).outcome).toBe("not_found");
+    // Any other refusal says nothing about the transfer: it must not read as
+    // "never sent", or the payout would be freed for a second attempt.
+    answer.value = () => refused(429, "Too many requests");
+    await expect(monnify.getTransferStatus({ reference: "WD_1" })).rejects.toThrow(/Too many requests/);
+    answer.value = () => refused(400, "Invalid reference");
+    await expect(monnify.getTransferStatus({ reference: "WD_1" })).rejects.toThrow(/Invalid reference/);
     answer.value = () => {
       throw new Error("ETIMEDOUT");
     };
@@ -347,6 +353,19 @@ describe("settleOrderPayment", () => {
     await expect(
       settleOrderPayment({ orderId: ctx.order._id, provider: "monnify", charge: charge(other.reference), source: "verify", actor: ACTOR }),
     ).rejects.toMatchObject({ code: "reference_mismatch" });
+    expect((await Order.findById(ctx.order._id)).paymentStatus).toBe("Unpaid");
+    expect(await balanceOf(ctx.seller.user._id)).toBe(0);
+    expect(notifyAdmins).toHaveBeenCalled();
+  });
+
+  it("refuses a charge in another currency and alerts admins", async () => {
+    const ctx = await checkedOutOrder();
+    await expect(
+      settleOrderPayment({ orderId: ctx.order._id, provider: "monnify", charge: charge(ctx.reference, { currency: "USD" }), source: "test", actor: ACTOR }),
+    ).rejects.toMatchObject({ code: "currency_mismatch" });
+    await expect(
+      settleOrderPayment({ orderId: ctx.order._id, provider: "monnify", charge: charge(ctx.reference, { currency: null }), source: "test", actor: ACTOR }),
+    ).rejects.toMatchObject({ code: "currency_mismatch" });
     expect((await Order.findById(ctx.order._id)).paymentStatus).toBe("Unpaid");
     expect(await balanceOf(ctx.seller.user._id)).toBe(0);
     expect(notifyAdmins).toHaveBeenCalled();
@@ -431,6 +450,7 @@ describe("payment endpoints", () => {
 
     const res = await request(app)
       .post("/api/payment/verify")
+      .set("Authorization", `Bearer ${ctx.token}`)
       .send({ orderId: ctx.order._id, transaction_id: "something-the-client-made-up" });
 
     expect(res.status).toBe(200);
@@ -438,17 +458,30 @@ describe("payment endpoints", () => {
     expect(verify).toHaveBeenCalledWith({ reference: ctx.reference });
     expect((await Order.findById(ctx.order._id)).paymentStatus).toBe("Paid");
 
-    const again = await request(app).post("/api/payment/verify").send({ orderId: ctx.order._id });
+    const again = await request(app).post("/api/payment/verify").set("Authorization", `Bearer ${ctx.token}`).send({ orderId: ctx.order._id });
     expect(again.status).toBe(200);
     expect(again.body.message).toBe("Payment already processed");
     expect(await Transaction.countDocuments({ reference: `Payment-${ctx.order._id}` })).toBe(1);
+  });
+
+  it("verify needs the order's buyer: anonymous is 401, another user 403", async () => {
+    const ctx = await checkedOutOrder();
+    const verify = jest.spyOn(monnify, "verifyCharge");
+
+    const anonymous = await request(app).post("/api/payment/verify").send({ orderId: ctx.order._id });
+    expect(anonymous.status).toBe(401);
+    const { token: stranger } = await createTestUser();
+    const other = await request(app).post("/api/payment/verify").set("Authorization", `Bearer ${stranger}`).send({ orderId: ctx.order._id });
+    expect(other.status).toBe(403);
+    expect(other.body.data).toBeUndefined();
+    expect(verify).not.toHaveBeenCalled();
   });
 
   it("verify reports a checkout that is not paid yet without failing the order", async () => {
     const ctx = await checkedOutOrder();
     jest.spyOn(monnify, "verifyCharge").mockImplementation(async ({ reference }) => charge(reference, { status: "pending", providerStatus: "PENDING" }));
 
-    const res = await request(app).post("/api/payment/verify").send({ orderId: ctx.order._id });
+    const res = await request(app).post("/api/payment/verify").set("Authorization", `Bearer ${ctx.token}`).send({ orderId: ctx.order._id });
 
     expect(res.status).toBe(400);
     expect(res.body).toMatchObject({ message: "Payment is not complete yet", data: { status: "pending", providerStatus: "PENDING" } });

@@ -35,7 +35,7 @@ const listUsers = asyncHandler(async (req, res) => {
 
   const [users, total] = await Promise.all([
     User.find(filter)
-      .select("-password -refreshToken")
+      .select(User.SECRET_FIELDS_EXCLUSION)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)

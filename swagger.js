@@ -38,9 +38,9 @@ const options = {
             "",
             "- **401** — missing, malformed, or expired token, or the account no",
             "  longer exists. The client should send the user back to login.",
-            "- **403** — the token is valid but the account is blocked or not yet",
-            "  active. Re-authenticating will NOT help, so the client must not",
-            "  bounce to login; surface the message instead.",
+            "- **403** — the token is valid but the account is blocked, not yet",
+            "  active, or deleted (DELETE /api/user/me). Re-authenticating will NOT",
+            "  help, so the client must not bounce to login; surface the message instead.",
             "",
             "Role guards (seller, dispatch, admin) also return **403**.",
           ].join("\n"),
@@ -58,6 +58,58 @@ const options = {
               type: "string",
               example: "Error message",
             },
+          },
+        },
+        StoreOpeningHours: {
+          type: "object",
+          nullable: true,
+          description: "Weekly hours, display only. null until the seller saves hours.",
+          properties: {
+            timezone: { type: "string", example: "Africa/Lagos" },
+            days: {
+              type: "array",
+              description: "Calendar order. A day not listed is closed. close < open runs past midnight.",
+              items: {
+                type: "object",
+                properties: {
+                  day: {
+                    type: "string",
+                    enum: ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
+                  },
+                  isOpen: { type: "boolean" },
+                  open: { type: "string", example: "09:00" },
+                  close: { type: "string", example: "18:00" },
+                },
+              },
+            },
+          },
+        },
+        StoreSettings: {
+          type: "object",
+          properties: {
+            isVisible: {
+              type: "boolean",
+              description: "false = shop and its products hidden from buyers; checkout refused",
+            },
+            openingHours: { $ref: "#/components/schemas/StoreOpeningHours" },
+            isOpenNow: {
+              type: "boolean",
+              nullable: true,
+              description: "Open right now by its own hours (display only); null when no hours are set",
+            },
+            fulfilmentOptions: {
+              type: "array",
+              description: "Enforced at checkout. delivery = deliveryMethod delivery_agent, pickup = self_delivery",
+              items: { type: "string", enum: ["delivery", "pickup"] },
+            },
+          },
+        },
+        StoreSettingsResponse: {
+          type: "object",
+          properties: {
+            success: { type: "boolean", example: true },
+            message: { type: "string" },
+            data: { $ref: "#/components/schemas/StoreSettings" },
           },
         },
         Success: {
@@ -169,6 +221,7 @@ const options = {
     "./routes/billPaymentRouter.js",
     "./routes/searchRouter.js",
     "./routes/adminRouter.js",
+    "./routes/supportRouter.js",
   ],
 };
 

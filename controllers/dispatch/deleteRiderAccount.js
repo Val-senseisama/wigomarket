@@ -1,80 +1,13 @@
-const asyncHandler = require("express-async-handler");
-const User = require("../../models/userModel");
-const DispatchProfile = require("../../models/dispatchProfileModel");
-const Wallet = require("../../models/walletModel");
-const Order = require("../../models/orderModel");
-const audit = require("../../services/auditService");
-const redisClient = require("../../config/redisClient");
-
 /**
  * @function deleteRiderAccount
- * @description Lets a delivery agent delete their own account. Blocked while the
- *              agent still has active deliveries or an unwithdrawn wallet balance
- *              so money/parcels are never stranded. Removes the user record and
- *              their dispatch profile.
+ * @description DELETE /api/delivery-agent/account. A rider deleting their account
+ * goes through the same flow as every other user (DELETE /api/user/me): password
+ * or Google re-confirmation, refused while deliveries, orders, refunds or wallet
+ * funds are outstanding, then the account is anonymised — not removed — so the
+ * orders the rider delivered still resolve. The rider profile is suspended and
+ * the wallet closed. See services/accountDeletionService.
  *
- *   For audit and financial integrity the wallet record itself is closed rather
- *   than hard-deleted.
- *
- * @param {string} req.user._id - Authenticated agent's ID
+ * It used to hard-delete the user and dispatch profile with no
+ * re-authentication, leaving delivered orders pointing at a missing user.
  */
-const deleteRiderAccount = asyncHandler(async (req, res) => {
-  const { _id } = req.user;
-
-  if (!req.userRoles.includes("dispatch")) {
-    return res.status(403).json({
-      success: false,
-      message: "Access denied. Only delivery agents can delete a rider account here.",
-    });
-  }
-
-  // ── Block deletion while deliveries are in flight ─────────────────────────
-  const activeDeliveries = await Order.countDocuments({
-    deliveryAgent: _id,
-    deliveryStatus: { $in: ["assigned", "picked_up", "in_transit"] },
-  });
-  if (activeDeliveries > 0) {
-    return res.status(400).json({
-      success: false,
-      message: `You have ${activeDeliveries} active deliver${
-        activeDeliveries === 1 ? "y" : "ies"
-      }. Complete them before deleting your account.`,
-    });
-  }
-
-  // ── Block deletion while there is money left to withdraw ──────────────────
-  const wallet = await Wallet.findOne({ user: _id });
-  if (wallet && wallet.balance > 0) {
-    return res.status(400).json({
-      success: false,
-      message: `Withdraw your remaining balance of ₦${wallet.balance} before deleting your account.`,
-    });
-  }
-
-  // ── Tear down ─────────────────────────────────────────────────────────────
-  await DispatchProfile.deleteOne({ user: _id });
-  if (wallet) {
-    wallet.status = "closed";
-    await wallet.save();
-  }
-  const deletedUser = await User.findByIdAndDelete(_id);
-
-  try {
-    await redisClient.del(`dispatch:profile:${_id}`);
-  } catch (_) {}
-
-  audit.log({
-    action: "user.deleted",
-    actor: audit.actor(req),
-    resource: { type: "user", id: _id, displayName: deletedUser?.email },
-    changes: { before: { email: deletedUser?.email, role: deletedUser?.role } },
-    metadata: { selfService: true },
-  });
-
-  res.json({
-    success: true,
-    message: "Your rider account has been deleted.",
-  });
-});
-
-module.exports = deleteRiderAccount;
+module.exports = require("../user/deleteMyAccount");

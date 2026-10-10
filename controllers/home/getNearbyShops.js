@@ -65,6 +65,7 @@ const getNearbyShops = asyncHandler(async (req, res) => {
         spherical: true,
         query: {
           status: "active",
+          isVisible: { $ne: false },
           "location.coordinates": { $exists: true, $ne: [] },
         },
       },

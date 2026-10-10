@@ -1,5 +1,6 @@
 const Store = require("../../models/storeModel");
 const asyncHandler = require("express-async-handler");
+const { PUBLIC_STORE_MATCH } = require("../../utils/storeVisibility");
 
 /**
  * @function getPopularSellers
@@ -20,6 +21,7 @@ const getPopularSellers = asyncHandler(async (req, res) => {
       // Match stores that have products
       {
         $match: {
+          ...PUBLIC_STORE_MATCH, // hidden/suspended shops are never listed
           ...(category && { "products.category": category })
         }
       },

@@ -16,7 +16,7 @@ const router = express.Router();
 
 /**
  * @swagger
- * /api/notifications/notifications:
+ * /api/notifications:
  *   get:
  *     summary: Get user notifications
  *     description: Get paginated notifications for the authenticated user
@@ -74,7 +74,7 @@ router.get("/", authMiddleware, getNotifications);
 
 /**
  * @swagger
- * /api/notifications/notifications/read:
+ * /api/notifications/read:
  *   post:
  *     summary: Mark notification as read
  *     description: Mark a specific notification as read
@@ -104,7 +104,7 @@ router.post("/read", authMiddleware, markAsRead);
 
 /**
  * @swagger
- * /api/notifications/notifications/read-all:
+ * /api/notifications/read-all:
  *   post:
  *     summary: Mark all notifications as read
  *     description: Mark all notifications as read for the authenticated user
@@ -120,7 +120,7 @@ router.post("/read-all", authMiddleware, markAllAsRead);
 
 /**
  * @swagger
- * /api/notifications/notifications/{notificationId}:
+ * /api/notifications/{notificationId}:
  *   delete:
  *     summary: Delete notification
  *     description: Delete a specific notification
@@ -145,7 +145,7 @@ router.delete("/:notificationId", authMiddleware, deleteNotification);
 
 /**
  * @swagger
- * /api/notifications/notifications/unread-count:
+ * /api/notifications/unread-count:
  *   get:
  *     summary: Get unread notification count
  *     description: Get count of unread notifications for the authenticated user
@@ -173,10 +173,207 @@ router.get("/unread-count", authMiddleware, getUnreadCount);
 
 /**
  * @swagger
- * /api/notifications/notifications/preferences:
+ * components:
+ *   schemas:
+ *     NotificationPreferences:
+ *       type: object
+ *       description: >
+ *         A user's notification settings. Every group is always present with
+ *         defaults filled in.
+ *       properties:
+ *         pushNotifications:
+ *           type: object
+ *           description: Push channel. `enabled` is the master switch; each other key mutes one notification type.
+ *           properties:
+ *             enabled:
+ *               type: boolean
+ *             orderUpdates:
+ *               type: boolean
+ *             deliveryUpdates:
+ *               type: boolean
+ *             promotions:
+ *               type: boolean
+ *             securityAlerts:
+ *               type: boolean
+ *             systemUpdates:
+ *               type: boolean
+ *             chatMessages:
+ *               type: boolean
+ *             ratingReminders:
+ *               type: boolean
+ *         emailNotifications:
+ *           type: object
+ *           description: Email channel. `enabled` is the master switch.
+ *           properties:
+ *             enabled:
+ *               type: boolean
+ *             orderUpdates:
+ *               type: boolean
+ *             deliveryUpdates:
+ *               type: boolean
+ *             promotions:
+ *               type: boolean
+ *             securityAlerts:
+ *               type: boolean
+ *             systemUpdates:
+ *               type: boolean
+ *             weeklyDigest:
+ *               type: boolean
+ *             monthlyReport:
+ *               type: boolean
+ *         smsNotifications:
+ *           type: object
+ *           description: SMS channel. `enabled` is the master switch.
+ *           properties:
+ *             enabled:
+ *               type: boolean
+ *             orderUpdates:
+ *               type: boolean
+ *             deliveryUpdates:
+ *               type: boolean
+ *             securityAlerts:
+ *               type: boolean
+ *             verificationCodes:
+ *               type: boolean
+ *         quietHours:
+ *           type: object
+ *           description: Push notifications are held back between startTime (inclusive) and endTime (exclusive) in `timezone`. The window may cross midnight. Email/SMS are unaffected.
+ *           properties:
+ *             enabled:
+ *               type: boolean
+ *             startTime:
+ *               type: string
+ *               pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+ *               example: "22:00"
+ *             endTime:
+ *               type: string
+ *               pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+ *               example: "08:00"
+ *             timezone:
+ *               type: string
+ *               description: IANA timezone name
+ *               example: Africa/Lagos
+ *         frequency:
+ *           type: object
+ *           properties:
+ *             push:
+ *               type: string
+ *               enum: [immediate, batched, daily]
+ *             email:
+ *               type: string
+ *               enum: [immediate, batched, daily, weekly]
+ *         language:
+ *           type: string
+ *           enum: [en, fr, es, pt, ar, sw]
+ *         lastUpdated:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *           description: When the user last saved their preferences (null if never).
+ *     NotificationPreferencesUpdate:
+ *       type: object
+ *       minProperties: 1
+ *       additionalProperties: false
+ *       description: >
+ *         Partial update - send only the keys that change. Nested groups are
+ *         merged, not replaced, so pushNotifications.promotions=false flips
+ *         that single toggle and leaves the rest alone.
+ *       properties:
+ *         pushNotifications:
+ *           type: object
+ *           description: Push channel. `enabled` is the master switch; each other key mutes one notification type.
+ *           properties:
+ *             enabled:
+ *               type: boolean
+ *             orderUpdates:
+ *               type: boolean
+ *             deliveryUpdates:
+ *               type: boolean
+ *             promotions:
+ *               type: boolean
+ *             securityAlerts:
+ *               type: boolean
+ *             systemUpdates:
+ *               type: boolean
+ *             chatMessages:
+ *               type: boolean
+ *             ratingReminders:
+ *               type: boolean
+ *         emailNotifications:
+ *           type: object
+ *           description: Email channel. `enabled` is the master switch.
+ *           properties:
+ *             enabled:
+ *               type: boolean
+ *             orderUpdates:
+ *               type: boolean
+ *             deliveryUpdates:
+ *               type: boolean
+ *             promotions:
+ *               type: boolean
+ *             securityAlerts:
+ *               type: boolean
+ *             systemUpdates:
+ *               type: boolean
+ *             weeklyDigest:
+ *               type: boolean
+ *             monthlyReport:
+ *               type: boolean
+ *         smsNotifications:
+ *           type: object
+ *           description: SMS channel. `enabled` is the master switch.
+ *           properties:
+ *             enabled:
+ *               type: boolean
+ *             orderUpdates:
+ *               type: boolean
+ *             deliveryUpdates:
+ *               type: boolean
+ *             securityAlerts:
+ *               type: boolean
+ *             verificationCodes:
+ *               type: boolean
+ *         quietHours:
+ *           type: object
+ *           description: Push notifications are held back between startTime (inclusive) and endTime (exclusive) in `timezone`. The window may cross midnight. Email/SMS are unaffected.
+ *           properties:
+ *             enabled:
+ *               type: boolean
+ *             startTime:
+ *               type: string
+ *               pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+ *               example: "22:00"
+ *             endTime:
+ *               type: string
+ *               pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+ *               example: "08:00"
+ *             timezone:
+ *               type: string
+ *               description: IANA timezone name
+ *               example: Africa/Lagos
+ *         frequency:
+ *           type: object
+ *           properties:
+ *             push:
+ *               type: string
+ *               enum: [immediate, batched, daily]
+ *             email:
+ *               type: string
+ *               enum: [immediate, batched, daily, weekly]
+ *         language:
+ *           type: string
+ *           enum: [en, fr, es, pt, ar, sw]
+ */
+
+/**
+ * @swagger
+ * /api/notifications/preferences:
  *   get:
  *     summary: Get notification preferences
- *     description: Get user's notification preferences
+ *     description: >
+ *       The authenticated user's notification settings (buyers, sellers and
+ *       riders all use this endpoint). A user who has never saved settings gets
+ *       the defaults, which are persisted on first read.
  *     tags:
  *       - Notifications
  *     security:
@@ -192,81 +389,7 @@ router.get("/unread-count", authMiddleware, getUnreadCount);
  *                 success:
  *                   type: boolean
  *                 data:
- *                   type: object
- *                   properties:
- *                     pushNotifications:
- *                       type: object
- *                       properties:
- *                         enabled:
- *                           type: boolean
- *                         orderUpdates:
- *                           type: boolean
- *                         deliveryUpdates:
- *                           type: boolean
- *                         promotions:
- *                           type: boolean
- *                         securityAlerts:
- *                           type: boolean
- *                         systemUpdates:
- *                           type: boolean
- *                         chatMessages:
- *                           type: boolean
- *                         ratingReminders:
- *                           type: boolean
- *                     emailNotifications:
- *                       type: object
- *                       properties:
- *                         enabled:
- *                           type: boolean
- *                         orderUpdates:
- *                           type: boolean
- *                         deliveryUpdates:
- *                           type: boolean
- *                         promotions:
- *                           type: boolean
- *                         securityAlerts:
- *                           type: boolean
- *                         systemUpdates:
- *                           type: boolean
- *                         weeklyDigest:
- *                           type: boolean
- *                         monthlyReport:
- *                           type: boolean
- *                     smsNotifications:
- *                       type: object
- *                       properties:
- *                         enabled:
- *                           type: boolean
- *                         orderUpdates:
- *                           type: boolean
- *                         deliveryUpdates:
- *                           type: boolean
- *                         securityAlerts:
- *                           type: boolean
- *                         verificationCodes:
- *                           type: boolean
- *                     quietHours:
- *                       type: object
- *                       properties:
- *                         enabled:
- *                           type: boolean
- *                         startTime:
- *                           type: string
- *                         endTime:
- *                           type: string
- *                         timezone:
- *                           type: string
- *                     frequency:
- *                       type: object
- *                       properties:
- *                         push:
- *                           type: string
- *                           enum: [immediate, batched, daily]
- *                         email:
- *                           type: string
- *                           enum: [immediate, batched, daily, weekly]
- *                     language:
- *                       type: string
+ *                   $ref: '#/components/schemas/NotificationPreferences'
  *       401:
  *         description: Unauthorized
  */
@@ -274,10 +397,14 @@ router.get("/preferences", authMiddleware, getNotificationPreferences);
 
 /**
  * @swagger
- * /api/notifications/notifications/preferences:
+ * /api/notifications/preferences:
  *   put:
  *     summary: Update notification preferences
- *     description: Update user's notification preferences
+ *     description: >
+ *       Partial update of the authenticated user's notification settings. Only
+ *       the keys present in the body change; nested groups are merged, so a
+ *       single toggle can be flipped without resending the rest. Returns the
+ *       full, updated preferences.
  *     tags:
  *       - Notifications
  *     security:
@@ -287,89 +414,50 @@ router.get("/preferences", authMiddleware, getNotificationPreferences);
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             properties:
- *               pushNotifications:
- *                 type: object
- *                 properties:
- *                   enabled:
- *                     type: boolean
- *                   orderUpdates:
- *                     type: boolean
- *                   deliveryUpdates:
- *                     type: boolean
- *                   promotions:
- *                     type: boolean
- *                   securityAlerts:
- *                     type: boolean
- *                   systemUpdates:
- *                     type: boolean
- *                   chatMessages:
- *                     type: boolean
- *                   ratingReminders:
- *                     type: boolean
- *               emailNotifications:
- *                 type: object
- *                 properties:
- *                   enabled:
- *                     type: boolean
- *                   orderUpdates:
- *                     type: boolean
- *                   deliveryUpdates:
- *                     type: boolean
- *                   promotions:
- *                     type: boolean
- *                   securityAlerts:
- *                     type: boolean
- *                   systemUpdates:
- *                     type: boolean
- *                   weeklyDigest:
- *                     type: boolean
- *                   monthlyReport:
- *                     type: boolean
- *               smsNotifications:
- *                 type: object
- *                 properties:
- *                   enabled:
- *                     type: boolean
- *                   orderUpdates:
- *                     type: boolean
- *                   deliveryUpdates:
- *                     type: boolean
- *                   securityAlerts:
- *                     type: boolean
- *                   verificationCodes:
- *                     type: boolean
- *               quietHours:
- *                 type: object
- *                 properties:
- *                   enabled:
- *                     type: boolean
- *                   startTime:
- *                     type: string
- *                     pattern: "^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$"
- *                   endTime:
- *                     type: string
- *                     pattern: "^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$"
- *                   timezone:
- *                     type: string
- *               frequency:
- *                 type: object
- *                 properties:
- *                   push:
- *                     type: string
- *                     enum: [immediate, batched, daily]
- *                   email:
- *                     type: string
- *                     enum: [immediate, batched, daily, weekly]
- *               language:
- *                 type: string
- *                 enum: [en, fr, es, pt, ar, sw]
+ *             $ref: '#/components/schemas/NotificationPreferencesUpdate'
+ *           examples:
+ *             muteMarketing:
+ *               summary: Turn off promotional push notifications
+ *               value:
+ *                 pushNotifications:
+ *                   promotions: false
+ *             quietHours:
+ *               summary: Enable quiet hours overnight
+ *               value:
+ *                 quietHours:
+ *                   enabled: true
+ *                   startTime: "22:00"
+ *                   endTime: "07:00"
  *     responses:
  *       200:
  *         description: Notification preferences updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                   example: Notification preferences updated successfully
+ *                 data:
+ *                   $ref: '#/components/schemas/NotificationPreferences'
  *       400:
- *         description: Invalid request data
+ *         description: >
+ *           Invalid body - empty body, unknown key (e.g. "Unknown preference:
+ *           pushNotifications.promos"), non-boolean toggle, value outside an
+ *           enum, quiet-hours time not in HH:mm, or an invalid timezone.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
  *       401:
  *         description: Unauthorized
  */
@@ -377,7 +465,7 @@ router.put("/preferences", authMiddleware, updateNotificationPreferences);
 
 /**
  * @swagger
- * /api/notifications/notifications/fcm/register:
+ * /api/notifications/fcm/register:
  *   post:
  *     summary: Register FCM token
  *     description: Register FCM token for push notifications
@@ -418,7 +506,7 @@ router.post("/fcm/register", authMiddleware, registerFCMToken);
 
 /**
  * @swagger
- * /api/notifications/notifications/fcm/unregister:
+ * /api/notifications/fcm/unregister:
  *   post:
  *     summary: Unregister FCM token
  *     description: Unregister FCM token for push notifications
@@ -450,7 +538,7 @@ router.post("/fcm/unregister", authMiddleware, unregisterFCMToken);
 
 /**
  * @swagger
- * /api/notifications/notifications/test:
+ * /api/notifications/test:
  *   post:
  *     summary: Send test notification
  *     description: Send a test notification to the current user (dispatched via background queue)

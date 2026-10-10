@@ -954,7 +954,7 @@ router.get("/spec-schemas", getSpecSchemas);
  *               category: { type: string, description: Category id }
  *               brand: { type: string }
  *               description: { type: string }
- *               images: { type: array, items: { type: string, format: uri }, description: Cloudinary URLs, 1-5 }
+ *               images: { type: array, items: { type: string, format: uri }, description: "Cloudinary URLs, 1-5" }
  *               video:
  *                 type: string
  *                 format: uri
@@ -1399,54 +1399,55 @@ router.get("/get-products", optionalAuthMiddleware, getAllProducts);
  *     summary: Get products by category
  *     description: |
  *       Public listing for one category — products the seller has hidden are
- *       never returned. Note this reads `categoryId` from the **request body**;
- *       `GET /api/product/get-products?category=<id>` is the query-param
- *       listing, and it also covers a category's subcategories.
+ *       never returned. Pass `categoryId` as a query parameter (a JSON body
+ *       `{ categoryId }` is still accepted for older clients).
+ *       `GET /api/product/get-products?category=<id>` also covers a category's
+ *       subcategories.
  *     tags:
  *       - Products
  *     parameters:
  *       - in: query
  *         name: categoryId
+ *         required: true
  *         schema:
  *           type: string
-*           required: true
-*         description: Category ID
-*     responses:
-*       200:
-*         description: List of products in the specified category
-*         content:
-*           application/json:
-*             schema:
-*               type: array
-*               items:
-*                 type: object
-*                 properties:
-*                   _id:
-*                     type: string
-*                   title:
-*                     type: string
-*                   price:
-*                     type: number
-*                   listedPrice:
-*                     type: number
-*                   quantity:
-*                     type: number
-*                   category:
-*                     type: string
-*                   brand:
-*                     type: string
-*                   description:
-*                     type: string
-*                   store:
-*                     type: object
-*                     properties:
-*                       name:
-*                         type: string
-*                       image:
-*                         type: string
-*       400:
-*         description: Retrieval fails
-*/
+ *         description: Category ID
+ *     responses:
+ *       200:
+ *         description: List of products in the specified category
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   _id:
+ *                     type: string
+ *                   title:
+ *                     type: string
+ *                   price:
+ *                     type: number
+ *                   listedPrice:
+ *                     type: number
+ *                   quantity:
+ *                     type: number
+ *                   category:
+ *                     type: string
+ *                   brand:
+ *                     type: string
+ *                   description:
+ *                     type: string
+ *                   store:
+ *                     type: object
+ *                     properties:
+ *                       name:
+ *                         type: string
+ *                       image:
+ *                         type: string
+ *       400:
+ *         description: Retrieval fails
+ */
 router.get("/products/category", getProductsByCategory); // Get products by category
 /**
  * @swagger

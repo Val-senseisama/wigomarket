@@ -1,5 +1,6 @@
 const Store = require("../../models/storeModel");
 const asyncHandler = require("express-async-handler");
+const { isOpenNow } = require("../../utils/storeSettings");
 
 /**
  * @function getMyStore
@@ -14,7 +15,9 @@ const getMyStore = asyncHandler(async (req, res) => {
   const { _id } = req.user;
   try {
     const myStore = await Store.findOne({ owner: _id });
-    res.json(myStore);
+    // The owner's full view, plus whether the shop is open right now by its
+    // own opening hours (null until hours are set).
+    res.json(myStore ? { ...myStore.toJSON(), isOpenNow: isOpenNow(myStore.openingHours) } : null);
   } catch (error) {
     throw new Error(error);
   }
