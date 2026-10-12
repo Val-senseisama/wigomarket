@@ -319,6 +319,20 @@ describe("Sign-out on password change", () => {
     expect(fresh.passwordChangedAt).toBeTruthy();
   });
 
+  it("leaves no same-second window: a token from the second of the change is retired", async () => {
+    const { user, rawPassword } = await createTestUser();
+    const sameSecond = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "1d" });
+
+    const res = await request(app)
+      .put("/api/user/update-password")
+      .set("Authorization", `Bearer ${sameSecond}`)
+      .send({ currentPassword: rawPassword, newPassword: "BrandNew123!" });
+    expect(res.status).toBe(200);
+
+    expect((await getMe(sameSecond)).status).toBe(401);
+    expect((await getMe(res.body.token)).status).toBe(200);
+  });
+
   it("unrelated saves do not sign anyone out", async () => {
     const { user } = await createTestUser();
     const token = olderToken(user._id);

@@ -64,7 +64,7 @@ const updatePassword = asyncHandler(async (req, res) => {
   await user.save();
 
   // Issued after the save so they are not older than passwordChangedAt
-  const session = await issueSession(res, user._id);
+  const session = await issueSession(res, user);
 
   audit.log({
     action: "user.password_changed",

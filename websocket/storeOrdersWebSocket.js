@@ -4,6 +4,7 @@ const User = require("../models/userModel");
 const Store = require("../models/storeModel");
 const { createRedisConnection } = require("../config/redisClient");
 const { CHANNEL, onLocalEvent } = require("../services/storeOrderEvents");
+const { closeRevokedSockets, startRevalidation } = require("./sessionRevalidation");
 
 const HEARTBEAT_MS = 30_000;
 
@@ -20,7 +21,9 @@ const HEARTBEAT_MS = 30_000;
  * server attached with `server` rejects (400) every upgrade whose path it does
  * not own, which would break /ws/location alongside it.
  *
- * Dead connections are dropped by a ping/pong heartbeat.
+ * Dead connections are dropped by a ping/pong heartbeat. Open connections are
+ * re-checked against the account every 30s and closed once the session is
+ * revoked (password changed, account blocked or deleted).
  */
 class StoreOrdersWebSocketServer {
   constructor() {
@@ -30,6 +33,12 @@ class StoreOrdersWebSocketServer {
     this.setupSubscriptions();
     this.heartbeat = setInterval(() => this.checkHeartbeats(), HEARTBEAT_MS);
     this.heartbeat.unref?.();
+    this.revalidation = startRevalidation(() => this.wss.clients);
+  }
+
+  /** Close every open socket whose session has been revoked. */
+  revalidate() {
+    return closeRevokedSockets(this.wss.clients);
   }
 
   /** Called by the server's upgrade router for /ws/orders. */
@@ -55,6 +64,7 @@ class StoreOrdersWebSocketServer {
           return ws.close(1008, "Password was changed, please login again");
         }
         if (!(user.role || []).includes("seller")) return ws.close(1008, "Sellers only");
+        ws.session = { userId: user._id, iat: decoded.iat };
 
         const store = await Store.findOne({ owner: user._id }).select("_id").lean();
         if (!store) return ws.close(1008, "No store found for this account");
@@ -144,6 +154,7 @@ class StoreOrdersWebSocketServer {
 
   close() {
     clearInterval(this.heartbeat);
+    clearInterval(this.revalidation);
     this.unsubscribeLocal?.();
     for (const ws of this.wss.clients) ws.terminate();
     this.wss.close();

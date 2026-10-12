@@ -23,6 +23,7 @@ const StoreOrdersWebSocketServer = require("../websocket/storeOrdersWebSocket");
 const LocationWebSocketServer = require("../websocket/locationWebSocket");
 const { attachWebSockets } = require("../websocket/upgradeRouter");
 const { createTestUser, getOrCreateCategory, makeToken } = require("./helpers");
+const User = require("../models/userModel");
 
 let seq = 0;
 
@@ -282,6 +283,33 @@ describe("/ws/orders", () => {
     const { token: buyerToken } = await createTestUser();
     const buyer = await connect(`/ws/orders?token=${buyerToken}`);
     expect(await buyer.closed).toBe(1008);
+  });
+
+  it("closes open sockets once the password changes", async () => {
+    const seller = await makeSeller();
+    const { user: rider } = await createTestUser();
+    const orders = await connect(`/ws/orders?token=${seller.token}`);
+    const location = await connect(`/ws/location?token=${makeToken(rider._id)}`);
+
+    // Nothing revoked yet: both stay open.
+    expect(await ordersWs.revalidate()).toBe(0);
+    expect(await locationWs.revalidate()).toBe(0);
+
+    // Stamp a change in the future so the test does not depend on timing.
+    const future = new Date(Date.now() + 60_000);
+    await User.updateMany({ _id: { $in: [seller.user._id, rider._id] } }, { passwordChangedAt: future });
+
+    expect(await ordersWs.revalidate()).toBe(1);
+    expect(await locationWs.revalidate()).toBe(1);
+    expect(await orders.closed).toBe(1008);
+    expect(await location.closed).toBe(1008);
+  });
+
+  it("refuses a token issued before the last password change", async () => {
+    const seller = await makeSeller();
+    await User.updateOne({ _id: seller.user._id }, { passwordChangedAt: new Date(Date.now() + 60_000) });
+    const res = await connect(`/ws/orders?token=${seller.token}`);
+    expect(await res.closed).toBe(1008);
   });
 
   it("keeps /ws/location working alongside it, and refuses unknown paths", async () => {

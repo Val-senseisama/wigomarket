@@ -2,6 +2,7 @@ const WebSocket = require('ws');
 const jwt = require('jsonwebtoken');
 const User = require('../models/userModel');
 const { createRedisConnection } = require('../config/redisClient');
+const { closeRevokedSockets, startRevalidation } = require('./sessionRevalidation');
 
 class LocationWebSocketServer {
   // Served at /ws/location. noServer mode: app.js routes HTTP upgrades by path
@@ -14,6 +15,14 @@ class LocationWebSocketServer {
     this.clients = new Map(); // Store connected clients
     this.setupWebSocket();
     this.setupRedisSubscription();
+    // Re-check open sockets every 30s and close revoked sessions (password
+    // changed, account blocked or deleted) — auth otherwise runs only at connect.
+    this.revalidation = startRevalidation(() => this.wss.clients);
+  }
+
+  /** Close every open socket whose session has been revoked. */
+  revalidate() {
+    return closeRevokedSockets(this.wss.clients);
   }
 
   /** Called by the server's upgrade router for /ws/location. */
@@ -43,6 +52,8 @@ class LocationWebSocketServer {
           ws.close(1008, 'Password was changed, please login again');
           return;
         }
+
+        ws.session = { userId: user._id, iat: decoded.iat };
 
         // Store client with user info
         this.clients.set(ws, {
@@ -272,6 +283,7 @@ class LocationWebSocketServer {
 
   // Close WebSocket server
   close() {
+    clearInterval(this.revalidation);
     this.wss.close();
     this.redis?.disconnect();
   }

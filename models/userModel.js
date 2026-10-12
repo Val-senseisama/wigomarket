@@ -218,11 +218,16 @@ var userSchema = new mongoose.Schema(
 // A changed password on an existing account also stamps passwordChangedAt,
 // which retires every access token issued before it (see
 // issuedBeforePasswordChange). New accounts are left unstamped.
+//
+// JWT iat has one-second resolution, so the stamp is the start of the *next*
+// second: every token issued up to and including the second of the change is
+// retired, with no same-second window. Tokens handed back by the change itself
+// are signed with iat = the stamp (utils/issueSession).
 userSchema.pre(`save`, async function () {
   if (!this.isModified("password") || !this.password) return;
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
-  if (!this.isNew) this.passwordChangedAt = new Date();
+  if (!this.isNew) this.passwordChangedAt = new Date((Math.floor(Date.now() / 1000) + 1) * 1000);
 });
 
 userSchema.methods.isPasswordMatched = async function (enteredPassword) {
@@ -232,12 +237,12 @@ userSchema.methods.isPasswordMatched = async function (enteredPassword) {
 
 /**
  * True when a JWT with this `iat` (seconds) was issued before the password was
- * last changed, so it must no longer be accepted. JWT iat has one-second
- * resolution: a token issued in the same second as the change still passes,
- * which lets the token handed back by the change itself work.
+ * last changed, so it must no longer be accepted. A missing iat counts as
+ * stale once a password change is on record.
  */
 userSchema.methods.issuedBeforePasswordChange = function (iat) {
-  if (!this.passwordChangedAt || typeof iat !== "number") return false;
+  if (!this.passwordChangedAt) return false;
+  if (typeof iat !== "number") return true;
   return iat < Math.floor(this.passwordChangedAt.getTime() / 1000);
 };
 

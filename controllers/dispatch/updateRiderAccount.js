@@ -158,7 +158,7 @@ const updateRiderAccount = asyncHandler(async (req, res) => {
     await invalidateDispatchProfile(_id);
 
     // The password change retired every existing token, the caller's included.
-    const session = await issueSession(res, _id);
+    const session = await issueSession(res, user);
 
     return res.json({
       success: true,

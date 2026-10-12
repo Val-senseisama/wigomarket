@@ -11,15 +11,22 @@ const ACCESS_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 1 day
  *
  * Used after a password change: passwordChangedAt retires every token issued
  * before it, including the caller's own, so the caller needs a new pair to
- * stay signed in. Call it only after the password save, so the tokens are not
- * older than passwordChangedAt.
+ * stay signed in. Call it only after the password save. passwordChangedAt is
+ * the start of the next second, so the access token is signed with that as
+ * its iat rather than now.
  *
+ * @param {Object} res - Express response
+ * @param {Object} user - the saved user document
  * @returns {Promise<{token: string, refreshToken: string, tokenExpiresAt: string}>}
  */
-const issueSession = async (res, userId) => {
-  const token = generateToken(userId);
+const issueSession = async (res, user) => {
+  const userId = user._id;
+  const iat = user.passwordChangedAt
+    ? Math.floor(user.passwordChangedAt.getTime() / 1000)
+    : undefined;
+  const token = generateToken(userId, iat);
   const refreshToken = generateRefreshToken(userId);
-  const tokenExpiresAt = new Date(Date.now() + ACCESS_TOKEN_TTL_MS).toISOString();
+  const tokenExpiresAt = new Date((iat ? iat * 1000 : Date.now()) + ACCESS_TOKEN_TTL_MS).toISOString();
 
   await User.updateOne({ _id: userId }, { refreshToken });
 
