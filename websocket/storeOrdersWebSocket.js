@@ -49,8 +49,11 @@ class StoreOrdersWebSocketServer {
         if (!token) return ws.close(1008, "Authentication required");
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await User.findById(decoded.id).select("_id role fullName");
+        const user = await User.findById(decoded.id).select("_id role fullName passwordChangedAt");
         if (!user) return ws.close(1008, "User not found");
+        if (user.issuedBeforePasswordChange(decoded.iat)) {
+          return ws.close(1008, "Password was changed, please login again");
+        }
         if (!(user.role || []).includes("seller")) return ws.close(1008, "Sellers only");
 
         const store = await Store.findOne({ owner: user._id }).select("_id").lean();

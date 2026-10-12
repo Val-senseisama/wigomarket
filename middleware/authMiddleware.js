@@ -42,6 +42,12 @@ const authMiddleware = asyncHandler(async (req, res, next) => {
     throw new Error("User not found");
   }
 
+  // Changing or resetting the password signs out every other session.
+  if (user.issuedBeforePasswordChange(decoded.iat)) {
+    res.status(401);
+    throw new Error("Password was changed, please login again");
+  }
+
   // The token is valid but the account may not be usable. 403 rather than 401:
   // re-authenticating will not help, so the client must not bounce to login.
   if (user.isBlocked) {
@@ -83,7 +89,12 @@ const optionalAuthMiddleware = asyncHandler(async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findById(decoded?.id).select("-password -refreshToken");
 
-    if (user && !user.isBlocked && user.status === "active") {
+    if (
+      user &&
+      !user.isBlocked &&
+      user.status === "active" &&
+      !user.issuedBeforePasswordChange(decoded.iat)
+    ) {
       req.user = user;
       req.userId = user._id;
       req.userRoles = user.role;

@@ -214,15 +214,31 @@ var userSchema = new mongoose.Schema(
 // Hash only when the password itself was set or changed. Any other save()
 // (FCM token registration, Google account linking...) used to hash the stored
 // hash again, so the user's real password stopped working.
+//
+// A changed password on an existing account also stamps passwordChangedAt,
+// which retires every access token issued before it (see
+// issuedBeforePasswordChange). New accounts are left unstamped.
 userSchema.pre(`save`, async function () {
   if (!this.isModified("password") || !this.password) return;
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
+  if (!this.isNew) this.passwordChangedAt = new Date();
 });
 
 userSchema.methods.isPasswordMatched = async function (enteredPassword) {
   if (!this.password || typeof enteredPassword !== "string") return false;
   return await bcrypt.compare(enteredPassword, this.password);
+};
+
+/**
+ * True when a JWT with this `iat` (seconds) was issued before the password was
+ * last changed, so it must no longer be accepted. JWT iat has one-second
+ * resolution: a token issued in the same second as the change still passes,
+ * which lets the token handed back by the change itself work.
+ */
+userSchema.methods.issuedBeforePasswordChange = function (iat) {
+  if (!this.passwordChangedAt || typeof iat !== "number") return false;
+  return iat < Math.floor(this.passwordChangedAt.getTime() / 1000);
 };
 
 userSchema.methods.createPasswordResetToken = async function () {

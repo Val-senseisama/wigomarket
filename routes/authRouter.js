@@ -26,6 +26,7 @@ const {
   changeActiveRole,
   googleAuth,
   resetPassword,
+  updatePassword,
   verifyResetToken,
 } = require("../controllers/user");
 const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
@@ -646,7 +647,8 @@ router.post("/verify-reset-token", verifyResetToken);
  *       by step 2 (POST /api/user/verify-reset-token) as proof that the caller
  *       is the same client that verified the OTP. The session is consumed atomically
  *       — concurrent requests cannot both succeed. The user must log in again after
- *       a successful reset.
+ *       a successful reset. Every existing session is signed out: access tokens
+ *       issued before the reset get 401, and the stored refresh token is cleared.
  *     tags:
  *       - Auth
  *     requestBody:
@@ -1325,6 +1327,75 @@ router.put("/edit-user", authMiddleware, updateAUser);
  *         description: The new email was registered by someone else in the meantime; the pending change is cancelled
  */
 router.post("/verify-email-change", authMiddleware, verifyEmailChange);
+/**
+ * @swagger
+ * /api/user/update-password:
+ *   put:
+ *     summary: Change the signed-in user's password
+ *     description: |
+ *       Requires the current password. On success every existing session is
+ *       signed out: access tokens issued before the change get 401 on their
+ *       next request (WebSocket connections using them are refused), and the
+ *       old refresh token can no longer be used.
+ *
+ *       The caller's own tokens are retired too, so the response carries a new
+ *       pair — the same shape as login. Replace both tokens on the client. The
+ *       refresh token is also set as the `refreshToken` cookie for web clients.
+ *
+ *       Google accounts that have never set a password get a 400 and should use
+ *       `POST /api/user/forgot-password-token` instead.
+ *     tags:
+ *       - Users
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [currentPassword, newPassword]
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *                 format: password
+ *                 example: "oldPassword123"
+ *               newPassword:
+ *                 type: string
+ *                 format: password
+ *                 minLength: 6
+ *                 description: Must differ from the current password
+ *                 example: "newSecurePassword123"
+ *     responses:
+ *       200:
+ *         description: Password updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Password updated"
+ *                 token:
+ *                   type: string
+ *                   description: New access token; the one used for this request no longer works
+ *                 refreshToken:
+ *                   type: string
+ *                   description: New refresh token; replaces the one the client held before
+ *                 tokenExpiresAt:
+ *                   type: string
+ *                   format: date-time
+ *                   description: When `token` expires
+ *       400:
+ *         description: Missing fields, new password too short or same as the current one, or the account has no password
+ *       401:
+ *         description: Not signed in, or the current password is incorrect
+ */
+router.put("/update-password", authMiddleware, updatePassword);
 /**
  * @swagger
  * /api/user/me:

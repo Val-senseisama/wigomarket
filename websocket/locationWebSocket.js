@@ -32,10 +32,15 @@ class LocationWebSocketServer {
         }
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await User.findById(decoded.id).select('_id role fullName');
+        const user = await User.findById(decoded.id).select('_id role fullName passwordChangedAt');
         
         if (!user) {
           ws.close(1008, 'User not found');
+          return;
+        }
+
+        if (user.issuedBeforePasswordChange(decoded.iat)) {
+          ws.close(1008, 'Password was changed, please login again');
           return;
         }
 

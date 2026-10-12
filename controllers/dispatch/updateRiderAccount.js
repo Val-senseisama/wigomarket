@@ -4,6 +4,7 @@ const Validate = require("../../Helpers/Validate");
 const audit = require("../../services/auditService");
 const { invalidateDispatchProfile } = require("../../utils/dispatchProfileCache");
 const { serializeNextOfKin } = require("../../utils/nextOfKin");
+const issueSession = require("../../utils/issueSession");
 
 /**
  * @function updateRiderAccount
@@ -156,10 +157,14 @@ const updateRiderAccount = asyncHandler(async (req, res) => {
     // GET /profile embeds the populated User document behind a 60 s cache.
     await invalidateDispatchProfile(_id);
 
+    // The password change retired every existing token, the caller's included.
+    const session = await issueSession(res, _id);
+
     return res.json({
       success: true,
       message: "Profile and password updated successfully.",
       data: serialize(user),
+      ...session, // token, refreshToken (for mobile clients), tokenExpiresAt
     });
   }
 

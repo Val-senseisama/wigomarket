@@ -72,8 +72,11 @@ const resetPassword = asyncHandler(async (req, res) => {
     return res.status(404).json({ success: false, message: "User not found" });
   }
 
-  // Assign directly — userModel pre-save hook bcrypt-hashes it
+  // Assign directly — userModel pre-save hook bcrypt-hashes it and stamps
+  // passwordChangedAt, which retires every access token issued before now.
+  // Dropping the refresh token stops old sessions from minting new ones.
   user.password = password;
+  user.refreshToken = undefined;
   await user.save();
 
   audit.log({

@@ -6,6 +6,7 @@ jest.mock("resend", () => ({
 }));
 
 const request = require("supertest");
+const jwt = require("jsonwebtoken");
 const app = require("../app");
 const sendEmail = require("../controllers/emailController");
 const User = require("../models/userModel");
@@ -28,6 +29,16 @@ const orderFor = (buyerId, product, orderStatus) =>
     orderStatus,
     totalAmount: 1000,
   });
+
+// A token issued a minute ago. JWT iat has one-second resolution and a token
+// from the same second as a password change is still accepted, so tests of
+// sign-out need a token that is clearly older.
+const olderToken = (userId) =>
+  jwt.sign({ id: userId, iat: Math.floor(Date.now() / 1000) - 60 }, process.env.JWT_SECRET, {
+    expiresIn: "1d",
+  });
+
+const getMe = (token) => request(app).get("/api/user/me").set("Authorization", `Bearer ${token}`);
 
 beforeEach(() => sendEmail.mockClear());
 
@@ -220,6 +231,119 @@ describe("DELETE /api/user/me", () => {
     expect((await Store.findById(store._id)).status).toBe("suspended");
     expect((await Product.findById(product._id)).status).toBe("hidden");
     expect((await Wallet.findOne({ user: seller._id })).status).toBe("closed");
+  });
+});
+
+describe("PUT /api/user/update-password", () => {
+  const put = (token, body) =>
+    request(app).put("/api/user/update-password").set("Authorization", `Bearer ${token}`).send(body);
+
+  it("changes the password and returns a new token pair but no secrets", async () => {
+    const { user, rawPassword } = await createTestUser({ refreshToken: "old-rt" });
+    const token = olderToken(user._id);
+    const otherDevice = olderToken(user._id);
+
+    const res = await put(token, { currentPassword: rawPassword, newPassword: "BrandNew123!" });
+    expect(res.status).toBe(200);
+    expect(res.body.token).toBeTruthy();
+    expect(res.body.refreshToken).toBeTruthy();
+    expect(res.body.tokenExpiresAt).toBeTruthy();
+    expect(res.body).not.toHaveProperty("password");
+
+    // Every older access token is signed out, the caller's own included;
+    // the new one works.
+    expect((await getMe(token)).status).toBe(401);
+    expect((await getMe(otherDevice)).status).toBe(401);
+    expect((await getMe(res.body.token)).status).toBe(200);
+
+    const fresh = await User.findById(user._id);
+    expect(await fresh.isPasswordMatched("BrandNew123!")).toBe(true);
+    expect(fresh.refreshToken).toBe(res.body.refreshToken);
+    expect(fresh.passwordChangedAt).toBeTruthy();
+
+    // Other sessions can no longer refresh; the caller's new token can.
+    const stale = await request(app).post("/api/user/refresh").send({ refreshToken: "old-rt" });
+    expect(stale.status).toBe(403);
+    const current = await request(app).post("/api/user/refresh").send({ refreshToken: res.body.refreshToken });
+    expect(current.status).toBe(200);
+
+    const oldLogin = await request(app).post("/api/user/login").send({ email: user.email, password: rawPassword });
+    expect(oldLogin.status).toBe(401);
+    const newLogin = await request(app).post("/api/user/login").send({ email: user.email, password: "BrandNew123!" });
+    expect(newLogin.status).toBe(200);
+  });
+
+  it("requires the correct current password", async () => {
+    const { user, token, rawPassword } = await createTestUser();
+    expect((await put(token, { newPassword: "BrandNew123!" })).status).toBe(400);
+    expect((await put(token, { currentPassword: "wrong", newPassword: "BrandNew123!" })).status).toBe(401);
+
+    const fresh = await User.findById(user._id);
+    expect(await fresh.isPasswordMatched(rawPassword)).toBe(true);
+  });
+
+  it("rejects a short or unchanged new password", async () => {
+    const { token, rawPassword } = await createTestUser();
+    expect((await put(token, { currentPassword: rawPassword, newPassword: "123" })).status).toBe(400);
+    expect((await put(token, { currentPassword: rawPassword, newPassword: rawPassword })).status).toBe(400);
+  });
+
+  it("requires authentication", async () => {
+    const res = await request(app).put("/api/user/update-password").send({ currentPassword: "a", newPassword: "bbbbbb" });
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("Sign-out on password change", () => {
+  it("reset-password signs out older access tokens and clears the refresh token", async () => {
+    const crypto = require("crypto");
+    const { user } = await createTestUser({ refreshToken: "old-rt" });
+    const token = olderToken(user._id);
+
+    const resetSession = "nonce";
+    await Token.create({
+      email: user.email,
+      code: "used",
+      verified: true,
+      sessionHash: crypto.createHash("sha256").update(resetSession).digest("hex"),
+    });
+
+    const res = await request(app)
+      .put("/api/user/reset-password")
+      .send({ email: user.email, password: "BrandNew123!", resetSession });
+    expect(res.status).toBe(200);
+
+    expect((await getMe(token)).status).toBe(401);
+    const fresh = await User.findById(user._id).lean();
+    expect(fresh.refreshToken).toBeUndefined();
+    expect(fresh.passwordChangedAt).toBeTruthy();
+  });
+
+  it("unrelated saves do not sign anyone out", async () => {
+    const { user } = await createTestUser();
+    const token = olderToken(user._id);
+    const doc = await User.findById(user._id);
+    doc.nickname = "changed";
+    await doc.save();
+
+    expect(doc.passwordChangedAt).toBeUndefined();
+    expect((await getMe(token)).status).toBe(200);
+  });
+
+  it("a rider changing their password gets a new token pair", async () => {
+    const { user, rawPassword } = await createTestUser({ role: ["dispatch"], activeRole: "dispatch" });
+    const token = olderToken(user._id);
+
+    const res = await request(app)
+      .put("/api/delivery-agent/account")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ currentPassword: rawPassword, password: "BrandNew123!" });
+    expect(res.status).toBe(200);
+    expect(res.body.token).toBeTruthy();
+    expect(res.body.refreshToken).toBeTruthy();
+
+    expect((await getMe(token)).status).toBe(401);
+    expect((await getMe(res.body.token)).status).toBe(200);
   });
 });
 

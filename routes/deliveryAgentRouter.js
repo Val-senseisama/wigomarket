@@ -1098,6 +1098,11 @@ router.put("/profile", authMiddleware, isDispatch, updateDispatchProfile);
  *       can be changed in the same request by supplying both `password` and
  *       `currentPassword`.
  *
+ *       Changing the password signs out every existing session, including the
+ *       one making this request. The response then also carries a new `token`,
+ *       `refreshToken` and `tokenExpiresAt` (same shape as login) — replace both
+ *       tokens on the client. The refresh token is also set as a cookie.
+ *
  *       Vehicle, document and payout details live on the dispatch profile — edit
  *       those via `PUT /api/delivery-agent/profile`.
  *     tags: [Delivery Agent]
