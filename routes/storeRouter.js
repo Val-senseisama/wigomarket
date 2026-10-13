@@ -227,7 +227,9 @@ router.post("/create", authMiddleware, createStore);
  * /api/store/my-store:
  *   get:
  *     summary: Get the current user's store
- *     description: Get the current user's store
+ *     description: |
+ *       Get the current user's store (owner view), including its `image`.
+ *       Change the image with `PUT /api/store/my-store`.
  *     tags:
  *       - Stores
  *     security:
@@ -243,6 +245,12 @@ router.post("/create", authMiddleware, createStore);
  *                 _id:
  *                   type: string
  *                 name:
+ *                   type: string
+ *                 image:
+ *                   type: string
+ *                   nullable: true
+ *                   description: Store image (Cloudinary URL)
+ *                 description:
  *                   type: string
  *                 mobile:
  *                   type: string
@@ -301,7 +309,9 @@ router.get("/my-store", authMiddleware, isSeller, getMyStore);
  *                 description: Send "" to clear
  *               image:
  *                 type: string
- *                 description: Cloudinary URL from POST /api/upload/signature
+ *                 description: |
+ *                   New store image. Upload it first via POST /api/upload/signature
+ *                   (folder `stores`), then send the returned Cloudinary URL here.
  *               email:
  *                 type: string
  *                 format: email

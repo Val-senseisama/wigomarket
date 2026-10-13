@@ -45,6 +45,23 @@ describe("PUT /api/store/my-store", () => {
     ).toBe(403);
   });
 
+  it("changes the store image and returns it from GET my-store", async () => {
+    const { token } = await createTestSeller();
+    const cloud = process.env.CLOUDINARY_CLOUD_NAME || "demo";
+    const image = `https://res.cloudinary.com/${cloud}/image/upload/v1/stores/new-banner.jpg`;
+
+    const res = await request(app).put("/api/store/my-store").set(auth(token)).send({ image });
+    expect(res.status).toBe(200);
+    expect(res.body.data.image).toBe(image);
+    expect((await request(app).get("/api/store/my-store").set(auth(token))).body.image).toBe(image);
+
+    const bad = await request(app)
+      .put("/api/store/my-store")
+      .set(auth(token))
+      .send({ image: "https://example.com/x.jpg" });
+    expect(bad.status).toBe(400);
+  });
+
   it("ignores fields that have their own flows", async () => {
     const { token, store } = await createTestSeller();
     await request(app)

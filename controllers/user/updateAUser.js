@@ -3,7 +3,7 @@ const Token = require("../../models/tokensModel");
 const asyncHandler = require("express-async-handler");
 const sendEmail = require("../../controllers/emailController");
 const Validate = require("../../Helpers/Validate");
-const { MakeID } = require("../../Helpers/Helpers");
+const crypto = require("crypto");
 const { verificationCodeTemplate } = require("../../templates/Emails");
 const audit = require("../../services/auditService");
 
@@ -91,7 +91,8 @@ const updateAUser = asyncHandler(async (req, res) => {
   const updatedUser = await User.findByIdAndUpdate(userId, { $set }, { new: true });
 
   if (newEmail) {
-    const code = MakeID(6);
+    // Digits only, like the other OTPs the app asks for.
+    const code = crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
     // One outstanding code per address. Replacing createdAt restarts the TTL.
     await Token.findOneAndUpdate(
       { email: newEmail },
