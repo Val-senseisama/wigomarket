@@ -16,8 +16,13 @@ const getMyStore = asyncHandler(async (req, res) => {
   try {
     const myStore = await Store.findOne({ owner: _id });
     // The owner's full view, plus whether the shop is open right now by its
-    // own opening hours (null until hours are set).
-    res.json(myStore ? { ...myStore.toJSON(), isOpenNow: isOpenNow(myStore.openingHours) } : null);
+    // own opening hours (null until hours are set). `image` has no schema
+    // default, so stores without one would drop the key; send null instead.
+    res.json(
+      myStore
+        ? { ...myStore.toJSON(), image: myStore.image ?? null, isOpenNow: isOpenNow(myStore.openingHours) }
+        : null
+    );
   } catch (error) {
     throw new Error(error);
   }

@@ -62,6 +62,15 @@ describe("PUT /api/store/my-store", () => {
     expect(bad.status).toBe(400);
   });
 
+  it("returns image: null from GET my-store when the store has none", async () => {
+    const { token, store } = await createTestSeller();
+    await Store.updateOne({ _id: store._id }, { $unset: { image: 1 } });
+
+    const res = await request(app).get("/api/store/my-store").set(auth(token));
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("image", null);
+  });
+
   it("ignores fields that have their own flows", async () => {
     const { token, store } = await createTestSeller();
     await request(app)
