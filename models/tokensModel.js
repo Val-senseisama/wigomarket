@@ -20,14 +20,14 @@ var tokenSchema = new mongoose.Schema({
         type: String,     // SHA-256 of the resetSession nonce issued in step 2
         default: null,
     },
+    // Reset to now every time a code is (re)issued, which restarts the TTL.
+    // No `timestamps` option: it would make createdAt immutable and silently
+    // drop that reset, so a resent code could expire minutes after arriving.
     createdAt: {
         type: Date,
         default: Date.now,
         expires: 900, // 15 minutes TTL (MongoDB auto-deletes)
     },
-},
-{
-    timestamps: true,
 });
 
 //Export the model

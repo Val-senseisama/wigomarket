@@ -11,6 +11,7 @@ const {
   updateAUser,
   deleteMyAccount,
   verifyEmailChange,
+  resendEmailChangeCode,
   blockUser,
   unblockUser,
   handleRefreshToken,
@@ -1200,6 +1201,10 @@ router.get("/:id", authMiddleware, isAdmin, getAUser);
  *       the new address (valid 15 minutes). The change takes effect once the
  *       code is sent to `POST /api/user/verify-email-change`. Until then the
  *       old email stays the login email. Sending the current email is a no-op.
+ *
+ *       To resend the code, call `POST /api/user/resend-email-change-code`
+ *       (sending the same new `email` here again also works). Either way the
+ *       earlier code stops working.
  *     tags:
  *       - Users
  *     security:
@@ -1301,7 +1306,7 @@ router.put("/edit-user", authMiddleware, updateAUser);
  *             properties:
  *               code:
  *                 type: string
- *                 example: "A1B2C3"
+ *                 example: "482913"
  *     responses:
  *       200:
  *         description: Email updated
@@ -1327,6 +1332,60 @@ router.put("/edit-user", authMiddleware, updateAUser);
  *         description: The new email was registered by someone else in the meantime; the pending change is cancelled
  */
 router.post("/verify-email-change", authMiddleware, verifyEmailChange);
+/**
+ * @swagger
+ * /api/user/resend-email-change-code:
+ *   post:
+ *     summary: Resend the code for a pending email change
+ *     description: |
+ *       Sends a new 6-digit code to the pending address set by
+ *       `PUT /api/user/edit-user`. The previous code stops working and the
+ *       15-minute expiry restarts. At most one code per minute; sooner calls
+ *       get 429 with `retryAfter` (seconds) and a `Retry-After` header.
+ *     tags:
+ *       - Users
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: New code sent
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: A new code has been sent to new@example.com
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     pendingEmail:
+ *                       type: string
+ *       400:
+ *         description: No email change is pending
+ *       401:
+ *         description: Unauthorized
+ *       429:
+ *         description: A code was sent less than a minute ago
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                 retryAfter:
+ *                   type: integer
+ *                   example: 42
+ */
+router.post("/resend-email-change-code", authMiddleware, resendEmailChangeCode);
 /**
  * @swagger
  * /api/user/update-password:

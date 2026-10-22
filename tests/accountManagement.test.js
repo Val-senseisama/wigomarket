@@ -122,6 +122,52 @@ describe("PUT /api/user/edit-user", () => {
     expect(await Token.exists({ email: "new@example.com" })).toBeNull();
   });
 
+  it("resends the change code: new code, old one dead, expiry restarted, once a minute", async () => {
+    const { token } = await createTestUser();
+    const auth = { Authorization: `Bearer ${token}` };
+
+    const none = await request(app).post("/api/user/resend-email-change-code").set(auth);
+    expect(none.status).toBe(400);
+
+    await request(app).put("/api/user/edit-user").set(auth).send({ email: "resend@example.com" });
+    const tooSoon = await request(app).post("/api/user/resend-email-change-code").set(auth);
+    expect(tooSoon.status).toBe(429);
+    expect(tooSoon.body.retryAfter).toBeGreaterThan(0);
+
+    // Pretend the first code went out 14 minutes ago.
+    const old = new Date(Date.now() - 14 * 60 * 1000);
+    await Token.updateOne({ email: "resend@example.com" }, { $set: { createdAt: old } });
+    const { code: oldCode } = await Token.findOne({ email: "resend@example.com" });
+    sendEmail.mockClear();
+
+    const res = await request(app).post("/api/user/resend-email-change-code").set(auth);
+    expect(res.status).toBe(200);
+    expect(res.body.data.pendingEmail).toBe("resend@example.com");
+    expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "resend@example.com" }), true);
+
+    const fresh = await Token.findOne({ email: "resend@example.com" });
+    expect(fresh.createdAt.getTime()).toBeGreaterThan(Date.now() - 5000);
+
+    if (fresh.code !== oldCode) {
+      const stale = await request(app).post("/api/user/verify-email-change").set(auth).send({ code: oldCode });
+      expect(stale.status).toBe(400);
+    }
+    const ok = await request(app).post("/api/user/verify-email-change").set(auth).send({ code: fresh.code });
+    expect(ok.status).toBe(200);
+  });
+
+  it("restarts the code expiry when edit-user is called again with the same email", async () => {
+    const { token } = await createTestUser();
+    const auth = { Authorization: `Bearer ${token}` };
+    await request(app).put("/api/user/edit-user").set(auth).send({ email: "again@example.com" });
+    const old = new Date(Date.now() - 14 * 60 * 1000);
+    await Token.updateOne({ email: "again@example.com" }, { $set: { createdAt: old } });
+
+    await request(app).put("/api/user/edit-user").set(auth).send({ email: "again@example.com" });
+    const token2 = await Token.findOne({ email: "again@example.com" });
+    expect(token2.createdAt.getTime()).toBeGreaterThan(Date.now() - 5000);
+  });
+
   it("rejects an email already used by another account, case-insensitively", async () => {
     const { user: other } = await createTestUser();
     const { token } = await createTestUser();

@@ -1,10 +1,7 @@
 const User = require("../../models/userModel");
-const Token = require("../../models/tokensModel");
 const asyncHandler = require("express-async-handler");
-const sendEmail = require("../../controllers/emailController");
 const Validate = require("../../Helpers/Validate");
-const crypto = require("crypto");
-const { verificationCodeTemplate } = require("../../templates/Emails");
+const { issueEmailChangeCode } = require("./emailChangeCode");
 const audit = require("../../services/auditService");
 
 // Plain-text fields a user may edit on themselves. Anything else in the body
@@ -20,7 +17,8 @@ const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  *
  * An email change is not applied directly: the new address is stored as
  * `pendingEmail` and a 6-digit code is sent to it. The change takes effect via
- * POST /api/user/verify-email-change.
+ * POST /api/user/verify-email-change. Sending the same new email again sends
+ * a fresh code (POST /api/user/resend-email-change-code does the same alone).
  *
  * @param {string} [req.body.firstname]
  * @param {string} [req.body.lastname]
@@ -90,25 +88,7 @@ const updateAUser = asyncHandler(async (req, res) => {
 
   const updatedUser = await User.findByIdAndUpdate(userId, { $set }, { new: true });
 
-  if (newEmail) {
-    // Digits only, like the other OTPs the app asks for.
-    const code = crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
-    // One outstanding code per address. Replacing createdAt restarts the TTL.
-    await Token.findOneAndUpdate(
-      { email: newEmail },
-      { email: newEmail, code, verified: false, sessionHash: null, createdAt: new Date() },
-      { upsert: true },
-    );
-    sendEmail(
-      {
-        to: newEmail,
-        text: "",
-        subject: "Confirm your new email - WigoMarket",
-        htm: verificationCodeTemplate(updatedUser.firstname || updatedUser.fullName || "User", code),
-      },
-      true,
-    );
-  }
+  if (newEmail) await issueEmailChangeCode(updatedUser, newEmail);
 
   const { pendingEmail, ...changed } = $set;
   audit.log({
