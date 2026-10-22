@@ -162,3 +162,4 @@ const createSupportRequest = asyncHandler(async (req, res) => {
 
 module.exports = createSupportRequest;
 module.exports.parseSupportRequest = parseSupportRequest;
+module.exports.escapeHtml = escapeHtml;

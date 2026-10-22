@@ -1,7 +1,11 @@
 const express = require("express");
 const rateLimit = require("express-rate-limit");
-const { createSupportRequest } = require("../controllers/support");
-const { optionalAuthMiddleware } = require("../middleware/authMiddleware");
+const {
+  createSupportRequest,
+  listMySupportRequests,
+  getMySupportRequest,
+} = require("../controllers/support");
+const { authMiddleware, optionalAuthMiddleware } = require("../middleware/authMiddleware");
 const router = express.Router();
 
 /**
@@ -37,7 +41,13 @@ const supportRequestLimiter = rateLimit({
  *       The "Contact support" form. Works for guests and signed-in users — send
  *       a bearer token to link the request to the account. The request is
  *       stored, the support team is emailed, and the sender receives an
- *       acknowledgement email quoting the reference. Limited to 5 accepted
+ *       acknowledgement email quoting the reference.
+ *
+ *       **Following up.** When the support team replies, the reply is emailed
+ *       to the address on the request. Signed-in users can also track status
+ *       and read the reply with `GET /api/support/requests` and
+ *       `GET /api/support/requests/{reference}`. Guest requests are not linked
+ *       to an account, so guests hear back by email only. Limited to 5 accepted
  *       submissions per hour per account (or per email for guests).
  *     tags:
  *       - Support
@@ -123,5 +133,141 @@ const supportRequestLimiter = rateLimit({
  *         description: Too many support requests
  */
 router.post("/requests", optionalAuthMiddleware, supportRequestLimiter, createSupportRequest);
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     MySupportRequest:
+ *       type: object
+ *       properties:
+ *         reference:
+ *           type: string
+ *           example: SR-7K2Q9XHD
+ *         status:
+ *           type: string
+ *           enum: [open, in_progress, resolved]
+ *           description: >
+ *             `open` — not picked up yet; `in_progress` — the team is on it
+ *             (set automatically on the first reply); `resolved` — closed.
+ *         message:
+ *           type: string
+ *           description: What the user wrote
+ *         response:
+ *           type: string
+ *           nullable: true
+ *           description: The support team's latest reply; null until they reply
+ *           example: We've refunded the duplicate charge. It should reach your card in 3–5 working days.
+ *         respondedAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         resolvedAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *         updatedAt:
+ *           type: string
+ *           format: date-time
+ */
+
+/**
+ * @swagger
+ * /api/support/requests:
+ *   get:
+ *     summary: List my support requests
+ *     description: >
+ *       The signed-in user's support requests, newest first. Only requests
+ *       submitted while signed in appear here.
+ *     tags:
+ *       - Support
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [open, in_progress, resolved]
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1, minimum: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20, minimum: 1, maximum: 50 }
+ *     responses:
+ *       200:
+ *         description: Support requests
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     requests:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/MySupportRequest'
+ *                     pagination:
+ *                       type: object
+ *                       properties:
+ *                         total: { type: integer }
+ *                         page: { type: integer }
+ *                         pages: { type: integer }
+ *                         hasMore: { type: boolean }
+ *       400:
+ *         description: Invalid status
+ *       401:
+ *         description: Unauthorized
+ */
+router.get("/requests", authMiddleware, listMySupportRequests);
+
+/**
+ * @swagger
+ * /api/support/requests/{reference}:
+ *   get:
+ *     summary: Get one of my support requests
+ *     description: >
+ *       Status and the support team's reply for a request the signed-in user
+ *       submitted. The reference is case-insensitive. Another user's
+ *       reference returns 404.
+ *     tags:
+ *       - Support
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: reference
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: SR-7K2Q9XHD
+ *     responses:
+ *       200:
+ *         description: The support request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/MySupportRequest'
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Not found, or not this user's request
+ */
+router.get("/requests/:reference", authMiddleware, getMySupportRequest);
 
 module.exports = router;

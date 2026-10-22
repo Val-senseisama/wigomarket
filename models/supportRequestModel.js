@@ -1,5 +1,7 @@
 const mongoose = require("mongoose");
 
+const STATUSES = ["open", "in_progress", "resolved"];
+
 // A "Contact support" form submission. Stored so nothing is lost if the email
 // to the support inbox fails, and so a team member can track it to resolution.
 const supportRequestSchema = new mongoose.Schema(
@@ -15,10 +17,16 @@ const supportRequestSchema = new mongoose.Schema(
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null, index: true },
     status: {
       type: String,
-      enum: ["open", "in_progress", "resolved"],
+      enum: STATUSES,
       default: "open",
       index: true,
     },
+    // The support team's reply, shown to the user and emailed to `email`.
+    // A later reply replaces it.
+    response: { type: String, trim: true, maxlength: 2000, default: null },
+    respondedAt: { type: Date, default: null },
+    respondedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    resolvedAt: { type: Date, default: null },
   },
   { timestamps: true },
 );
@@ -26,3 +34,4 @@ const supportRequestSchema = new mongoose.Schema(
 supportRequestSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model("SupportRequest", supportRequestSchema);
+module.exports.STATUSES = STATUSES;

@@ -16,6 +16,7 @@ const AuditLog = require("../models/auditLogModel");
 const { authMiddleware, isAdmin } = require("../middleware/authMiddleware");
 const admin = require("../controllers/admin");
 const refunds = require("../controllers/refund/admin");
+const support = require("../controllers/support");
 const {
   getPendingWithdrawals,
   processWithdrawal,
@@ -681,6 +682,97 @@ router.put("/wallets/:id/limits", admin.updateWalletLimits);
 router.get("/withdrawals/pending", getPendingWithdrawals);
 router.post("/withdrawals/:transactionId/process", processWithdrawal);
 router.get("/withdrawals/stats", getWithdrawalStats);
+
+// ── Support requests ────────────────────────────────────────────────────────
+
+/**
+ * @swagger
+ * /api/admin/support-requests:
+ *   get:
+ *     summary: List support requests
+ *     description: >
+ *       Every "Contact support" submission, newest first, with the sender's
+ *       contact details. `counts` gives the open and in-progress queue sizes.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [open, in_progress, resolved] }
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *         description: Partial match on reference, email, first or last name
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1, minimum: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+ *     responses:
+ *       200:
+ *         description: >
+ *           `{ success, data: { requests, pagination, counts: { open, inProgress } } }`.
+ *           Each request has reference, firstName, lastName, email, phone,
+ *           message, user (populated, null for guests), status, response,
+ *           respondedAt, respondedBy (populated), resolvedAt, createdAt, updatedAt.
+ *       400:
+ *         description: Invalid status
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not an admin
+ */
+router.get("/support-requests", support.listSupportRequests);
+
+/**
+ * @swagger
+ * /api/admin/support-requests/{reference}:
+ *   put:
+ *     summary: Reply to a support request and/or change its status
+ *     description: |
+ *       Send `response`, `status`, or both.
+ *
+ *       A `response` is saved on the request (a later one replaces it),
+ *       shown to the user by `GET /api/support/requests/{reference}`, and
+ *       emailed to the address on the request. Replying to an `open` request
+ *       without a `status` moves it to `in_progress`.
+ *
+ *       Setting `resolved` stamps `resolvedAt`; moving it back clears it.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: reference
+ *         required: true
+ *         schema: { type: string, example: SR-7K2Q9XHD }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             minProperties: 1
+ *             properties:
+ *               response:
+ *                 type: string
+ *                 maxLength: 2000
+ *                 example: We've refunded the duplicate charge. It should reach your card in 3–5 working days.
+ *               status:
+ *                 type: string
+ *                 enum: [open, in_progress, resolved]
+ *                 example: resolved
+ *     responses:
+ *       200:
+ *         description: Updated; `data` is the full support request
+ *       400:
+ *         description: Nothing sent, invalid status, or response empty/over 2000 characters
+ *       404:
+ *         description: Support request not found
+ */
+router.put("/support-requests/:reference", support.updateSupportRequest);
 
 // ── Refund requests ─────────────────────────────────────────────────────────
 
