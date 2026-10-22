@@ -175,6 +175,12 @@ const router = express.Router();
  *           nullable: true
  *           description: Ready-made label for the availableFor list.
  *           example: "Delivery & Pick-up"
+ *         isInWishlist:
+ *           type: boolean
+ *           description: |
+ *             GET /api/product/get-products storefront listings only (not
+ *             `mine=true`): whether the signed-in caller saved this product.
+ *             Always false for guests.
  *         createdAt: { type: string, format: date-time }
  *         updatedAt: { type: string, format: date-time }
  *     ProductDetail:
@@ -273,6 +279,46 @@ const router = express.Router();
  *                     "3": { type: integer }
  *                     "4": { type: integer }
  *                     "5": { type: integer }
+ *             store:
+ *               type: object
+ *               nullable: true
+ *               description: The shop, for the "Shop Name" line and a link to GET /api/store/{id}.
+ *               properties:
+ *                 id: { type: string }
+ *                 name: { type: string, nullable: true }
+ *                 image: { type: string, nullable: true }
+ *                 address: { type: string, nullable: true }
+ *                 mobile: { type: string, nullable: true }
+ *                 rating:
+ *                   type: object
+ *                   description: The shop's rating — same figures as the home shop cards and GET /api/store/{id}.
+ *                   properties:
+ *                     average: { type: number, example: 4.3 }
+ *                     count: { type: integer, example: 1247 }
+ *             viewer:
+ *               type: object
+ *               description: |
+ *                 The caller's own state for this product. All false/null for
+ *                 guests and for the owner.
+ *               properties:
+ *                 isSignedIn: { type: boolean }
+ *                 isInWishlist:
+ *                   type: boolean
+ *                   description: Fill the heart / "Saved". Toggle with POST /api/wishlist/add and DELETE /api/wishlist/remove/{productId}.
+ *                 canReview:
+ *                   type: boolean
+ *                   description: |
+ *                     True when the caller has a delivered order containing this
+ *                     product — the only case POST /api/product/{id}/reviews
+ *                     accepts. Show the review form only when true.
+ *                 myReview:
+ *                   type: object
+ *                   nullable: true
+ *                   description: The caller's existing review; posting again replaces it.
+ *                   properties:
+ *                     rating: { type: integer, minimum: 1, maximum: 5 }
+ *                     comment: { type: string }
+ *                     updatedAt: { type: string, format: date-time }
  */
 /**
  * @swagger
@@ -401,6 +447,11 @@ router.post("/create-category", authMiddleware, isAdmin, createProductCategory);
  *               image:
  *                 type: string
  *                 format: uri
+ *                 nullable: true
+ *                 description: |
+ *                   Cloudinary `secure_url` from POST /api/upload/signature with
+ *                   `folder: "categories"`. Send null to remove the image. The
+ *                   home categories section shows the change immediately.
  *     responses:
  *       200:
  *         description: Updated category
@@ -419,7 +470,7 @@ router.post("/create-category", authMiddleware, isAdmin, createProductCategory);
  *                     parent:     { type: string, nullable: true }
  *                     specSchema: { type: string, nullable: true }
  *       400:
- *         description: Validation failed, no fields supplied, or an illegal tree move
+ *         description: Validation failed (including an image that is not one of our Cloudinary URLs), no fields supplied, or an illegal tree move
  *       404:
  *         description: Category not found
  */
@@ -2070,6 +2121,14 @@ router.post("/:id/reviews", authMiddleware, createProductReview);
  *       cheapest variant's price and the total stock across variants — and the
  *       table lives in `inventory.variants`.
  *
+ *       - **viewer** — the signed-in buyer's state: `isInWishlist`,
+ *         `canReview` (has a delivered order with this product) and `myReview`
+ *       - **store.rating** — the shop's rating, as on the home shop cards
+ *
+ *       **Price to show the buyer is `listedPrice`** — it is what the cart
+ *       charges. `price` is the seller's own price before the platform fee.
+ *       There is no discount / "was" price field.
+ *
  *       Sending the seller's Bearer token adds `isOwner: true` and
  *       `inventory.lastOrderedAt` (sales data, not exposed to buyers), and
  *       suppresses the view-count increment so a seller opening their own
@@ -2187,6 +2246,18 @@ router.post("/:id/reviews", authMiddleware, createProductReview);
  *                   average: 4.5
  *                   count: 10
  *                   breakdown: { "1": 0, "2": 1, "3": 1, "4": 2, "5": 6 }
+ *                 store:
+ *                   id: "66c1a2b3c4d5e6f708192a01"
+ *                   name: "Alex Clothing & Packages"
+ *                   image: null
+ *                   address: "12 Allen Ave, Ikeja"
+ *                   mobile: "2348012345678"
+ *                   rating: { average: 4.3, count: 1247 }
+ *                 viewer:
+ *                   isSignedIn: true
+ *                   isInWishlist: false
+ *                   canReview: false
+ *                   myReview: null
  *       404:
  *         description: Product not found, or hidden and you do not own it
  *         content:

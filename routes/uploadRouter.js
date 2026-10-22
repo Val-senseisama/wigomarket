@@ -43,6 +43,7 @@ const { authMiddleware } = require("../middleware/authMiddleware");
  *       | `stores` | Store banner / logo (`storeImage`) |
  *       | `store-nin` | Store owner NIN image (`ownerNIN`) |
  *       | `products` | Product images (`images[]`) |
+ *       | `categories` | Product category images (`image` on create-category / update-category, admin only) |
  *       | `dispatch-documents` | Rider documents — driver's licence, vehicle registration, NIN |
  *       | `profiles` | User profile photos (`image` in profile update) |
  *

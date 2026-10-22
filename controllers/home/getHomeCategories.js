@@ -1,6 +1,7 @@
 const Category = require("../../models/categoryModel");
 const asyncHandler = require("express-async-handler");
 const redisClient = require("../../config/redisClient");
+const { categoryCacheVersion } = require("../../utils/categoryCache");
 
 const TTL = 1800; // 30 minutes — categories and their product counts change infrequently
 
@@ -9,12 +10,13 @@ const TTL = 1800; // 30 minutes — categories and their product counts change i
  * @description Returns product categories with their image and the lowest listed
  *              price of any in-stock product in that category ("From ₦X").
  *              Categories with no active products are excluded.
- *              Results are cached in Redis for 30 minutes.
+ *              Results are cached in Redis for 30 minutes; any category
+ *              write clears them (utils/categoryCache).
  * @query {number} [limit=12] - Number of categories to return (max 24)
  */
 const getHomeCategories = asyncHandler(async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 12, 24);
-  const cacheKey = `home:categories:${limit}`;
+  const cacheKey = `home:categories:v${await categoryCacheVersion()}:${limit}`;
 
   // ── Cache read ────────────────────────────────────────────────────────────
   try {

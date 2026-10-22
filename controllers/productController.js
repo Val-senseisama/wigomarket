@@ -33,6 +33,8 @@ const { listProducts } = require("../services/productQueryService");
 const { withVisibleStores, isStorePublic } = require("../utils/storeVisibility");
 const { serializeProductDetail } = require("../utils/productSerializer");
 const Wishlist = require("../models/wishlistModel");
+const { getStoreRating } = require("../utils/storeRating");
+const { bumpCategoryCacheVersion } = require("../utils/categoryCache");
 
 // How a buyer can receive a product. Mirrors productModel.availableFor.
 const FULFILMENT_OPTIONS = ["delivery", "pickup"];
@@ -98,11 +100,23 @@ const validateSpecSchemaKey = (specSchema) => {
  * @param {string} [req.body.image] - Cloudinary URL
  * @returns {Object} - Created category
  */
+// A category image must be one of our Cloudinary uploads (folder: categories).
+// On update, null clears it.
+const invalidCategoryImage = (image, { allowNull = false } = {}) => {
+  if (image === undefined || (allowNull && image === null)) return null;
+  return Validate.cloudinaryUrl(image)
+    ? null
+    : "image must be a valid Cloudinary URL. Upload via POST /api/upload/signature (folder: categories).";
+};
+
 const createProductCategory = asyncHandler(async (req, res) => {
   const { name, image } = req.body;
   if (!Validate.string(name)) {
     ThrowError("Invalid Name");
   }
+
+  const imageError = invalidCategoryImage(image);
+  if (imageError) return invalid(res, imageError);
 
   const parentResult = await resolveParent(req.body.parent);
   if (parentResult.error) return invalid(res, parentResult.error);
@@ -138,6 +152,8 @@ const createProductCategory = asyncHandler(async (req, res) => {
     },
   });
 
+  await bumpCategoryCacheVersion();
+
   res.status(201).json({ success: true, data: newCategory });
 });
 /**
@@ -165,6 +181,9 @@ const updateProductCategory = asyncHandler(async (req, res) => {
   if (name !== undefined && !Validate.string(name)) {
     ThrowError("Invalid Name");
   }
+
+  const imageError = invalidCategoryImage(image, { allowNull: true });
+  if (imageError) return invalid(res, imageError);
 
   const parentResult = await resolveParent(req.body.parent);
   if (parentResult.error) return invalid(res, parentResult.error);
@@ -215,6 +234,7 @@ const updateProductCategory = asyncHandler(async (req, res) => {
     changes: { after: updates },
   });
 
+  await bumpCategoryCacheVersion();
   res.json({ success: true, data: updatedCategory });
 });
 
@@ -264,6 +284,7 @@ const deleteProductCategory = asyncHandler(async (req, res) => {
       actor: audit.actor(req),
       resource: { type: "category", id: id },
     });
+    await bumpCategoryCacheVersion();
     res.json({ message: "Category deleted successfully" });
   } catch (error) {
     throw new Error(error);
@@ -1074,6 +1095,8 @@ const bulkUpdateProducts = asyncHandler(async (req, res) => {
  * @description Full detail for one product — everything the product page
  *   renders: overview, every image and the video, description, pricing and
  *   inventory (including the variants table), and the rating summary.
+ *   `store.rating` is the shop's rating (utils/storeRating). `viewer` is what
+ *   the signed-in buyer needs: wishlist state and whether they may review.
  * @route GET /api/product/:id
  * @param {string} req.params.id - Product ID (required)
  * @returns {Object} - Serialized product detail
@@ -1115,7 +1138,12 @@ const getAProduct = asyncHandler(async (req, res) => {
 
   const productObjId = new mongoose.Types.ObjectId(id);
 
-  const [lastOrder, breakdownRaw] = await Promise.all([
+  // Buyer-side state. A review needs a delivered order containing the product
+  // (same rule as POST /:id/reviews); the owner never reviews their own.
+  const buyer = req.user && !isOwner ? req.user._id : null;
+  const storeId = product.store?._id;
+
+  const [lastOrder, breakdownRaw, storeRating, inWishlist, deliveredOrder, myReview] = await Promise.all([
     // "Last Ordered" on the inventory panel. Only the owner sees it — it is
     // sales data, not something the storefront should expose.
     isOwner
@@ -1131,6 +1159,17 @@ const getAProduct = asyncHandler(async (req, res) => {
       { $match: { product: productObjId, status: "active" } },
       { $group: { _id: "$rating", count: { $sum: 1 } } },
     ]),
+
+    storeId ? getStoreRating(storeId) : Promise.resolve(null),
+    buyer ? Wishlist.exists({ user: buyer, "products.product": productObjId }) : null,
+    buyer
+      ? Order.exists({ orderedBy: buyer, orderStatus: "delivered", "products.product": productObjId })
+      : null,
+    buyer
+      ? ProductReview.findOne({ product: productObjId, user: buyer })
+          .select("rating comment updatedAt")
+          .lean()
+      : null,
   ]);
 
   const breakdown = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
@@ -1150,6 +1189,16 @@ const getAProduct = asyncHandler(async (req, res) => {
       breakdown,
     },
   });
+
+  if (data.store && storeRating) data.store.rating = storeRating;
+  data.viewer = {
+    isSignedIn: Boolean(req.user),
+    isInWishlist: Boolean(inWishlist),
+    canReview: Boolean(deliveredOrder),
+    myReview: myReview
+      ? { rating: myReview.rating, comment: myReview.comment || "", updatedAt: myReview.updatedAt }
+      : null,
+  };
 
   res.json({
     success: true,
@@ -1228,6 +1277,15 @@ const getAllProducts = asyncHandler(async (req, res) => {
     // The seller's grid needs per-variant stock; the storefront does not.
     includeVariants: mine || String(req.query.includeVariants || "") === "true",
   });
+
+  // The card's heart. One wishlist read for the whole page; false for guests.
+  if (!mine) {
+    const wishlist = req.user
+      ? await Wishlist.findOne({ user: req.user._id }, "products.product").lean()
+      : null;
+    const saved = new Set((wishlist?.products || []).map((item) => String(item.product)));
+    for (const p of products) p.isInWishlist = saved.has(String(p.id));
+  }
 
   res.json({
     success: true,
