@@ -67,7 +67,8 @@ var storeSchema = new mongoose.Schema(
     description: {
       type: String,
     },
-    // Denormalised rating cache — recomputed from product ratings via syncStoreRating()
+    // Not maintained — always 0. Public reads compute the shop's rating from
+    // its products' reviews (utils/storeRating).
     rating: {
       average: { type: Number, default: 0, min: 0, max: 5 },
       count:   { type: Number, default: 0, min: 0 },

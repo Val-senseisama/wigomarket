@@ -1,6 +1,7 @@
 const Store = require("../../models/storeModel");
 const asyncHandler = require("express-async-handler");
 const redisClient = require("../../config/redisClient");
+const { RATED_PRODUCT_MATCH, ratingFields } = require("../../utils/storeRating");
 
 const TTL = 600; // 10 minutes — changes when orders land or products are rated
 
@@ -14,7 +15,7 @@ const TTL = 600; // 10 minutes — changes when orders land or products are rate
  */
 const getTopShops = asyncHandler(async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 10, 20);
-  const cacheKey = `home:top-shops:${limit}`;
+  const cacheKey = `home:top-shops:v2:${limit}`;
 
   // ── Cache read ────────────────────────────────────────────────────────────
   try {
@@ -38,9 +39,16 @@ const getTopShops = asyncHandler(async (req, res) => {
         foreignField: "store",
         as: "products",
         pipeline: [
-          { $match: { quantity: { $gt: 0 } } },
-          { $project: { "rating.average": 1, "rating.count": 1, sold: 1 } },
+          // Unhidden products: all of them feed the rating, in-stock ones the
+          // product count and price (utils/storeRating).
+          { $match: RATED_PRODUCT_MATCH },
+          { $project: { quantity: 1, listedPrice: 1, "rating.average": 1, "rating.count": 1 } },
         ],
+      },
+    },
+    {
+      $addFields: {
+        _inStock: { $filter: { input: "$products", cond: { $gt: ["$$this.quantity", 0] } } },
       },
     },
 
@@ -63,29 +71,9 @@ const getTopShops = asyncHandler(async (req, res) => {
 
     {
       $addFields: {
-        totalProducts: { $size: "$products" },
+        totalProducts: { $size: "$_inStock" },
         totalOrders: { $ifNull: [{ $arrayElemAt: ["$_orders.n", 0] }, 0] },
-        "rating.count": { $sum: "$products.rating.count" },
-        "rating.average": {
-          $cond: {
-            if: { $gt: [{ $sum: "$products.rating.count" }, 0] },
-            then: {
-              $divide: [
-                {
-                  $sum: {
-                    $map: {
-                      input: "$products",
-                      as: "p",
-                      in: { $multiply: ["$$p.rating.average", "$$p.rating.count"] },
-                    },
-                  },
-                },
-                { $sum: "$products.rating.count" },
-              ],
-            },
-            else: 0,
-          },
-        },
+        ...ratingFields(),
       },
     },
 
@@ -109,6 +97,8 @@ const getTopShops = asyncHandler(async (req, res) => {
         _id: 1,
         name: 1,
         image: 1,
+        address: 1,
+        description: 1,
         businessType: 1,
         city: 1,
         state: 1,

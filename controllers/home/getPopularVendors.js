@@ -1,6 +1,7 @@
 const Store = require("../../models/storeModel");
 const asyncHandler = require("express-async-handler");
 const redisClient = require("../../config/redisClient");
+const { RATED_PRODUCT_MATCH, ratingFields } = require("../../utils/storeRating");
 
 const TTL = 600;                    // 10 minutes — popularity score changes with orders/ratings
 const CITY_SPEED_KM_PER_MIN = 0.5; // 30 km/h
@@ -30,8 +31,8 @@ const getPopularVendors = asyncHandler(async (req, res) => {
 
   // Bucketed key — users within ~1.1 km share a cache entry
   const cacheKey = hasLocation
-    ? `home:popular-vendors:${bucketCoord(userLat)}:${bucketCoord(userLng)}:${limitNum}`
-    : `home:popular-vendors:global:${limitNum}`;
+    ? `home:popular-vendors:v2:${bucketCoord(userLat)}:${bucketCoord(userLng)}:${limitNum}`
+    : `home:popular-vendors:v2:global:${limitNum}`;
 
   // ── Cache read ────────────────────────────────────────────────────────────
   try {
@@ -74,9 +75,16 @@ const getPopularVendors = asyncHandler(async (req, res) => {
         foreignField: "store",
         as: "products",
         pipeline: [
-          { $match: { quantity: { $gt: 0 } } },
-          { $project: { listedPrice: 1, "rating.average": 1, "rating.count": 1 } },
+          // Unhidden products: all of them feed the rating, in-stock ones the
+          // product count and price (utils/storeRating).
+          { $match: RATED_PRODUCT_MATCH },
+          { $project: { quantity: 1, listedPrice: 1, "rating.average": 1, "rating.count": 1 } },
         ],
+      },
+    },
+    {
+      $addFields: {
+        _inStock: { $filter: { input: "$products", cond: { $gt: ["$$this.quantity", 0] } } },
       },
     },
 
@@ -100,36 +108,16 @@ const getPopularVendors = asyncHandler(async (req, res) => {
 
     {
       $addFields: {
-        totalProducts: { $size: "$products" },
+        totalProducts: { $size: "$_inStock" },
         totalOrders: { $ifNull: [{ $arrayElemAt: ["$_orders.n", 0] }, 0] },
         averagePrice: {
           $cond: {
-            if: { $gt: [{ $size: "$products" }, 0] },
-            then: { $round: [{ $avg: "$products.listedPrice" }, 0] },
+            if: { $gt: [{ $size: "$_inStock" }, 0] },
+            then: { $round: [{ $avg: "$_inStock.listedPrice" }, 0] },
             else: null,
           },
         },
-        "rating.count": { $sum: "$products.rating.count" },
-        "rating.average": {
-          $cond: {
-            if: { $gt: [{ $sum: "$products.rating.count" }, 0] },
-            then: {
-              $divide: [
-                {
-                  $sum: {
-                    $map: {
-                      input: "$products",
-                      as: "p",
-                      in: { $multiply: ["$$p.rating.average", "$$p.rating.count"] },
-                    },
-                  },
-                },
-                { $sum: "$products.rating.count" },
-              ],
-            },
-            else: 0,
-          },
-        },
+        ...ratingFields(),
       },
     },
 
@@ -155,6 +143,8 @@ const getPopularVendors = asyncHandler(async (req, res) => {
       _id: 1,
       name: 1,
       image: 1,
+      address: 1,
+      description: 1,
       businessType: 1,
       city: 1,
       averagePrice: 1,

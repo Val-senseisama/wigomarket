@@ -42,6 +42,14 @@ const router = express.Router();
  *         image:
  *           type: string
  *           format: uri
+ *         address:
+ *           type: string
+ *           nullable: true
+ *           example: "Fresh Foods Store, Market Square, Benin City"
+ *         description:
+ *           type: string
+ *           nullable: true
+ *           example: "High-quality sound systems, mixers and microphones for events and studios."
  *         businessType:
  *           type: string
  *           example: "Retail"
@@ -57,7 +65,11 @@ const router = express.Router();
  *               example: 4.3
  *             count:
  *               type: integer
- *               description: Total number of raters
+ *               description: >
+ *                 Number of product reviews across the shop's unhidden products
+ *                 (including out-of-stock ones). This is the "N reviews" figure;
+ *                 there is no separate seller rating. GET /api/store/{id}
+ *                 returns the same number.
  *               example: 128
  *         averagePrice:
  *           type: integer
@@ -115,8 +127,16 @@ const router = express.Router();
  *     summary: Top shops ranked by popularity
  *     description: >
  *       Returns shops sorted by a composite score of completed orders, star rating,
- *       and product count. Store rating is the weighted average of all its products'
- *       individual ratings (weighted by number of raters). No authentication needed.
+ *       and product count. Store rating is the weighted average of its unhidden
+ *       products' ratings (weighted by number of reviews). No authentication needed.
+ *
+ *       When a shop is tapped, the card already has what the shop popup needs
+ *       (name, image, address, description, rating). For "View Products" call
+ *       `GET /api/product/get-products?store={_id}` — it returns product cards
+ *       for the shop's unhidden, in-stock products (add `status=all` to include
+ *       out-of-stock ones). A product card opens `GET /api/product/{id}`.
+ *       `GET /api/store/{id}` has the full shop (opening hours, contact,
+ *       fulfilment options).
  *     tags: [Home]
  *     parameters:
  *       - in: query
@@ -146,7 +166,10 @@ const router = express.Router();
  *                         properties:
  *                           totalProducts:
  *                             type: integer
+ *                             description: Unhidden, in-stock products
  *                             example: 42
+ *                           state:
+ *                             type: string
  */
 router.get("/top-shops", getTopShops);
 

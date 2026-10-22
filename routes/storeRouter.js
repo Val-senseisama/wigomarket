@@ -2099,6 +2099,18 @@ router.get("/all", getAllStores);
  *                   type: object
  *                 rating:
  *                   type: object
+ *                   description: >
+ *                     Computed from the shop's product reviews — `count` is the
+ *                     number of reviews across its unhidden products, `average`
+ *                     their weighted star average. Same figures as the home
+ *                     shop cards.
+ *                   properties:
+ *                     average:
+ *                       type: number
+ *                       example: 4.3
+ *                     count:
+ *                       type: integer
+ *                       example: 1247
  *                 openingHours:
  *                   $ref: '#/components/schemas/StoreOpeningHours'
  *                 isOpenNow:

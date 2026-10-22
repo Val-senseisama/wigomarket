@@ -1,6 +1,7 @@
 const Store = require("../../models/storeModel");
 const asyncHandler = require("express-async-handler");
 const redisClient = require("../../config/redisClient");
+const { RATED_PRODUCT_MATCH, ratingFields } = require("../../utils/storeRating");
 
 const TTL = 300;                    // 5 minutes — location results go stale quickly
 const CITY_SPEED_KM_PER_MIN = 0.5; // 30 km/h
@@ -43,7 +44,7 @@ const getNearbyShops = asyncHandler(async (req, res) => {
   }
 
   // Bucketed key — users within ~1.1 km share a cache entry
-  const cacheKey = `home:nearby:${bucketCoord(userLat)}:${bucketCoord(userLng)}:${radiusKm}:${limitNum}`;
+  const cacheKey = `home:nearby:v2:${bucketCoord(userLat)}:${bucketCoord(userLng)}:${radiusKm}:${limitNum}`;
 
   // ── Cache read ────────────────────────────────────────────────────────────
   try {
@@ -80,9 +81,16 @@ const getNearbyShops = asyncHandler(async (req, res) => {
         foreignField: "store",
         as: "products",
         pipeline: [
-          { $match: { quantity: { $gt: 0 } } },
-          { $project: { listedPrice: 1, "rating.average": 1, "rating.count": 1 } },
+          // Unhidden products: all of them feed the rating, in-stock ones the
+          // product count and price (utils/storeRating).
+          { $match: RATED_PRODUCT_MATCH },
+          { $project: { quantity: 1, listedPrice: 1, "rating.average": 1, "rating.count": 1 } },
         ],
+      },
+    },
+    {
+      $addFields: {
+        _inStock: { $filter: { input: "$products", cond: { $gt: ["$$this.quantity", 0] } } },
       },
     },
 
@@ -91,32 +99,12 @@ const getNearbyShops = asyncHandler(async (req, res) => {
         distanceKm: { $round: [{ $divide: ["$distanceM", 1000] }, 1] },
         averagePrice: {
           $cond: {
-            if: { $gt: [{ $size: "$products" }, 0] },
-            then: { $round: [{ $avg: "$products.listedPrice" }, 0] },
+            if: { $gt: [{ $size: "$_inStock" }, 0] },
+            then: { $round: [{ $avg: "$_inStock.listedPrice" }, 0] },
             else: null,
           },
         },
-        "rating.count": { $sum: "$products.rating.count" },
-        "rating.average": {
-          $cond: {
-            if: { $gt: [{ $sum: "$products.rating.count" }, 0] },
-            then: {
-              $divide: [
-                {
-                  $sum: {
-                    $map: {
-                      input: "$products",
-                      as: "p",
-                      in: { $multiply: ["$$p.rating.average", "$$p.rating.count"] },
-                    },
-                  },
-                },
-                { $sum: "$products.rating.count" },
-              ],
-            },
-            else: 0,
-          },
-        },
+        ...ratingFields(),
       },
     },
 
@@ -125,6 +113,8 @@ const getNearbyShops = asyncHandler(async (req, res) => {
         _id: 1,
         name: 1,
         image: 1,
+        address: 1,
+        description: 1,
         businessType: 1,
         city: 1,
         distanceKm: 1,
