@@ -23,6 +23,9 @@ const Store = require("../models/storeModel");
 const Category = require("../models/categoryModel");
 const SearchHistory = require("../models/searchHistoryModel");
 const redisClient = require("../config/redisClient");
+const { serializeBuyerCard } = require("../utils/productSerializer");
+const { markViewerState } = require("../utils/viewerProductState");
+const { markFavouriteStores } = require("../utils/favouriteStores");
 const {
   PUBLIC_STORE_MATCH,
   visibleStoreProductFilter,
@@ -195,8 +198,10 @@ function buildAtlasProductPipeline(query, skip, limit, filters, shopFilter = {})
         title: 1,
         slug: 1,
         description: 1,
-        price: 1,
         listedPrice: 1,
+        listedCompareAtPrice: 1,
+        productType: 1,
+        "variants.listedPrice": 1,
         brand: 1,
         quantity: 1,
         images: 1,
@@ -338,7 +343,7 @@ const globalSearch = asyncHandler(async (req, res) => {
   // ── Cache read ─────────────────────────────────────────────────────────
   try {
     const cached = await redisClient.get(cacheKey);
-    if (cached) return res.json(JSON.parse(cached));
+    if (cached) return sendSearchResults(res, req.user?._id, JSON.parse(cached));
   } catch (_) {
     // Redis unavailable — continue to DB
   }
@@ -396,6 +401,7 @@ const globalSearch = asyncHandler(async (req, res) => {
 
     const [rawProducts, productCount, rawStores] = await Promise.all([
       Product.find(productFilter)
+        .select("title images listedPrice listedCompareAtPrice quantity productType variants.listedPrice rating store category description brand tags")
         .populate("category", "name")
         .populate("store", "name image address")
         .skip(skip)
@@ -481,8 +487,24 @@ const globalSearch = asyncHandler(async (req, res) => {
     await redisClient.lTrim(ANALYTICS_KEY, 0, ANALYTICS_CAP - 1);
   } catch (_) {}
 
-  res.json(response);
+  return sendSearchResults(res, req.user?._id, response);
 });
+
+/**
+ * Finish a search response for this viewer. Products become the buyer product
+ * card shared with get-products (plus `searchScore`), and get the viewer's
+ * heart and cart state — per viewer, so added to a copy, never to the cached
+ * payload. Matching shops get `isFavourite`.
+ */
+const sendSearchResults = async (res, userId, response) => {
+  const products = (response.data?.products || []).map((p) => ({
+    ...serializeBuyerCard({ ...p, store: p.storeDetails ?? p.store }),
+    searchScore: p.searchScore ?? null,
+  }));
+  const stores = (response.data?.stores || []).map((s) => ({ ...s }));
+  await Promise.all([markViewerState(userId, products), markFavouriteStores(userId, stores)]);
+  return res.json({ ...response, data: { ...response.data, products, stores } });
+};
 
 /**
  * GET /api/search/suggestions?q=iph

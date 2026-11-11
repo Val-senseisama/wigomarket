@@ -44,6 +44,20 @@ var productSchema = new mongoose.Schema(
     listedPrice: {
       type: Number,
     },
+    // Optional "was" price — the slashed figure on the buyer's card. The seller
+    // sets compareAtPrice (same basis as `price`); listedCompareAtPrice is
+    // derived with the same platform margin, so the two buyer-facing figures
+    // compare like for like. Null when there is no discount. Always greater
+    // than price when set (utils/productVariants.parseCompareAtPrice). On a
+    // variable product both are derived from the cheapest variant.
+    compareAtPrice: {
+      type: Number,
+      default: null,
+    },
+    listedCompareAtPrice: {
+      type: Number,
+      default: null,
+    },
     category: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Category",
@@ -160,6 +174,8 @@ var productSchema = new mongoose.Schema(
         sku:         { type: String, trim: true },
         price:       { type: Number, required: true },
         listedPrice: { type: Number },
+        compareAtPrice:       { type: Number, default: null },
+        listedCompareAtPrice: { type: Number, default: null },
         quantity:    { type: Number, required: true, min: 0 },
         sold:        { type: Number, default: 0, min: 0 },
         image:       { type: String, default: null },

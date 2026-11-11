@@ -51,6 +51,8 @@ describe("GET /api/product/:id buyer view", () => {
     expect(res.body.data.viewer).toEqual({
       isSignedIn: false,
       isInWishlist: false,
+      isInCart: false,
+      cartQuantity: 0,
       canReview: false,
       myReview: null,
     });

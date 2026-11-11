@@ -1,7 +1,10 @@
 const Store = require("../../models/storeModel");
 const asyncHandler = require("express-async-handler");
 const redisClient = require("../../config/redisClient");
+const { markFavouriteStores } = require("../../utils/favouriteStores");
 const { RATED_PRODUCT_MATCH, ratingFields } = require("../../utils/storeRating");
+const { PUBLIC_STORE_MATCH } = require("../../utils/storeVisibility");
+const { parsePage } = require("./pagination");
 
 const TTL = 600;                    // 10 minutes — popularity score changes with orders/ratings
 const CITY_SPEED_KM_PER_MIN = 0.5; // 30 km/h
@@ -20,25 +23,26 @@ const bucketCoord = (n) => Math.round(parseFloat(n) * 100) / 100;
  *
  * @query {number} [lat]         - User latitude  (optional, enables travel time)
  * @query {number} [lng]         - User longitude (optional, enables travel time)
- * @query {number} [limit=10]    - Number of results (max 20)
+ * @query {number} [page=1]      - Page, for the "view all" screen
+ * @query {number} [limit=10]    - Results per page (max 50)
  */
 const getPopularVendors = asyncHandler(async (req, res) => {
-  const { lat, lng, limit = 10 } = req.query;
-  const limitNum = Math.min(parseInt(limit), 20);
+  const { lat, lng } = req.query;
+  const { page, limit: limitNum, skip } = parsePage(req.query, { defaultLimit: 10, maxLimit: 50 });
   const hasLocation = lat && lng;
   const userLat = hasLocation ? parseFloat(lat) : null;
   const userLng = hasLocation ? parseFloat(lng) : null;
 
   // Bucketed key — users within ~1.1 km share a cache entry
   const cacheKey = hasLocation
-    ? `home:popular-vendors:v2:${bucketCoord(userLat)}:${bucketCoord(userLng)}:${limitNum}`
-    : `home:popular-vendors:v2:global:${limitNum}`;
+    ? `home:popular-vendors:v3:${bucketCoord(userLat)}:${bucketCoord(userLng)}:${page}:${limitNum}`
+    : `home:popular-vendors:v3:global:${page}:${limitNum}`;
 
   // ── Cache read ────────────────────────────────────────────────────────────
   try {
     const cached = await redisClient.get(cacheKey);
     if (cached) {
-      return res.status(200).json(JSON.parse(cached));
+      return sendWithFavourites(res, req.user?._id, JSON.parse(cached));
     }
   } catch {
     // Redis unavailable — continue to DB
@@ -54,8 +58,8 @@ const getPopularVendors = asyncHandler(async (req, res) => {
         distanceField: "distanceM",
         spherical: true,
         query: {
+          ...PUBLIC_STORE_MATCH,
           status: "active",
-          isVisible: { $ne: false },
           "location.coordinates": { $exists: true, $ne: [] },
         },
       },
@@ -63,7 +67,7 @@ const getPopularVendors = asyncHandler(async (req, res) => {
     // After $geoNear, also include active stores without a set location
     // (they won't have distanceM, which is fine — travelTimeMin will be omitted)
   } else {
-    pipeline.push({ $match: { status: "active", isVisible: { $ne: false } } });
+    pipeline.push({ $match: { ...PUBLIC_STORE_MATCH, status: "active" } });
   }
 
   pipeline.push(
@@ -133,8 +137,11 @@ const getPopularVendors = asyncHandler(async (req, res) => {
       },
     },
 
-    { $sort: { _score: -1 } },
-    { $limit: limitNum },
+    // _id breaks score ties so a shop never appears on two pages.
+    { $sort: { _score: -1, _id: 1 } },
+    { $skip: skip },
+    // One extra row says whether another page exists.
+    { $limit: limitNum + 1 },
   );
 
   // ── Project — conditionally include distance/travelTimeMin ──────────────────
@@ -171,7 +178,12 @@ const getPopularVendors = asyncHandler(async (req, res) => {
 
   const vendors = await Store.aggregate(pipeline);
 
-  const payload = { success: true, data: vendors };
+  const hasMore = vendors.length > limitNum;
+  const payload = {
+    success: true,
+    data: vendors.slice(0, limitNum),
+    pagination: { page, limit: limitNum, hasMore },
+  };
 
   // ── Cache write ───────────────────────────────────────────────────────────
   try {
@@ -180,7 +192,17 @@ const getPopularVendors = asyncHandler(async (req, res) => {
     // Non-fatal
   }
 
-  res.status(200).json(payload);
+  return sendWithFavourites(res, req.user?._id, payload);
 });
+
+/**
+ * `isFavourite` (the heart) is per viewer: added to a copy of the shared,
+ * cached payload on the way out.
+ */
+const sendWithFavourites = async (res, userId, payload) => {
+  const data = (payload.data || []).map((store) => ({ ...store }));
+  await markFavouriteStores(userId, data);
+  return res.status(200).json({ ...payload, data });
+};
 
 module.exports = getPopularVendors;

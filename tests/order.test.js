@@ -114,6 +114,31 @@ describe("Orders - POST /api/order/create", () => {
     expect(again.products[0]).toMatchObject({ price: 4000, listedPrice: 4500 });
   });
 
+  it("charges current prices and pays the product's own shop, whatever the stored cart says", async () => {
+    const { user, token } = await createTestUser();
+    const { store } = await createTestSeller();
+    const { store: otherStore } = await createTestSeller();
+    const product = await createTestProduct(store._id, { price: 4000, listedPrice: 4500 });
+    // A stale line: wrong shop, stale line price and total.
+    const Cart = require("../models/cartModel");
+    await Cart.create({
+      owner: user._id,
+      products: [{ product: product._id, count: 2, price: 1, store: otherStore._id }],
+      cartTotal: 1,
+    });
+
+    const res = await request(app)
+      .post("/api/order/create")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ paymentMethod: "card", deliveryMethod: "self_delivery", deliveryAddress: "123 Test Street, Lagos" });
+
+    expect(res.status).toBeLessThan(300);
+    const Order = require("../models/orderModel");
+    const order = await Order.findOne({ orderedBy: user._id }).lean();
+    expect(String(order.products[0].store)).toBe(String(store._id));
+    expect(order.paymentIntent.amount - (order.deliveryFee || 0)).toBe(9000);
+  });
+
   it("rejects order creation without auth", async () => {
     const res = await request(app).post("/api/order/create").send({
       paymentMethod: "cash",

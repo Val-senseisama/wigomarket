@@ -4,6 +4,7 @@ const validateMongodbId = require("../../utils/validateMongodbId");
 const { isStorePublic } = require("../../utils/storeVisibility");
 const { serializePublicStore } = require("../../utils/storeSettings");
 const { getStoreRating } = require("../../utils/storeRating");
+const FavouriteStore = require("../../models/favouriteStoreModel");
 
 /**
  * @function getAStore
@@ -21,8 +22,13 @@ const getAStore = asyncHandler(async (req, res) => {
   if (!isStorePublic(store)) {
     return res.status(404).json({ success: false, message: "Store not found" });
   }
-  store.rating = await getStoreRating(store._id);
-  res.json(serializePublicStore(store));
+  const [rating, favourite] = await Promise.all([
+    getStoreRating(store._id),
+    req.user ? FavouriteStore.exists({ user: req.user._id, store: store._id }) : null,
+  ]);
+  store.rating = rating;
+  // The heart on the shop page — same flag as on the vendor cards.
+  res.json({ ...serializePublicStore(store), isFavourite: Boolean(favourite) });
 });
 
 module.exports = getAStore;

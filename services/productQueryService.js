@@ -1,6 +1,6 @@
 const Product = require("../models/productModel");
 const Category = require("../models/categoryModel");
-const { serializeProductCards } = require("../utils/productSerializer");
+const { serializeProductCards, serializeBuyerCards } = require("../utils/productSerializer");
 const { visibleStoreProductFilter } = require("../utils/storeVisibility");
 
 /**
@@ -61,6 +61,8 @@ const priceFilter = (minPrice, maxPrice) => {
   return Object.keys(range).length ? { listedPrice: range } : {};
 };
 
+// The storefront's "Sort by" options use the same keys; `latest`, `name`,
+// `highest_price` and `lowest_price` are aliases matching the UI labels.
 const SORTS = {
   newest: { createdAt: -1 },
   oldest: { createdAt: 1 },
@@ -72,9 +74,17 @@ const SORTS = {
   title_desc: { title: -1 },
   stock_asc: { quantity: 1 },
   stock_desc: { quantity: -1 },
+  latest: { createdAt: -1 },
+  name: { title: 1 },
+  highest_price: { listedPrice: -1 },
+  lowest_price: { listedPrice: 1 },
 };
 
-const buildSort = (sort) => SORTS[String(sort || "").toLowerCase()] || SORTS.newest;
+// _id breaks ties so equal prices or titles never repeat across pages.
+const buildSort = (sort) => ({
+  ...(SORTS[String(sort || "").toLowerCase()] || SORTS.newest),
+  _id: 1,
+});
 
 /**
  * Category filter. Picking a top-level category in the filter dropdown includes
@@ -105,6 +115,11 @@ const merge = (...fragments) => {
  * @param {boolean} [opts.includeHidden=false] Whether hidden products are in
  *   scope. False for every public caller.
  * @param {boolean} [opts.includeVariants=false] Embed full variant lists.
+ * @param {boolean} [opts.forOwner=false] Include seller-side prices — only
+ *   when the caller owns every product in scope.
+ * @param {"full"|"buyer"} [opts.shape="full"] "buyer" returns the storefront
+ *   card (utils/productSerializer.serializeBuyerCard); "full" the seller's
+ *   product-list card.
  * @param {boolean} [opts.withCounts=false] Also return per-status totals for
  *   the filter chips. Skipped on unscoped public listings — four extra counts
  *   across the whole catalogue is not worth it.
@@ -116,6 +131,8 @@ const listProducts = async ({
   includeHidden = false,
   includeVariants = false,
   withCounts = false,
+  forOwner = false,
+  shape = "full",
 } = {}) => {
   const page = Math.max(1, parseInt(query.page, 10) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(query.limit, 10) || 30));
@@ -169,7 +186,10 @@ const listProducts = async ({
   ]);
 
   return {
-    products: serializeProductCards(products, { includeVariants }),
+    products:
+      shape === "buyer"
+        ? serializeBuyerCards(products, { includeVariants })
+        : serializeProductCards(products, { includeVariants, forOwner }),
     pagination: {
       total,
       page,
@@ -184,4 +204,4 @@ const listProducts = async ({
   };
 };
 
-module.exports = { listProducts, STATUS_VALUES, normalizeStatus };
+module.exports = { listProducts, categoryFilter, STATUS_VALUES, normalizeStatus };

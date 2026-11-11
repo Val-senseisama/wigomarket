@@ -6,6 +6,7 @@ const {
   getPopularVendors,
   getSuggestedProducts,
 } = require("../controllers/home");
+const { optionalAuthMiddleware } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
@@ -15,8 +16,8 @@ const router = express.Router();
 //  Store card:  { _id, name, image, businessType, city,
 //                 rating: { average, count }, averagePrice?, distanceKm?, travelTimeMin? }
 //
-//  Product card: { _id, title, listedPrice, image, rating: { average, count },
-//                  store: { _id, name } }
+//  Product card: the buyer card (components/schemas/ProductCard) — the same
+//                  object on every buyer product listing.
 //
 //  All ratings are out of 5.  `count` is the total number of raters.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -83,40 +84,124 @@ const router = express.Router();
  *           type: integer
  *           description: Estimated travel time in minutes at 30 km/h (only when lat/lng supplied)
  *           example: 5
+ *         isFavourite:
+ *           type: boolean
+ *           description: >
+ *             Whether the signed-in viewer saved this shop (the heart). Send the
+ *             bearer token; always false for guests. Toggle with
+ *             PUT/DELETE /api/favourites/stores/{storeId}; list with
+ *             GET /api/favourites/stores.
+ *           example: false
+ *     HomePagination:
+ *       type: object
+ *       description: >
+ *         The home section asks for page 1 with the default limit; its "view all"
+ *         screen keeps requesting the next page (e.g. limit=20) while `hasMore` is true.
+ *       properties:
+ *         page:
+ *           type: integer
+ *           example: 1
+ *         limit:
+ *           type: integer
+ *           example: 20
+ *         hasMore:
+ *           type: boolean
+ *           description: true when another page exists
+ *           example: true
  *     ProductCard:
  *       type: object
+ *       description: >
+ *         The buyer product card — one shape for every buyer product listing:
+ *         GET /api/product/get-products (storefront), home suggested-products,
+ *         category suggestions, search, saved products and cart lines. Tapping a
+ *         card opens GET /api/product/{id} for the full detail. Viewer fields
+ *         (isInWishlist, isInCart, cartQuantity) need the bearer token; they are
+ *         false/0 for guests.
+ *         **Pricing:** show `listedPrice` as the price. When
+ *         `listedCompareAtPrice` is not null, show it struck through as the
+ *         slashed "was" price, with `discountPercent` as the badge. There is no
+ *         `price` field here. `price` is the seller's own figure before the
+ *         platform margin and only reaches the shop owner (`mine=true`).
  *       properties:
- *         _id:
+ *         id:
  *           type: string
  *         title:
  *           type: string
- *           example: "Bluetooth Speaker"
- *         listedPrice:
- *           type: integer
- *           description: Buyer-facing price in NGN
- *           example: 15300
+ *           example: "Quartz Wrist Watch"
  *         image:
  *           type: string
  *           format: uri
- *           description: First product image URL (null if none uploaded)
+ *           nullable: true
+ *           description: The display image (images[0])
+ *         listedPrice:
+ *           type: number
+ *           description: >
+ *             The price the buyer pays (NGN), the main price on the card. Buyer
+ *             responses have no `price` field; `price` is the seller's own figure
+ *             and is returned to the shop owner only.
+ *           example: 10027.61
+ *         listedCompareAtPrice:
+ *           type: number
+ *           nullable: true
+ *           description: >
+ *             The slashed "was" price (NGN). Render it struck through next to
+ *             `listedPrice` only when it is not null; null means no discount.
+ *           example: 12053.69
+ *         discountPercent:
+ *           type: integer
+ *           nullable: true
+ *           description: Whole-percent saving for a "-17%" badge; null when there is no discount.
+ *           example: 17
+ *         currency:
+ *           type: string
+ *           example: "NGN"
+ *         priceRange:
+ *           type: object
+ *           nullable: true
+ *           description: Cheapest and dearest version price ("from ₦X") for a product with versions; null otherwise.
+ *           properties:
+ *             from: { type: number }
+ *             to: { type: number }
+ *         productType:
+ *           type: string
+ *           enum: [single, variable]
+ *         hasVariants:
+ *           type: boolean
+ *           description: >
+ *             True when the buyer must pick a version (size, colour). Open the
+ *             product page instead of adding to cart from the card.
+ *         inStock:
+ *           type: boolean
+ *         stock:
+ *           type: integer
+ *           description: Units available (total across versions)
  *         rating:
  *           type: object
  *           properties:
  *             average:
  *               type: number
- *               description: Average rating out of 5
+ *               description: Average rating out of 5, one decimal
  *               example: 4.2
  *             count:
  *               type: integer
- *               description: Total number of raters
+ *               description: Number of reviews
  *               example: 89
  *         store:
  *           type: object
  *           properties:
- *             _id:
+ *             id:
  *               type: string
  *             name:
  *               type: string
+ *         isInWishlist:
+ *           type: boolean
+ *           description: The viewer saved this product (fill the heart).
+ *         isInCart:
+ *           type: boolean
+ *           description: The viewer has this product in their cart.
+ *         cartQuantity:
+ *           type: integer
+ *           description: Units of this product in the viewer's cart (0 when not in cart).
  */
 
 // ─── 1. Top Shops ─────────────────────────────────────────────────────────────
@@ -171,7 +256,7 @@ const router = express.Router();
  *                           state:
  *                             type: string
  */
-router.get("/top-shops", getTopShops);
+router.get("/top-shops", optionalAuthMiddleware, getTopShops);
 
 // ─── 2. Categories ────────────────────────────────────────────────────────────
 /**
@@ -180,12 +265,26 @@ router.get("/top-shops", getTopShops);
  *   get:
  *     summary: Product categories with sample price
  *     description: >
- *       Returns categories that have at least one in-stock product, sorted by
- *       how many products they contain. `fromPrice` is the lowest listed price
- *       in that category — display as "From ₦X". `image` is the category's
- *       Cloudinary URL (set via the admin update-category endpoint).
+ *       Returns categories that have at least one in-stock product a buyer can
+ *       see (unhidden, from a public shop). `fromPrice` is the lowest listed
+ *       price in that category — display as "From ₦X". `image` is the
+ *       category's Cloudinary URL (set via the admin update-category endpoint).
+
+ *       Tapping a card: `GET /api/product/products/suggestions/category/{_id}`
+ *       returns that category's product cards (paginated).
  *     tags: [Home]
  *     parameters:
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *           enum: [popular, highest_price, lowest_price, latest, alphabetical]
+ *           default: popular
+ *         description: >
+ *           The "Sort By" menu. popular = most products first; highest_price /
+ *           lowest_price order by `fromPrice` (the price on the card); latest =
+ *           category with the most recently listed product first;
+ *           alphabetical = A–Z by name. Unknown values fall back to popular.
  *       - in: query
  *         name: limit
  *         schema:
@@ -204,6 +303,10 @@ router.get("/top-shops", getTopShops);
  *                 success:
  *                   type: boolean
  *                   example: true
+ *                 sort:
+ *                   type: string
+ *                   description: The sort actually applied
+ *                   example: popular
  *                 data:
  *                   type: array
  *                   items:
@@ -225,6 +328,10 @@ router.get("/top-shops", getTopShops);
  *                       productCount:
  *                         type: integer
  *                         example: 143
+ *                       latestProductAt:
+ *                         type: string
+ *                         format: date-time
+ *                         description: When the newest product in this category was listed
  */
 router.get("/categories", getHomeCategories);
 
@@ -264,12 +371,18 @@ router.get("/categories", getHomeCategories);
  *           maximum: 50
  *         description: Search radius in km
  *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number, for the "view all" screen
+ *       - in: query
  *         name: limit
  *         schema:
  *           type: integer
  *           default: 10
- *           maximum: 20
- *         description: Number of shops to return
+ *           maximum: 50
+ *         description: Shops per page
  *     responses:
  *       200:
  *         description: Nearby shops
@@ -284,6 +397,8 @@ router.get("/categories", getHomeCategories);
  *                   type: array
  *                   items:
  *                     $ref: '#/components/schemas/StoreCard'
+ *                 pagination:
+ *                   $ref: '#/components/schemas/HomePagination'
  *                 meta:
  *                   type: object
  *                   properties:
@@ -299,7 +414,7 @@ router.get("/categories", getHomeCategories);
  *       400:
  *         description: lat and lng are required or are not valid numbers
  */
-router.get("/nearby-shops", getNearbyShops);
+router.get("/nearby-shops", optionalAuthMiddleware, getNearbyShops);
 
 // ─── 4. Popular Vendors ───────────────────────────────────────────────────────
 /**
@@ -327,12 +442,18 @@ router.get("/nearby-shops", getNearbyShops);
  *         description: User longitude (optional — enables distance + travel time)
  *         example: 3.3792
  *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number, for the "view all" screen
+ *       - in: query
  *         name: limit
  *         schema:
  *           type: integer
  *           default: 10
- *           maximum: 20
- *         description: Number of vendors to return
+ *           maximum: 50
+ *         description: Vendors per page
  *     responses:
  *       200:
  *         description: Popular vendors list
@@ -347,8 +468,10 @@ router.get("/nearby-shops", getNearbyShops);
  *                   type: array
  *                   items:
  *                     $ref: '#/components/schemas/StoreCard'
+ *                 pagination:
+ *                   $ref: '#/components/schemas/HomePagination'
  */
-router.get("/popular-vendors", getPopularVendors);
+router.get("/popular-vendors", optionalAuthMiddleware, getPopularVendors);
 
 // ─── 5. Suggested Products ────────────────────────────────────────────────────
 /**
@@ -363,25 +486,35 @@ router.get("/popular-vendors", getPopularVendors);
  *       **Personalised (token present):** finds the categories from the user's last
  *       10 delivered orders, returns highly-rated in-stock products from those
  *       categories that the user has not already purchased. Falls back to trending
- *       if purchase history is empty or too narrow.
+ *       if fewer than 6 such products exist. The choice is made for the whole
+ *       feed, so every page of a "view all" list comes from the same one.
  *
  *       **Trending (no token / fallback):** ranked by `sold × 2 + views × 0.1 +
  *       rating × 5` over the last 30 days.
  *
  *       The `personalised` boolean in the response tells the client which path
  *       was taken so it can label the section accordingly ("For you" vs "Trending").
+ *
+ *       Send the bearer token whenever the user is signed in: it also sets
+ *       `isInWishlist` on each card, so the heart matches the product page.
  *     tags: [Home]
  *     security:
  *       - {}
  *       - bearerAuth: []
  *     parameters:
  *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number, for the "view all" screen
+ *       - in: query
  *         name: limit
  *         schema:
  *           type: integer
  *           default: 12
- *           maximum: 24
- *         description: Number of products to return
+ *           maximum: 50
+ *         description: Products per page
  *     responses:
  *       200:
  *         description: Product suggestions
@@ -400,7 +533,15 @@ router.get("/popular-vendors", getPopularVendors);
  *                   type: array
  *                   items:
  *                     $ref: '#/components/schemas/ProductCard'
+ *                 pagination:
+ *                   allOf:
+ *                     - $ref: '#/components/schemas/HomePagination'
+ *                     - type: object
+ *                       properties:
+ *                         total:
+ *                           type: integer
+ *                           description: Total products in this feed
  */
-router.get("/suggested-products", getSuggestedProducts);
+router.get("/suggested-products", optionalAuthMiddleware, getSuggestedProducts);
 
 module.exports = router;

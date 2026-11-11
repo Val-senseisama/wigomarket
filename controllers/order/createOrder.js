@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const uniqid = require("uniqid");
 const Order = require("../../models/orderModel");
 const Cart = require("../../models/cartModel");
+const money = require("../../utils/money");
 const Product = require("../../models/productModel");
 const Store = require("../../models/storeModel");
 const User = require("../../models/userModel");
@@ -131,7 +132,8 @@ const createOrder = asyncHandler(async (req, res) => {
       const cartStoreIds = [
         ...new Set(
           cartForPricing.products
-            .map((item) => String(item.store ?? item.product?.store ?? ""))
+            // The product's own shop — never the cart line's stored store.
+            .map((item) => String(item.product?.store ?? ""))
             .filter(Boolean),
         ),
       ];
@@ -286,7 +288,13 @@ const createOrder = asyncHandler(async (req, res) => {
         }
       }
 
-      totalAmount = userCart.cartTotal + deliveryFee;
+      // Price from the products as they are now, matching the per-line
+      // listedPrice snapshots below — never the stored cartTotal, which goes
+      // stale when a seller reprices after the item was added.
+      const itemsTotal = money.sum(userCart.products, (item) =>
+        money.multiply(item.product.listedPrice ?? item.product.price, item.count),
+      );
+      totalAmount = money.add(itemsTotal, deliveryFee);
 
       // Generate the human-friendly sequential order number (e.g. WM1201).
       // Uses the session so the counter rolls back if the transaction aborts.
@@ -299,7 +307,8 @@ const createOrder = asyncHandler(async (req, res) => {
         products: userCart.products.map((item) => ({
           product: item.product._id,
           count: item.count,
-          store: item.store ?? item.product.store,
+          // The product's shop decides who is paid for this line.
+          store: item.product.store,
           price: item.product.price,
           listedPrice: item.product.listedPrice ?? item.product.price,
         })),

@@ -20,6 +20,7 @@ const notificationRouter = require("./routes/notificationRouter");
 const bankRouter = require("./routes/bankRouter");
 const walletRouter = require("./routes/walletRouter");
 const wishlistRouter = require("./routes/wishlistRouter");
+const favouriteRouter = require("./routes/favouriteRouter");
 const sellerDiscoveryRouter = require("./routes/sellerDiscoveryRouter");
 const mapsRouter = require("./routes/mapsRouter");
 const billPaymentRouter = require("./routes/billPaymentRouter");
@@ -113,6 +114,7 @@ app.use("/api/banks", bankRouter);
 app.use("/api/flutterwave", bankRouter); // deprecated alias of /api/banks
 app.use("/api", walletRouter);
 app.use("/api/wishlist", wishlistRouter);
+app.use("/api/favourites", favouriteRouter);
 app.use("/api/sellers", sellerDiscoveryRouter);
 app.use("/api/maps", mapsRouter);
 app.use("/api/bills", billPaymentRouter);

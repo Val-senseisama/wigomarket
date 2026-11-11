@@ -1,6 +1,7 @@
 const express = require("express");
 const {
   getAStore,
+  getStoreCategories,
   getAllStores,
   createStore,
   getMyStore,
@@ -26,7 +27,7 @@ const {
   approveRefundRequest,
   rejectRefundRequest,
 } = require("../controllers/refund/seller");
-const { authMiddleware, isSeller } = require("../middleware/authMiddleware");
+const { authMiddleware, isSeller, optionalAuthMiddleware } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
@@ -2097,6 +2098,12 @@ router.get("/all", getAllStores);
  *                   type: string
  *                 location:
  *                   type: object
+ *                 isFavourite:
+ *                   type: boolean
+ *                   description: >
+ *                     Whether the signed-in viewer saved this shop (the heart).
+ *                     Send the bearer token; false for guests. Toggle with
+ *                     PUT/DELETE /api/favourites/stores/{storeId}.
  *                 rating:
  *                   type: object
  *                   description: >
@@ -2127,6 +2134,45 @@ router.get("/all", getAllStores);
  *       404:
  *         description: Store not found, hidden or suspended
  */
-router.get("/:id", getAStore);
+router.get("/:id", optionalAuthMiddleware, getAStore);
+
+/**
+ * @swagger
+ * /api/store/{id}/categories:
+ *   get:
+ *     summary: Categories a shop sells in (shop screen category filter)
+ *     description: >
+ *       The categories this shop has unhidden, in-stock products in, with counts,
+ *       sorted by name. Picking one, call
+ *       `GET /api/product/get-products?store={id}&category={categoryId}` to list
+ *       that shop's products in it (same product cards as everywhere else).
+ *     tags: [Stores]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: The shop's categories
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id: { type: string }
+ *                       name: { type: string, example: "Gadgets" }
+ *                       image: { type: string, nullable: true, format: uri }
+ *                       productCount: { type: integer, example: 12 }
+ *       404:
+ *         description: Store not found, hidden or suspended
+ */
+router.get("/:id/categories", getStoreCategories);
 
 module.exports = router;

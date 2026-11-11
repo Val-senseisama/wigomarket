@@ -18,6 +18,7 @@ const {
   logoutUser,
   addToCart2,
   emptyCart,
+  removeFromCart,
   verifyOtp,
   forgotPasswordToken,
   getUserCart,
@@ -940,62 +941,68 @@ router.post("/refresh", handleRefreshToken);
 router.get("/logout", logoutUser);
 /**
  * @swagger
+ * components:
+ *   schemas:
+ *     CartItem:
+ *       type: object
+ *       properties:
+ *         productId: { type: string }
+ *         product:
+ *           $ref: '#/components/schemas/ProductCard'
+ *         count: { type: integer, example: 2 }
+ *         unitPrice: { type: number, description: "The product's current listedPrice (NGN)", example: 5100 }
+ *         lineTotal: { type: number, description: "unitPrice × count", example: 10200 }
+ *         store:
+ *           type: object
+ *           properties:
+ *             id: { type: string }
+ *             name: { type: string }
+ *         available:
+ *           type: boolean
+ *           description: False when the line cannot be checked out — see `issue`. Unavailable lines are not in cartTotal.
+ *         issue:
+ *           type: string
+ *           nullable: true
+ *           enum: [out_of_stock, insufficient_stock, unavailable]
+ *         issueMessage: { type: string, nullable: true, example: "Out of stock" }
+ *         maxQuantity: { type: integer, description: Units in stock — cap the quantity stepper here, example: 8 }
+ *     CartView:
+ *       type: object
+ *       properties:
+ *         items:
+ *           type: array
+ *           items: { $ref: '#/components/schemas/CartItem' }
+ *         itemCount: { type: integer, description: Units across available lines (the cart badge), example: 3 }
+ *         lineCount: { type: integer, description: "Number of lines, available or not", example: 2 }
+ *         cartTotal: { type: number, description: Total of available lines at current prices (NGN), example: 15300 }
+ *         currency: { type: string, example: "NGN" }
+ *         hasUnavailableItems:
+ *           type: boolean
+ *           description: True when some line must be removed or reduced before checkout.
+ *     CartResponse:
+ *       type: object
+ *       properties:
+ *         success: { type: boolean, example: true }
+ *         message: { type: string }
+ *         data: { $ref: '#/components/schemas/CartView' }
  * /api/user/get-cart:
  *   get:
- *     summary: Get user's cart with populated product details
- *     description: Get user's cart with populated product details
+ *     summary: Get the cart
+ *     description: >
+ *       The signed-in user's cart, priced at current listed prices. Lines that
+ *       can no longer be bought stay in the cart with `available: false` and an
+ *       `issue`, and are left out of `cartTotal`. Every product card elsewhere
+ *       carries `isInCart` / `cartQuantity` from this same cart.
  *     tags:
  *       - Cart
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       200:
- *         description: User's cart with populated product details
+ *         description: The cart (empty items array when there is none)
  *         content:
  *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 _id:
- *                   type: string
- *                 products:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       product:
- *                         type: object
- *                         properties:
- *                           _id:
- *                             type: string
- *                           title:
- *                             type: string
- *                           listedPrice:
- *                             type: number
- *                           store:
- *                             type: object
- *                             properties:
- *                               _id:
- *                                 type: string
- *                               bankDetails:
- *                                 type: object
- *                               address:
- *                                 type: object
- *                               owner:
- *                                 type: object
- *                                 properties:
- *                                   mobile:
- *                                     type: string
- *                                   email:
- *                                     type: string
- *                       count:
- *                         type: number
- *                       price:
- *                         type: number
- *                 cartTotal:
- *                   type: number
- *       400:
- *         description: Cart retrieval fails
+ *             schema: { $ref: '#/components/schemas/CartResponse' }
  */
 router.get("/get-cart", authMiddleware, getUserCart);
 /**
@@ -1697,8 +1704,8 @@ router.put("/unblock-user/:id", authMiddleware, isAdmin, unblockUser);
  * @swagger
  * /api/user/update-cart:
  *   put:
- *     summary: Update product quantity in user's cart
- *     description: Update product quantity in user's cart
+ *     summary: Set a cart line's quantity
+ *     description: Sets the quantity of a product already in the cart. `newCount` 0 removes it.
  *     tags:
  *       - Cart
  *     security:
@@ -1709,83 +1716,35 @@ router.put("/unblock-user/:id", authMiddleware, isAdmin, unblockUser);
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - count
- *               - newCount
- *               - _id
- *               - product
+ *             required: [productId, newCount]
  *             properties:
- *               count:
- *                 type: number
- *                 description: Current product count
- *               newCount:
- *                 type: number
- *                 description: New product count to set
- *               _id:
- *                 type: string
- *                 description: Product ID in cart
- *               product:
- *                 type: object
- *                 properties:
- *                   listedPrice:
- *                     type: number
- *                     description: Product price
+ *               productId: { type: string }
+ *               newCount: { type: integer, minimum: 0, example: 3 }
  *     responses:
  *       200:
- *         description: Updated cart information
+ *         description: The cart after the change
  *         content:
  *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 _id:
- *                   type: string
- *                 products:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       product:
- *                         type: object
- *                         properties:
- *                           _id:
- *                             type: string
- *                           title:
- *                             type: string
- *                           listedPrice:
- *                             type: number
- *                           store:
- *                             type: object
- *                             properties:
- *                               _id:
- *                                 type: string
- *                               bankDetails:
- *                                 type: object
- *                               address:
- *                                 type: object
- *                               owner:
- *                                 type: object
- *                                 properties:
- *                                   mobile:
- *                                     type: string
- *                                   email:
- *                                     type: string
- *                       count:
- *                         type: number
- *                       price:
- *                         type: number
- *                 cartTotal:
- *                   type: number
+ *             schema: { $ref: '#/components/schemas/CartResponse' }
  *       400:
- *         description: Cart operation fails
+ *         description: Invalid input, or more than is in stock
+ *       404:
+ *         description: Product not in cart
  */
 router.put("/update-cart", authMiddleware, updateCart);
 /**
  * @swagger
  * /api/user/add-cart:
  *   post:
- *     summary: Add product to user's cart
- *     description: Add product to user's cart
+ *     summary: Add to cart
+ *     description: >
+ *       Adds `count` units of a product (on top of any already in the cart).
+ *       The shop is taken from the product. Returns the whole cart; the
+ *       product's card state is `isInCart: true` with the new `cartQuantity`.
+ *       The legacy body `{ product: { _id, count } }` is still accepted.
+ *
+ *       Products with `hasVariants: true` need a size/colour choice, which the
+ *       cart does not record yet — send buyers to the product page for those.
  *     tags:
  *       - Cart
  *     security:
@@ -1796,122 +1755,63 @@ router.put("/update-cart", authMiddleware, updateCart);
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - product
+ *             required: [productId]
  *             properties:
- *               product:
- *                 type: object
- *                 description: Product details to add to cart
+ *               productId: { type: string }
+ *               count: { type: integer, minimum: 1, default: 1 }
  *     responses:
  *       200:
- *         description: Updated cart information
+ *         description: The cart after the change
  *         content:
  *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 _id:
- *                   type: string
- *                 products:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       product:
- *                         type: object
- *                         properties:
- *                           _id:
- *                             type: string
- *                           title:
- *                             type: string
- *                           listedPrice:
- *                             type: number
- *                           store:
- *                             type: object
- *                             properties:
- *                               _id:
- *                                 type: string
- *                               bankDetails:
- *                                 type: object
- *                               address:
- *                                 type: object
- *                               owner:
- *                                 type: object
- *                                 properties:
- *                                   mobile:
- *                                     type: string
- *                                   email:
- *                                     type: string
- *                       count:
- *                         type: number
- *                       price:
- *                         type: number
- *                 cartTotal:
- *                   type: number
+ *             schema: { $ref: '#/components/schemas/CartResponse' }
  *       400:
- *         description: Cart operation fails
+ *         description: Invalid input, out of stock, or more than is in stock
+ *       404:
+ *         description: Product not found or not on the storefront
  */
 router.post("/add-cart", authMiddleware, addToCart2);
 /**
  * @swagger
  * /api/user/empty-cart:
  *   post:
- *     summary: Empty user's cart by removing it from the database
- *     description: Empty user's cart by removing it from the database
+ *     summary: Empty the cart
  *     tags:
  *       - Cart
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       200:
- *         description: Removed cart information
+ *         description: The cart after the change
  *         content:
  *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 _id:
- *                   type: string
- *                 products:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       product:
- *                         type: object
- *                         properties:
- *                           _id:
- *                             type: string
- *                           title:
- *                             type: string
- *                           listedPrice:
- *                             type: number
- *                           store:
- *                             type: object
- *                             properties:
- *                               _id:
- *                                 type: string
- *                               bankDetails:
- *                                 type: object
- *                               address:
- *                                 type: object
- *                               owner:
- *                                 type: object
- *                                 properties:
- *                                   mobile:
- *                                     type: string
- *                                   email:
- *                                     type: string
- *                       count:
- *                         type: number
- *                       price:
- *                         type: number
- *                 cartTotal:
- *                   type: number
- *       400:
- *         description: Cart removal fails
+ *             schema: { $ref: '#/components/schemas/CartResponse' }
  */
 router.post("/empty-cart", authMiddleware, emptyCart);
+
+/**
+ * @swagger
+ * /api/user/cart/{productId}:
+ *   delete:
+ *     summary: Remove a product from the cart
+ *     description: Idempotent — removing a product that is not in the cart returns 200.
+ *     tags:
+ *       - Cart
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: productId
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: The cart after the change
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/CartResponse' }
+ */
+router.delete("/cart/:productId", authMiddleware, removeFromCart);
 /**
  * @swagger
  * /api/user/verify:

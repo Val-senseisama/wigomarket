@@ -1,7 +1,10 @@
 const Store = require("../../models/storeModel");
 const asyncHandler = require("express-async-handler");
 const redisClient = require("../../config/redisClient");
+const { markFavouriteStores } = require("../../utils/favouriteStores");
 const { RATED_PRODUCT_MATCH, ratingFields } = require("../../utils/storeRating");
+const { PUBLIC_STORE_MATCH } = require("../../utils/storeVisibility");
+const { parsePage } = require("./pagination");
 
 const TTL = 300;                    // 5 minutes — location results go stale quickly
 const CITY_SPEED_KM_PER_MIN = 0.5; // 30 km/h
@@ -22,10 +25,11 @@ const bucketCoord = (n) => Math.round(parseFloat(n) * 100) / 100;
  * @query {number} lat           - User latitude  (required)
  * @query {number} lng           - User longitude (required)
  * @query {number} [radius=10]   - Search radius in km (max 50)
- * @query {number} [limit=10]    - Number of results (max 20)
+ * @query {number} [page=1]      - Page, for the "view all" screen
+ * @query {number} [limit=10]    - Results per page (max 50)
  */
 const getNearbyShops = asyncHandler(async (req, res) => {
-  const { lat, lng, radius = 10, limit = 10 } = req.query;
+  const { lat, lng, radius = 10 } = req.query;
 
   if (!lat || !lng) {
     return res.status(400).json({
@@ -36,21 +40,21 @@ const getNearbyShops = asyncHandler(async (req, res) => {
 
   const userLat  = parseFloat(lat);
   const userLng  = parseFloat(lng);
-  const radiusKm = Math.min(parseFloat(radius), 50);
-  const limitNum = Math.min(parseInt(limit), 20);
+  const radiusKm = Math.min(parseFloat(radius) || 10, 50);
+  const { page, limit: limitNum, skip } = parsePage(req.query, { defaultLimit: 10, maxLimit: 50 });
 
   if (isNaN(userLat) || isNaN(userLng)) {
     return res.status(400).json({ success: false, message: "lat and lng must be valid numbers" });
   }
 
   // Bucketed key — users within ~1.1 km share a cache entry
-  const cacheKey = `home:nearby:v2:${bucketCoord(userLat)}:${bucketCoord(userLng)}:${radiusKm}:${limitNum}`;
+  const cacheKey = `home:nearby:v3:${bucketCoord(userLat)}:${bucketCoord(userLng)}:${radiusKm}:${page}:${limitNum}`;
 
   // ── Cache read ────────────────────────────────────────────────────────────
   try {
     const cached = await redisClient.get(cacheKey);
     if (cached) {
-      return res.status(200).json(JSON.parse(cached));
+      return sendWithFavourites(res, req.user?._id, JSON.parse(cached));
     }
   } catch {
     // Redis unavailable — continue to DB
@@ -65,14 +69,17 @@ const getNearbyShops = asyncHandler(async (req, res) => {
         maxDistance: radiusKm * 1000,
         spherical: true,
         query: {
+          ...PUBLIC_STORE_MATCH,
           status: "active",
-          isVisible: { $ne: false },
           "location.coordinates": { $exists: true, $ne: [] },
         },
       },
     },
 
-    { $limit: limitNum },
+    // $geoNear already sorts nearest first. One extra row tells us whether
+    // there is another page without a second geo query to count.
+    { $skip: skip },
+    { $limit: limitNum + 1 },
 
     {
       $lookup: {
@@ -130,9 +137,11 @@ const getNearbyShops = asyncHandler(async (req, res) => {
     },
   ]);
 
+  const hasMore = shops.length > limitNum;
   const payload = {
     success: true,
-    data: shops,
+    data: shops.slice(0, limitNum),
+    pagination: { page, limit: limitNum, hasMore },
     meta: { userLocation: { lat: userLat, lng: userLng }, radiusKm },
   };
 
@@ -143,7 +152,17 @@ const getNearbyShops = asyncHandler(async (req, res) => {
     // Non-fatal
   }
 
-  res.status(200).json(payload);
+  return sendWithFavourites(res, req.user?._id, payload);
 });
+
+/**
+ * `isFavourite` (the heart) is per viewer: added to a copy of the shared,
+ * cached payload on the way out.
+ */
+const sendWithFavourites = async (res, userId, payload) => {
+  const data = (payload.data || []).map((store) => ({ ...store }));
+  await markFavouriteStores(userId, data);
+  return res.status(200).json({ ...payload, data });
+};
 
 module.exports = getNearbyShops;

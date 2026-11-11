@@ -130,7 +130,7 @@ describe("getAllProducts — card payload", () => {
     expect(card.variants[0].inStock).toBe(true);
   });
 
-  it("reports variantCount 0 for a single product and omits variants publicly", async () => {
+  it("public cards are the buyer card: no seller fields, no variants", async () => {
     const { store } = await makeSeller();
     const category = await makeCategory();
     await makeProduct(store, category);
@@ -138,7 +138,9 @@ describe("getAllProducts — card payload", () => {
     const card = (await listPublic()).body.data[0];
 
     expect(card.productType).toBe("single");
-    expect(card.variantCount).toBe(0);
+    expect(card.hasVariants).toBe(false);
+    expect(card.variantCount).toBeUndefined();
+    expect(card.price).toBeUndefined();
     expect(card.priceRange).toBeNull();
     expect(card.variants).toBeUndefined();
   });

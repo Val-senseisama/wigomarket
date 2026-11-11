@@ -22,6 +22,7 @@ const {
 const {
   validateVariants,
   listedPriceFor,
+  parseCompareAtPrice,
   combinationKey,
 } = require("../utils/productVariants");
 
@@ -33,6 +34,7 @@ const { listProducts } = require("../services/productQueryService");
 const { withVisibleStores, isStorePublic } = require("../utils/storeVisibility");
 const { serializeProductDetail } = require("../utils/productSerializer");
 const Wishlist = require("../models/wishlistModel");
+const { markViewerState, viewerProductState, stateFor } = require("../utils/viewerProductState");
 const { getStoreRating } = require("../utils/storeRating");
 const { bumpCategoryCacheVersion } = require("../utils/categoryCache");
 
@@ -470,7 +472,7 @@ const createProduct = asyncHandler(async (req, res) => {
   const {
     title, price, quantity, category, brand, description, sku,
     images, video, specifications, sizes, colors,
-    optionTypes, variants,
+    optionTypes, variants, compareAtPrice,
   } = req.body;
 
   const productType = req.body.productType || "single";
@@ -578,10 +580,10 @@ const createProduct = asyncHandler(async (req, res) => {
   let validatedVariants = [];
 
   if (productType === "variable") {
-    if (price !== undefined || quantity !== undefined) {
+    if (price !== undefined || quantity !== undefined || compareAtPrice !== undefined) {
       return invalid(
         res,
-        "A multiple-version product is priced and stocked per variant — omit the top-level price and quantity. They are derived from the variants.",
+        "A multiple-version product is priced and stocked per variant — omit the top-level price, compareAtPrice and quantity. They are derived from the variants.",
       );
     }
 
@@ -604,9 +606,13 @@ const createProduct = asyncHandler(async (req, res) => {
     }
 
     const sellersPrice = money.round(price);
+    const compareAt = parseCompareAtPrice(compareAtPrice, sellersPrice);
+    if (compareAt.error) return invalid(res, compareAt.error);
     pricing = {
       price: sellersPrice,
       listedPrice: listedPriceFor(sellersPrice),
+      compareAtPrice: compareAt.compareAtPrice ?? null,
+      listedCompareAtPrice: compareAt.listedCompareAtPrice ?? null,
       quantity,
     };
   }
@@ -629,6 +635,8 @@ const createProduct = asyncHandler(async (req, res) => {
       ...(validatedSku && { sku: validatedSku }),
       price:          pricing.price,
       listedPrice:    pricing.listedPrice,
+      compareAtPrice:       pricing.compareAtPrice,
+      listedCompareAtPrice: pricing.listedCompareAtPrice,
       quantity:       pricing.quantity,
       category,
       ...(brand !== undefined && { brand }),
@@ -660,6 +668,7 @@ const createProduct = asyncHandler(async (req, res) => {
           sku: validatedSku,
           price: pricing.price,
           listedPrice: pricing.listedPrice,
+          compareAtPrice: pricing.compareAtPrice,
           quantity: pricing.quantity,
           category,
           brand,
@@ -745,7 +754,7 @@ const updateProduct = asyncHandler(async (req, res) => {
   // `status` is the hide/unhide toggle on the product card; "out of stock" is
   // never set here, it follows from quantity.
   const ALLOWED = [
-    "title", "price", "quantity", "category", "brand", "description",
+    "title", "price", "compareAtPrice", "quantity", "category", "brand", "description",
     "images", "video", "sku", "tags", "isFeatured", "status", "availableFor",
     "specifications", "sizes", "colors", "optionTypes", "variants",
   ];
@@ -760,10 +769,14 @@ const updateProduct = asyncHandler(async (req, res) => {
 
   // ── Pricing & stock ──────────────────────────────────────────────────────
   if (isVariable) {
-    if (updateData.price !== undefined || updateData.quantity !== undefined) {
+    if (
+      updateData.price !== undefined ||
+      updateData.quantity !== undefined ||
+      updateData.compareAtPrice !== undefined
+    ) {
       return invalid(
         res,
-        "This is a multiple-version product: price and quantity are derived from its variants — send `variants` instead",
+        "This is a multiple-version product: price, compareAtPrice and quantity are derived from its variants — send `variants` instead",
       );
     }
   } else {
@@ -783,6 +796,19 @@ const updateProduct = asyncHandler(async (req, res) => {
     if (updateData.price !== undefined) {
       updateData.price = money.round(updateData.price);
       updateData.listedPrice = listedPriceFor(updateData.price);
+    }
+    // The "was" price is checked against the price the product will have after
+    // this edit, so raising the price above a stored compare-at is caught too.
+    if (updateData.price !== undefined || updateData.compareAtPrice !== undefined) {
+      const finalPrice = updateData.price ?? existing.price;
+      const sent = updateData.compareAtPrice;
+      const compareAt = parseCompareAtPrice(
+        sent !== undefined ? sent : existing.compareAtPrice ?? null,
+        finalPrice,
+      );
+      if (compareAt.error) return invalid(res, compareAt.error);
+      updateData.compareAtPrice = compareAt.compareAtPrice ?? null;
+      updateData.listedCompareAtPrice = compareAt.listedCompareAtPrice ?? null;
     }
   }
 
@@ -815,6 +841,8 @@ const updateProduct = asyncHandler(async (req, res) => {
     // and the order pipeline all key off them.
     updateData.price = result.derived.price;
     updateData.listedPrice = result.derived.listedPrice;
+    updateData.compareAtPrice = result.derived.compareAtPrice;
+    updateData.listedCompareAtPrice = result.derived.listedCompareAtPrice;
     updateData.quantity = result.derived.quantity;
   }
 
@@ -911,7 +939,7 @@ const updateProduct = asyncHandler(async (req, res) => {
       success: true,
       // The same shape the product page reads, so a client can render the
       // result of an edit without re-fetching.
-      data: serializeProductDetail(updatedProduct),
+      data: serializeProductDetail(updatedProduct, { forOwner: true }),
     });
   } catch (error) {
     // Last line of defence against two concurrent edits claiming one SKU.
@@ -1143,7 +1171,7 @@ const getAProduct = asyncHandler(async (req, res) => {
   const buyer = req.user && !isOwner ? req.user._id : null;
   const storeId = product.store?._id;
 
-  const [lastOrder, breakdownRaw, storeRating, inWishlist, deliveredOrder, myReview] = await Promise.all([
+  const [lastOrder, breakdownRaw, storeRating, viewerStateRaw, deliveredOrder, myReview] = await Promise.all([
     // "Last Ordered" on the inventory panel. Only the owner sees it — it is
     // sales data, not something the storefront should expose.
     isOwner
@@ -1161,7 +1189,7 @@ const getAProduct = asyncHandler(async (req, res) => {
     ]),
 
     storeId ? getStoreRating(storeId) : Promise.resolve(null),
-    buyer ? Wishlist.exists({ user: buyer, "products.product": productObjId }) : null,
+    buyer ? viewerProductState(buyer) : null,
     buyer
       ? Order.exists({ orderedBy: buyer, orderStatus: "delivered", "products.product": productObjId })
       : null,
@@ -1182,6 +1210,7 @@ const getAProduct = asyncHandler(async (req, res) => {
   }
 
   const data = serializeProductDetail(product, {
+    forOwner: isOwner,
     lastOrderedAt: lastOrder?.createdAt || null,
     reviews: {
       average: product.rating?.average ?? 0,
@@ -1191,9 +1220,15 @@ const getAProduct = asyncHandler(async (req, res) => {
   });
 
   if (data.store && storeRating) data.store.rating = storeRating;
+  // Same flag, same place as on every product card, so the detail screen's
+  // save button and the card heart read one field.
+  const viewerState = viewerStateRaw
+    ? stateFor(viewerStateRaw, productObjId)
+    : { isInWishlist: false, isInCart: false, cartQuantity: 0 };
+  Object.assign(data, viewerState);
   data.viewer = {
     isSignedIn: Boolean(req.user),
-    isInWishlist: Boolean(inWishlist),
+    ...viewerState,
     canReview: Boolean(deliveredOrder),
     myReview: myReview
       ? { rating: myReview.rating, comment: myReview.comment || "", updatedAt: myReview.updatedAt }
@@ -1276,16 +1311,14 @@ const getAllProducts = asyncHandler(async (req, res) => {
     withCounts,
     // The seller's grid needs per-variant stock; the storefront does not.
     includeVariants: mine || String(req.query.includeVariants || "") === "true",
+    // Seller-side prices only on the seller's own shelf.
+    forOwner: mine,
+    // Buyers get the storefront card; the seller's grid the full one.
+    shape: mine ? "full" : "buyer",
   });
 
-  // The card's heart. One wishlist read for the whole page; false for guests.
-  if (!mine) {
-    const wishlist = req.user
-      ? await Wishlist.findOne({ user: req.user._id }, "products.product").lean()
-      : null;
-    const saved = new Set((wishlist?.products || []).map((item) => String(item.product)));
-    for (const p of products) p.isInWishlist = saved.has(String(p.id));
-  }
+  // The card's heart and cart button. False/0 for guests.
+  if (!mine) await markViewerState(req.user?._id, products);
 
   res.json({
     success: true,
@@ -1655,68 +1688,44 @@ const getTrendingProducts = asyncHandler(async (req, res) => {
 
 /**
  * @function getCategorySuggestions
- * @description Get product suggestions for a specific category
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
+ * @description The products screen behind a category card: buyer product
+ *   cards for the category and its subcategories, paginated.
  * @param {string} req.params.categoryId - Category ID
- * @param {number} [req.query.limit=10] - Number of suggestions
- * @returns {Object} - Category-based product suggestions
+ * @param {string} [req.query.sort=top_rated] - Any get-products sort
+ * @param {number} [req.query.page=1]
+ * @param {number} [req.query.limit=20] - Max 100
+ * @returns {Object} - { category, data: cards, pagination }
  */
 const getCategorySuggestions = asyncHandler(async (req, res) => {
   const { categoryId } = req.params;
-  const { limit = 10 } = req.query;
-
   validateMongodbId(categoryId);
 
-  const cacheKey = `category_suggestions:${categoryId}:${limit}`;
-
-  try {
-    // Try to get from cache first
-    const cachedData = await redisClient.get(cacheKey);
-    if (cachedData) {
-      return res.json(JSON.parse(cachedData));
-    }
-
-    // Get category details
-    const category = await Category.findById(categoryId);
-    if (!category) {
-      return res.status(404).json({
-        success: false,
-        message: "Category not found",
-      });
-    }
-
-    // Get products in this category
-    const suggestions = await Product.find(
-      await withVisibleStores({
-        category: categoryId,
-        quantity: { $gt: 0 },
-        status: { $ne: "hidden" },
-      }),
-    )
-      .populate("category", "name")
-      .populate("store", "name address")
-      .sort({ "rating.average": -1, sold: -1, views: -1 })
-      .limit(parseInt(limit));
-
-    const response = {
-      success: true,
-      data: {
-        category: {
-          _id: category._id,
-          name: category.name,
-        },
-        suggestions,
-      },
-    };
-
-    // Cache for 1 hour
-    await redisClient.setex(cacheKey, 3600, JSON.stringify(response));
-
-    res.json(response);
-  } catch (error) {
-    throw new Error(error);
+  const category = await Category.findById(categoryId, "name image parent").lean();
+  if (!category) {
+    return res.status(404).json({ success: false, message: "Category not found" });
   }
+
+  // Same query and card as GET /api/product/get-products?category=…: in-stock
+  // products of public shops, subcategories included, best rated first unless
+  // the client picks another sort.
+  const { products, pagination } = await listProducts({
+    query: {
+      ...req.query,
+      category: categoryId,
+      sort: req.query.sort || "top_rated",
+      limit: req.query.limit || 20,
+      status: "active",
+    },
+    shape: "buyer",
+  });
+  await markViewerState(req.user?._id, products);
+
+  res.json({
+    success: true,
+    category: { id: category._id, name: category.name, image: category.image || null },
+    data: products,
+    pagination,
+  });
 });
 
 /**

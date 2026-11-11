@@ -46,8 +46,11 @@ const router = express.Router();
  *       properties:
  *         id: { type: string }
  *         sku: { type: string, nullable: true, example: "WM1201-M-BRN" }
- *         price: { type: number, description: Seller's price (NGN), example: 4900 }
+ *         price: { type: number, description: "Seller's price (NGN). Owner only: absent on buyer responses", example: 4900 }
+ *         compareAtPrice: { type: number, nullable: true, description: "Seller's compare-at price (NGN). Owner only", example: 6000 }
  *         listedPrice: { type: number, nullable: true, description: Buyer-facing price (NGN), example: 5000 }
+ *         listedCompareAtPrice: { type: number, nullable: true, description: "Slashed was-price for this variant (NGN); null = no discount", example: 6120 }
+ *         discountPercent: { type: integer, nullable: true, example: 18 }
  *         stock: { type: integer, example: 12 }
  *         sold: { type: integer, example: 9 }
  *         image: { type: string, nullable: true, format: uri }
@@ -77,11 +80,36 @@ const router = express.Router();
  *           example: "WM1201"
  *         description: { type: string, nullable: true }
  *         brand: { type: string, nullable: true }
- *         price: { type: number, description: What the seller set (NGN), example: 4900 }
+ *         price:
+ *           type: number
+ *           description: |
+ *             What the seller set (NGN), before the platform margin. **Owner
+ *             only** — returned with `mine=true` and on the owner's product
+ *             detail; absent on every buyer response. Never render it to buyers.
+ *           example: 4900
+ *         compareAtPrice:
+ *           type: number
+ *           nullable: true
+ *           description: The seller's compare-at ("was") price, same basis as `price`. Owner only.
+ *           example: 6000
  *         listedPrice:
  *           type: number
- *           description: What the buyer pays (NGN) — the figure to show on the card.
+ *           description: What the buyer pays (NGN) — the main price to show on the card.
  *           example: 5000
+ *         listedCompareAtPrice:
+ *           type: number
+ *           nullable: true
+ *           description: |
+ *             The slashed "was" price on the card (NGN). Render it struck
+ *             through next to `listedPrice` only when it is not null — null
+ *             means the product is not discounted. For a variable product it
+ *             belongs to the cheapest variant, i.e. it pairs with the "from" price.
+ *           example: 6120
+ *         discountPercent:
+ *           type: integer
+ *           nullable: true
+ *           description: Whole-percent saving for a "-18%" badge; null when not discounted.
+ *           example: 18
  *         currency: { type: string, example: "NGN" }
  *         image: { type: string, nullable: true, format: uri, description: 'images[0] — the display image' }
  *         images: { type: array, items: { type: string, format: uri } }
@@ -178,9 +206,11 @@ const router = express.Router();
  *         isInWishlist:
  *           type: boolean
  *           description: |
- *             GET /api/product/get-products storefront listings only (not
- *             `mine=true`): whether the signed-in caller saved this product.
- *             Always false for guests.
+ *             Whether the signed-in caller saved this product (fill the heart).
+ *             Present on storefront listings (not `mine=true`), product detail,
+ *             home suggested-products, search and GET /api/wishlist. Always
+ *             false for guests. Save with POST /api/wishlist/add, unsave with
+ *             DELETE /api/wishlist/remove/{productId}.
  *         createdAt: { type: string, format: date-time }
  *         updatedAt: { type: string, format: date-time }
  *     ProductDetail:
@@ -239,8 +269,11 @@ const router = express.Router();
  *               type: object
  *               description: The Pricing & Inventory panel, including the variants table.
  *               properties:
- *                 price: { type: number, example: 7500 }
+ *                 price: { type: number, description: Owner only, example: 7500 }
+ *                 compareAtPrice: { type: number, nullable: true, description: Owner only }
  *                 listedPrice: { type: number, example: 7650 }
+ *                 listedCompareAtPrice: { type: number, nullable: true, example: 9180 }
+ *                 discountPercent: { type: integer, nullable: true, example: 17 }
  *                 currency: { type: string, example: "NGN" }
  *                 priceRange:
  *                   type: object
@@ -295,6 +328,9 @@ const router = express.Router();
  *                   properties:
  *                     average: { type: number, example: 4.3 }
  *                     count: { type: integer, example: 1247 }
+ *             isInWishlist:
+ *               type: boolean
+ *               description: Same as viewer.isInWishlist, at the same place as on product cards.
  *             viewer:
  *               type: object
  *               description: |
@@ -574,6 +610,15 @@ router.put("/update-category", authMiddleware, isAdmin, updateProductCategory)
  *                   Selling price in NGN (integer, > 0). Required for `single`;
  *                   must be omitted for `variable`.
  *                 example: 15000
+ *               compareAtPrice:
+ *                 type: number
+ *                 nullable: true
+ *                 description: >
+ *                   Optional original ("was") price in NGN, shown slashed on the
+ *                   buyer's card. Must be higher than `price` (400 otherwise).
+ *                   `single` only — for `variable` set it per variant. Buyers see
+ *                   it as `listedCompareAtPrice` (with the same 2% margin).
+ *                 example: 18000
  *               quantity:
  *                 type: integer
  *                 description: >
@@ -639,6 +684,7 @@ router.put("/update-category", authMiddleware, isAdmin, updateProductCategory)
  *                   properties:
  *                     sku:      { type: string, example: "SNK-41-BLK" }
  *                     price:    { type: number, example: 45000 }
+ *                     compareAtPrice: { type: number, nullable: true, description: "Optional was-price; must be higher than this variant's price", example: 50000 }
  *                     quantity: { type: integer, example: 5 }
  *                     image:    { type: string, format: uri, nullable: true }
  *                     options:
@@ -1001,6 +1047,14 @@ router.get("/spec-schemas", getSpecSchemas);
  *             properties:
  *               title: { type: string }
  *               price: { type: number, description: "Seller's price (NGN); listedPrice is recomputed from it" }
+ *               compareAtPrice:
+ *                 type: number
+ *                 nullable: true
+ *                 description: >
+ *                   Single products only. Original ("was") price; must be higher than
+ *                   the price the product will have after this edit, so raising
+ *                   `price` above a stored compare-at is a 400 unless you also send a
+ *                   new compareAtPrice or null to remove the discount.
  *               quantity: { type: integer, minimum: 0 }
  *               category: { type: string, description: Category id }
  *               brand: { type: string }
@@ -1036,6 +1090,7 @@ router.get("/spec-schemas", getSpecSchemas);
  *                   properties:
  *                     sku: { type: string }
  *                     price: { type: number, description: "Seller's price (NGN)" }
+ *                     compareAtPrice: { type: number, nullable: true, description: "Optional was-price. Variants are replaced wholesale, so omit it to remove the discount" }
  *                     quantity: { type: integer, minimum: 0 }
  *                     image: { type: string, format: uri, nullable: true }
  *                     options:
@@ -1235,7 +1290,14 @@ router.post("/bulk", authMiddleware, isSeller, bulkUpdateProducts);
  *
  *       **Public / storefront** — no token, or any token without `mine=true`.
  *       Returns active, in-stock products only; hidden products are never
- *       included, whoever asks.
+ *       included, whoever asks. Items are the **buyer product card**
+ *       (`ProductCard`) — the same object as home suggested-products, category
+ *       suggestions, search and saved products. Send the buyer's token to get
+ *       `isInWishlist` / `isInCart` / `cartQuantity`.
+ *
+ *       A shop's products screen: `?store={id}`; its category filter adds
+ *       `&category={categoryId}` (the dropdown's entries come from
+ *       `GET /api/store/{id}/categories`). Category includes its subcategories.
  *
  *       **Seller's own product list** — send the seller's Bearer token with
  *       `mine=true`. Scopes to the caller's store and includes hidden and
@@ -1243,8 +1305,9 @@ router.post("/bulk", authMiddleware, isSeller, bulkUpdateProducts);
  *       `counts` for the Status filter chips. This is what the "Product List"
  *       grid uses.
  *
- *       Every item is the same card shape: image, title, SKU, price, variant
- *       count, stock, units sold, status pill and rating.
+ *       With `mine=true` items are the seller's full `ProductListItem`: image,
+ *       title, SKU, seller price, variant count, stock, units sold, status
+ *       pill and rating.
  *
  *       **Status is partly derived.** `status` on the document is only
  *       `active` or `hidden`; the pill to render is `displayStatus`, which is
@@ -1300,7 +1363,7 @@ router.post("/bulk", authMiddleware, isSeller, bulkUpdateProducts);
  *         name: sort
  *         schema:
  *           type: string
- *           enum: [newest, oldest, price_asc, price_desc, best_selling, top_rated, title_asc, title_desc, stock_asc, stock_desc]
+ *           enum: [newest, oldest, price_asc, price_desc, best_selling, top_rated, title_asc, title_desc, stock_asc, stock_desc, latest, name, highest_price, lowest_price]
  *           default: newest
  *       - in: query
  *         name: includeVariants
@@ -1323,7 +1386,11 @@ router.post("/bulk", authMiddleware, isSeller, bulkUpdateProducts);
  *                 success: { type: boolean }
  *                 data:
  *                   type: array
- *                   items: { $ref: '#/components/schemas/ProductListItem' }
+ *                   description: ProductCard for the storefront; ProductListItem with mine=true.
+ *                   items:
+ *                     oneOf:
+ *                       - $ref: '#/components/schemas/ProductCard'
+ *                       - $ref: '#/components/schemas/ProductListItem'
  *                 pagination: { $ref: '#/components/schemas/Pagination' }
  *                 counts:
  *                   type: object
@@ -1340,103 +1407,163 @@ router.post("/bulk", authMiddleware, isSeller, bulkUpdateProducts);
  *                 totalProducts: { type: integer, deprecated: true }
  *                 totalPages: { type: integer, deprecated: true }
  *                 currentPage: { type: integer, deprecated: true }
- *             example:
- *               success: true
- *               data:
- *                 - id: "66f1a2b3c4d5e6f708192a3b"
- *                   title: "Men's Casual Short Sleeve Shirt"
- *                   slug: "mens-casual-short-sleeve-shirt"
- *                   sku: "WM1201"
- *                   description: "Breathable cotton shirt, regular fit."
- *                   brand: "Wigo Basics"
- *                   price: 4900
- *                   listedPrice: 5000
- *                   currency: "NGN"
- *                   image: "https://res.cloudinary.com/demo/image/upload/v1/products/shirt-1.jpg"
- *                   images:
- *                     - "https://res.cloudinary.com/demo/image/upload/v1/products/shirt-1.jpg"
- *                     - "https://res.cloudinary.com/demo/image/upload/v1/products/shirt-2.jpg"
- *                   video: null
- *                   stock: 50
- *                   sold: 50
- *                   views: 412
- *                   productType: "variable"
- *                   variantCount: 6
- *                   optionTypes:
- *                     - name: "Size"
- *                       values: ["S", "M", "L"]
- *                     - name: "Color"
- *                       values: ["Brown", "Black"]
- *                   priceRange: { from: 5000, to: 6500 }
- *                   variants:
- *                     - id: "66f1a2b3c4d5e6f708192a4c"
- *                       sku: "WM1201-M-BRN"
+ *             examples:
+ *               storefront:
+ *                 summary: Buyer storefront (ProductCard) — no mine=true
+ *                 description: |
+ *                   What a buyer app gets. Show `listedPrice` as the price. When
+ *                   `listedCompareAtPrice` is not null, show it struck through
+ *                   (the slashed "was" price) with the `discountPercent` badge.
+ *                   There is no `price` field on buyer responses.
+ *                 value:
+ *                   success: true
+ *                   data:
+ *                     - id: "66f1a2b3c4d5e6f708192a3d"
+ *                       title: "Quartz Wrist Watch"
+ *                       image: "https://res.cloudinary.com/demo/image/upload/v1/products/watch.jpg"
+ *                       listedPrice: 10000
+ *                       listedCompareAtPrice: 12000
+ *                       discountPercent: 17
+ *                       currency: "NGN"
+ *                       priceRange: null
+ *                       productType: "single"
+ *                       hasVariants: false
+ *                       inStock: true
+ *                       stock: 14
+ *                       rating: { average: 4.2, count: 89 }
+ *                       store: { id: "66c1a2b3c4d5e6f708192a10", name: "Wigo Threads" }
+ *                       isInWishlist: true
+ *                       isInCart: true
+ *                       cartQuantity: 2
+ *                     - id: "66f1a2b3c4d5e6f708192a3b"
+ *                       title: "Men's Casual Short Sleeve Shirt"
+ *                       image: "https://res.cloudinary.com/demo/image/upload/v1/products/shirt-1.jpg"
+ *                       listedPrice: 5000
+ *                       listedCompareAtPrice: null
+ *                       discountPercent: null
+ *                       currency: "NGN"
+ *                       priceRange: { from: 5000, to: 6500 }
+ *                       productType: "variable"
+ *                       hasVariants: true
+ *                       inStock: true
+ *                       stock: 50
+ *                       rating: { average: 4.5, count: 131 }
+ *                       store: { id: "66c1a2b3c4d5e6f708192a10", name: "Wigo Threads" }
+ *                       isInWishlist: false
+ *                       isInCart: false
+ *                       cartQuantity: 0
+ *                   pagination: { total: 2, page: 1, limit: 30, pages: 1, hasMore: false }
+ *                   counts: null
+ *                   appliedStatus: "active"
+ *               sellerOwnList:
+ *                 summary: Seller's own product list (ProductListItem) — mine=true
+ *                 description: |
+ *                   Shop-owner view only. `price` / `compareAtPrice` are the seller's
+ *                   own figures before the platform margin; `listedPrice` is what
+ *                   buyers are charged. Never shown to buyers.
+ *                 value:
+ *                   success: true
+ *                   data:
+ *                     - id: "66f1a2b3c4d5e6f708192a3b"
+ *                       title: "Men's Casual Short Sleeve Shirt"
+ *                       slug: "mens-casual-short-sleeve-shirt"
+ *                       sku: "WM1201"
+ *                       description: "Breathable cotton shirt, regular fit."
+ *                       brand: "Wigo Basics"
  *                       price: 4900
  *                       listedPrice: 5000
- *                       stock: 12
- *                       sold: 9
- *                       image: "https://res.cloudinary.com/demo/image/upload/v1/products/shirt-brown.jpg"
- *                       options:
- *                         - { name: "Size", value: "M" }
- *                         - { name: "Color", value: "Brown" }
- *                       inStock: true
- *                   status: "active"
- *                   displayStatus: "active"
- *                   statusLabel: "Active"
- *                   rating: { average: 4.5, count: 131 }
- *                   category: { id: "66e0…", name: "Men's Fashion", parent: "66d9…" }
- *                   store: { id: "66c1…", name: "Wigo Threads", image: null, address: "12 Allen Ave, Ikeja", mobile: "2348012345678" }
- *                   specifications: []
- *                   sizes: []
- *                   colors: []
- *                   tags: []
- *                   isFeatured: false
- *                   createdAt: "2026-08-01T09:14:22.113Z"
- *                   updatedAt: "2026-08-20T16:02:41.900Z"
- *                 - id: "66f1a2b3c4d5e6f708192a3c"
- *                   title: "Sprinkle Birthday cake"
- *                   slug: "sprinkle-birthday-cake"
- *                   sku: "WM1202"
- *                   description: "Vanilla sponge with buttercream and sprinkles."
- *                   brand: null
- *                   price: 4900
- *                   listedPrice: 5000
- *                   currency: "NGN"
- *                   image: "https://res.cloudinary.com/demo/image/upload/v1/products/cake.jpg"
- *                   images: ["https://res.cloudinary.com/demo/image/upload/v1/products/cake.jpg"]
- *                   video: null
- *                   stock: 0
- *                   sold: 50
- *                   views: 88
- *                   productType: "single"
- *                   variantCount: 0
- *                   optionTypes: []
- *                   priceRange: null
- *                   variants: []
- *                   status: "active"
- *                   displayStatus: "out_of_stock"
- *                   statusLabel: "Out of stock"
- *                   rating: { average: 4.5, count: 131 }
- *                   category: { id: "66e1…", name: "Cakes", parent: "66d8…" }
- *                   store: { id: "66c1…", name: "Wigo Threads", image: null, address: "12 Allen Ave, Ikeja", mobile: "2348012345678" }
- *                   specifications: []
- *                   sizes: []
- *                   colors: []
- *                   tags: []
- *                   isFeatured: false
- *                   createdAt: "2026-07-28T11:02:10.000Z"
- *                   updatedAt: "2026-08-19T08:31:00.000Z"
- *               pagination:
- *                 total: 20
- *                 page: 1
- *                 limit: 30
- *                 pages: 1
- *                 hasMore: false
- *               counts: { all: 20, active: 16, out_of_stock: 3, hidden: 1 }
- *               appliedStatus: "all"
- *               totalProducts: 20
- *               totalPages: 1
- *               currentPage: 1
+ *                       compareAtPrice: null
+ *                       listedCompareAtPrice: null
+ *                       discountPercent: null
+ *                       currency: "NGN"
+ *                       image: "https://res.cloudinary.com/demo/image/upload/v1/products/shirt-1.jpg"
+ *                       images:
+ *                         - "https://res.cloudinary.com/demo/image/upload/v1/products/shirt-1.jpg"
+ *                         - "https://res.cloudinary.com/demo/image/upload/v1/products/shirt-2.jpg"
+ *                       video: null
+ *                       stock: 50
+ *                       sold: 50
+ *                       views: 412
+ *                       productType: "variable"
+ *                       variantCount: 6
+ *                       optionTypes:
+ *                         - name: "Size"
+ *                           values: ["S", "M", "L"]
+ *                         - name: "Color"
+ *                           values: ["Brown", "Black"]
+ *                       priceRange: { from: 5000, to: 6500 }
+ *                       variants:
+ *                         - id: "66f1a2b3c4d5e6f708192a4c"
+ *                           sku: "WM1201-M-BRN"
+ *                           price: 4900
+ *                           listedPrice: 5000
+ *                           stock: 12
+ *                           sold: 9
+ *                           image: "https://res.cloudinary.com/demo/image/upload/v1/products/shirt-brown.jpg"
+ *                           options:
+ *                             - { name: "Size", value: "M" }
+ *                             - { name: "Color", value: "Brown" }
+ *                           inStock: true
+ *                       status: "active"
+ *                       displayStatus: "active"
+ *                       statusLabel: "Active"
+ *                       rating: { average: 4.5, count: 131 }
+ *                       category: { id: "66e0…", name: "Men's Fashion", parent: "66d9…" }
+ *                       store: { id: "66c1…", name: "Wigo Threads", image: null, address: "12 Allen Ave, Ikeja", mobile: "2348012345678" }
+ *                       specifications: []
+ *                       sizes: []
+ *                       colors: []
+ *                       tags: []
+ *                       isFeatured: false
+ *                       createdAt: "2026-08-01T09:14:22.113Z"
+ *                       updatedAt: "2026-08-20T16:02:41.900Z"
+ *                     - id: "66f1a2b3c4d5e6f708192a3c"
+ *                       title: "Sprinkle Birthday cake"
+ *                       slug: "sprinkle-birthday-cake"
+ *                       sku: "WM1202"
+ *                       description: "Vanilla sponge with buttercream and sprinkles."
+ *                       brand: null
+ *                       price: 4900
+ *                       listedPrice: 5000
+ *                       compareAtPrice: null
+ *                       listedCompareAtPrice: null
+ *                       discountPercent: null
+ *                       currency: "NGN"
+ *                       image: "https://res.cloudinary.com/demo/image/upload/v1/products/cake.jpg"
+ *                       images: ["https://res.cloudinary.com/demo/image/upload/v1/products/cake.jpg"]
+ *                       video: null
+ *                       stock: 0
+ *                       sold: 50
+ *                       views: 88
+ *                       productType: "single"
+ *                       variantCount: 0
+ *                       optionTypes: []
+ *                       priceRange: null
+ *                       variants: []
+ *                       status: "active"
+ *                       displayStatus: "out_of_stock"
+ *                       statusLabel: "Out of stock"
+ *                       rating: { average: 4.5, count: 131 }
+ *                       category: { id: "66e1…", name: "Cakes", parent: "66d8…" }
+ *                       store: { id: "66c1…", name: "Wigo Threads", image: null, address: "12 Allen Ave, Ikeja", mobile: "2348012345678" }
+ *                       specifications: []
+ *                       sizes: []
+ *                       colors: []
+ *                       tags: []
+ *                       isFeatured: false
+ *                       createdAt: "2026-07-28T11:02:10.000Z"
+ *                       updatedAt: "2026-08-19T08:31:00.000Z"
+ *                   pagination:
+ *                     total: 20
+ *                     page: 1
+ *                     limit: 30
+ *                     pages: 1
+ *                     hasMore: false
+ *                   counts: { all: 20, active: 16, out_of_stock: 3, hidden: 1 }
+ *                   appliedStatus: "all"
+ *                   totalProducts: 20
+ *                   totalPages: 1
+ *                   currentPage: 1
  *       401:
  *         description: "`mine=true` without a valid token"
  *       404:
@@ -1825,26 +1952,39 @@ router.get("/products/suggestions/trending", getTrendingProducts);
  * @swagger
  * /api/product/products/suggestions/category/{categoryId}:
  *   get:
- *     summary: Get category-based product suggestions
- *     description: Get product suggestions for a specific category
+ *     summary: A category's products (tapping a category card)
+ *     description: >
+ *       Buyer product cards (`ProductCard`, the same object as get-products) for
+ *       the category and its subcategories — in-stock products of public shops,
+ *       best rated first by default — paginated. Send the bearer token for
+ *       `isInWishlist` / `isInCart` / `cartQuantity`. Equivalent to
+ *       `GET /api/product/get-products?category={categoryId}&sort=top_rated`.
  *     tags:
  *       - Products
+ *     security:
+ *       - {}
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: categoryId
  *         required: true
  *         schema:
  *           type: string
- *         description: Category ID
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *           enum: [top_rated, latest, name, highest_price, lowest_price, best_selling, newest, price_asc, price_desc]
+ *           default: top_rated
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
  *       - in: query
  *         name: limit
- *         schema:
- *           type: integer
- *           default: 10
- *         description: Number of suggestions
+ *         schema: { type: integer, default: 20, maximum: 100 }
  *     responses:
  *       200:
- *         description: Category-based product suggestions
+ *         description: The category and one page of its products
  *         content:
  *           application/json:
  *             schema:
@@ -1852,24 +1992,21 @@ router.get("/products/suggestions/trending", getTrendingProducts);
  *               properties:
  *                 success:
  *                   type: boolean
- *                 data:
+ *                   example: true
+ *                 category:
  *                   type: object
  *                   properties:
- *                     category:
- *                       type: object
- *                       properties:
- *                         _id:
- *                           type: string
- *                         name:
- *                           type: string
- *                     suggestions:
- *                       type: array
- *                       items:
- *                         type: object
+ *                     id: { type: string }
+ *                     name: { type: string, example: "Gadgets" }
+ *                     image: { type: string, nullable: true, format: uri }
+ *                 data:
+ *                   type: array
+ *                   items: { $ref: '#/components/schemas/ProductCard' }
+ *                 pagination: { $ref: '#/components/schemas/Pagination' }
  *       404:
  *         description: Category not found
  */
-router.get("/products/suggestions/category/:categoryId", getCategorySuggestions);
+router.get("/products/suggestions/category/:categoryId", optionalAuthMiddleware, getCategorySuggestions);
 
 /**
  * @swagger
@@ -2126,8 +2263,13 @@ router.post("/:id/reviews", authMiddleware, createProductReview);
  *       - **store.rating** — the shop's rating, as on the home shop cards
  *
  *       **Price to show the buyer is `listedPrice`** — it is what the cart
- *       charges. `price` is the seller's own price before the platform fee.
- *       There is no discount / "was" price field.
+ *       charges. The slashed "was" price is `listedCompareAtPrice` (null = no
+ *       discount) with `discountPercent` for a badge. `price` / `compareAtPrice`
+ *       are the seller's own figures before the platform fee and are returned to
+ *       the owner only.
+ *
+ *       `data.isInWishlist` (same as `data.viewer.isInWishlist`) drives the save
+ *       button; it is the same flag the product cards carry.
  *
  *       Sending the seller's Bearer token adds `isOwner: true` and
  *       `inventory.lastOrderedAt` (sales data, not exposed to buyers), and

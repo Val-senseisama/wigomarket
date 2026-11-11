@@ -8,7 +8,7 @@ const {
   updateWishlistSettings,
   getPublicWishlist
 } = require("../controllers/wishlistController");
-const { authMiddleware } = require("../middleware/authMiddleware");
+const { authMiddleware, optionalAuthMiddleware } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
@@ -16,8 +16,14 @@ const router = express.Router();
  * @swagger
  * /api/wishlist/add:
  *   post:
- *     summary: Add product to wishlist
- *     description: Add a product to the authenticated user's wishlist
+ *     summary: Save a product (the heart)
+ *     description: >
+ *       Saves a product for the signed-in user — the heart on a product card and
+ *       the save button on the product page. Idempotent: saving a product that is
+ *       already saved returns 200 with the same body, so double taps are harmless.
+ *       Every product response (`get-products`, product detail, home
+ *       suggested-products, search, GET /api/wishlist) reports the result as
+ *       `isInWishlist`.
  *     tags:
  *       - Wishlist
  *     security:
@@ -33,91 +39,59 @@ const router = express.Router();
  *             properties:
  *               productId:
  *                 type: string
- *                 description: ID of the product to add to wishlist
  *                 example: "64f8a1b2c3d4e5f6a7b8c9d0"
  *               notes:
  *                 type: string
  *                 maxLength: 500
- *                 description: Optional notes for the product
- *                 example: "Want this for birthday gift"
+ *                 description: Optional note
  *     responses:
  *       200:
- *         description: Product added to wishlist successfully
+ *         description: Product is saved
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: "Product added to wishlist successfully"
- *                 data:
- *                   type: object
- *                   properties:
- *                     wishlist:
- *                       type: object
- *                       properties:
- *                         _id:
- *                           type: string
- *                         name:
- *                           type: string
- *                         totalItems:
- *                           type: number
- *                         products:
- *                           type: array
- *                           items:
- *                             type: object
- *                             properties:
- *                               product:
- *                                 type: object
- *                                 properties:
- *                                   _id:
- *                                     type: string
- *                                   title:
- *                                     type: string
- *                                   price:
- *                                     type: number
- *                                   images:
- *                                     type: array
- *                                     items:
- *                                       type: string
- *                                   store:
- *                                     type: object
- *                                     properties:
- *                                       _id:
- *                                         type: string
- *                                       name:
- *                                         type: string
- *                               addedAt:
- *                                 type: string
- *                                 format: date-time
- *                               notes:
- *                                 type: string
- *                     addedProduct:
- *                       type: object
- *                       properties:
- *                         _id:
- *                           type: string
- *                         title:
- *                           type: string
- *                         price:
- *                           type: number
+ *               $ref: '#/components/schemas/WishlistToggleResult'
+ *             example:
+ *               success: true
+ *               message: "Product saved"
+ *               data: { productId: "64f8a1b2c3d4e5f6a7b8c9d0", isInWishlist: true, totalItems: 3 }
  *       400:
- *         description: Invalid product ID or product already in wishlist
+ *         description: Invalid product ID
  *       404:
- *         description: Product not found
+ *         description: Product not found (or hidden from the storefront)
  */
 router.post("/add", authMiddleware, addToWishlist);
 
 /**
  * @swagger
+ * components:
+ *   schemas:
+ *     WishlistToggleResult:
+ *       type: object
+ *       properties:
+ *         success: { type: boolean, example: true }
+ *         message: { type: string }
+ *         data:
+ *           type: object
+ *           properties:
+ *             productId: { type: string }
+ *             isInWishlist:
+ *               type: boolean
+ *               description: The product's saved state after the call — set the heart from this.
+ *             totalItems: { type: integer, description: Number of products now saved }
+ *     SavedProductCard:
+ *       allOf:
+ *         - $ref: '#/components/schemas/ProductCard'
+ *         - type: object
+ *           properties:
+ *             isInWishlist: { type: boolean, example: true }
+ *             savedAt: { type: string, format: date-time, nullable: true }
  * /api/wishlist/remove/{productId}:
  *   delete:
- *     summary: Remove product from wishlist
- *     description: Remove a product from the authenticated user's wishlist
+ *     summary: Unsave a product
+ *     description: >
+ *       Removes a product from the signed-in user's saved products. Idempotent:
+ *       removing a product that is not saved returns 200.
  *     tags:
  *       - Wishlist
  *     security:
@@ -128,38 +102,20 @@ router.post("/add", authMiddleware, addToWishlist);
  *         required: true
  *         schema:
  *           type: string
- *         description: ID of the product to remove from wishlist
  *         example: "64f8a1b2c3d4e5f6a7b8c9d0"
  *     responses:
  *       200:
- *         description: Product removed from wishlist successfully
+ *         description: Product is not saved
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: "Product removed from wishlist successfully"
- *                 data:
- *                   type: object
- *                   properties:
- *                     wishlist:
- *                       type: object
- *                       properties:
- *                         _id:
- *                           type: string
- *                         totalItems:
- *                           type: number
- *                         products:
- *                           type: array
+ *               $ref: '#/components/schemas/WishlistToggleResult'
+ *             example:
+ *               success: true
+ *               message: "Product removed from saved items"
+ *               data: { productId: "64f8a1b2c3d4e5f6a7b8c9d0", isInWishlist: false, totalItems: 2 }
  *       400:
- *         description: Invalid product ID or product not in wishlist
- *       404:
- *         description: Wishlist not found
+ *         description: Invalid product ID
  */
 router.delete("/remove/:productId", authMiddleware, removeFromWishlist);
 
@@ -167,8 +123,13 @@ router.delete("/remove/:productId", authMiddleware, removeFromWishlist);
  * @swagger
  * /api/wishlist:
  *   get:
- *     summary: Get user's wishlist
- *     description: Get the authenticated user's wishlist with pagination
+ *     summary: Saved products screen
+ *     description: >
+ *       The signed-in user's saved products as product cards (the same shape as
+ *       GET /api/product/get-products), most recently saved first. Products that
+ *       are hidden, or whose shop is hidden or suspended, are left out but stay
+ *       saved and reappear if restored. Out-of-stock products are included —
+ *       check `displayStatus`.
  *     tags:
  *       - Wishlist
  *     security:
@@ -176,104 +137,30 @@ router.delete("/remove/:productId", authMiddleware, removeFromWishlist);
  *     parameters:
  *       - in: query
  *         name: page
- *         schema:
- *           type: integer
- *           minimum: 1
- *           default: 1
- *         description: Page number for pagination
+ *         schema: { type: integer, default: 1 }
  *       - in: query
  *         name: limit
- *         schema:
- *           type: integer
- *           minimum: 1
- *           maximum: 50
- *           default: 20
- *         description: Number of items per page
+ *         schema: { type: integer, default: 20, maximum: 50 }
  *     responses:
  *       200:
- *         description: Wishlist retrieved successfully
+ *         description: One page of saved products
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: "Wishlist retrieved successfully"
+ *                 success: { type: boolean, example: true }
  *                 data:
+ *                   type: array
+ *                   items: { $ref: '#/components/schemas/SavedProductCard' }
+ *                 pagination: { $ref: '#/components/schemas/Pagination' }
+ *                 wishlist:
  *                   type: object
  *                   properties:
- *                     wishlist:
- *                       type: object
- *                       properties:
- *                         _id:
- *                           type: string
- *                         name:
- *                           type: string
- *                         isPublic:
- *                           type: boolean
- *                         totalItems:
- *                           type: number
- *                         lastUpdated:
- *                           type: string
- *                           format: date-time
- *                         products:
- *                           type: array
- *                           items:
- *                             type: object
- *                             properties:
- *                               product:
- *                                 type: object
- *                                 properties:
- *                                   _id:
- *                                     type: string
- *                                   title:
- *                                     type: string
- *                                   price:
- *                                     type: number
- *                                   listedPrice:
- *                                     type: number
- *                                   images:
- *                                     type: array
- *                                     items:
- *                                       type: string
- *                                   category:
- *                                     type: object
- *                                     properties:
- *                                       _id:
- *                                         type: string
- *                                       name:
- *                                         type: string
- *                                   store:
- *                                     type: object
- *                                     properties:
- *                                       _id:
- *                                         type: string
- *                                       name:
- *                                         type: string
- *                                       address:
- *                                         type: object
- *                               addedAt:
- *                                 type: string
- *                                 format: date-time
- *                               notes:
- *                                 type: string
- *                         pagination:
- *                           type: object
- *                           properties:
- *                             currentPage:
- *                               type: number
- *                             totalPages:
- *                               type: number
- *                             totalItems:
- *                               type: number
- *                             hasNext:
- *                               type: boolean
- *                             hasPrev:
- *                               type: boolean
+ *                     _id: { type: string, nullable: true }
+ *                     name: { type: string, example: "My Wishlist" }
+ *                     isPublic: { type: boolean }
+ *                     totalItems: { type: integer, description: Saved products currently visible }
  */
 router.get("/", authMiddleware, getWishlist);
 
@@ -437,58 +324,37 @@ router.put("/settings", authMiddleware, updateWishlistSettings);
  *           type: string
  *         description: ID of the user whose public wishlist to view
  *         example: "64f8a1b2c3d4e5f6a7b8c9d0"
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20, maximum: 50 }
  *     responses:
  *       200:
- *         description: Public wishlist retrieved successfully
+ *         description: Public wishlist retrieved successfully, as product cards
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: "Public wishlist retrieved successfully"
+ *                 success: { type: boolean, example: true }
+ *                 message: { type: string }
  *                 data:
+ *                   type: array
+ *                   items: { $ref: '#/components/schemas/ProductCard' }
+ *                 pagination: { $ref: '#/components/schemas/Pagination' }
+ *                 wishlist:
  *                   type: object
  *                   properties:
- *                     wishlist:
- *                       type: object
- *                       properties:
- *                         _id:
- *                           type: string
- *                         name:
- *                           type: string
- *                         totalItems:
- *                           type: number
- *                         products:
- *                           type: array
- *                           items:
- *                             type: object
- *                             properties:
- *                               product:
- *                                 type: object
- *                                 properties:
- *                                   _id:
- *                                     type: string
- *                                   title:
- *                                     type: string
- *                                   price:
- *                                     type: number
- *                                   images:
- *                                     type: array
- *                                     items:
- *                                       type: string
- *                               addedAt:
- *                                 type: string
- *                                 format: date-time
+ *                     _id: { type: string }
+ *                     name: { type: string }
+ *                     totalItems: { type: integer }
  *       400:
  *         description: Invalid user ID
  *       404:
  *         description: Public wishlist not found
  */
-router.get("/public/:userId", getPublicWishlist);
+router.get("/public/:userId", optionalAuthMiddleware, getPublicWishlist);
 
 module.exports = router;

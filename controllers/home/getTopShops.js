@@ -1,6 +1,7 @@
 const Store = require("../../models/storeModel");
 const asyncHandler = require("express-async-handler");
 const redisClient = require("../../config/redisClient");
+const { markFavouriteStores } = require("../../utils/favouriteStores");
 const { RATED_PRODUCT_MATCH, ratingFields } = require("../../utils/storeRating");
 
 const TTL = 600; // 10 minutes — changes when orders land or products are rated
@@ -21,7 +22,7 @@ const getTopShops = asyncHandler(async (req, res) => {
   try {
     const cached = await redisClient.get(cacheKey);
     if (cached) {
-      return res.status(200).json(JSON.parse(cached));
+      return sendWithFavourites(res, req.user?._id, JSON.parse(cached));
     }
   } catch {
     // Redis unavailable — continue to DB
@@ -120,7 +121,17 @@ const getTopShops = asyncHandler(async (req, res) => {
     // Non-fatal
   }
 
-  res.status(200).json(payload);
+  return sendWithFavourites(res, req.user?._id, payload);
 });
+
+/**
+ * `isFavourite` (the heart) is per viewer: added to a copy of the shared,
+ * cached payload on the way out.
+ */
+const sendWithFavourites = async (res, userId, payload) => {
+  const data = (payload.data || []).map((store) => ({ ...store }));
+  await markFavouriteStores(userId, data);
+  return res.status(200).json({ ...payload, data });
+};
 
 module.exports = getTopShops;

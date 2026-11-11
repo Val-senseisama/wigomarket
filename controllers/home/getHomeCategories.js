@@ -2,6 +2,33 @@ const Category = require("../../models/categoryModel");
 const asyncHandler = require("express-async-handler");
 const redisClient = require("../../config/redisClient");
 const { categoryCacheVersion } = require("../../utils/categoryCache");
+const { visibleStoreProductFilter } = require("../../utils/storeVisibility");
+
+/**
+ * The "Sort By" menu on the Product Categories section. Prices are the card's
+ * own figure (`fromPrice`, the cheapest in-stock listed price), so "Highest
+ * Price" orders the cards by the number printed on them. `_id` breaks ties.
+ */
+const SORTS = {
+  popular: { productCount: -1, _id: 1 },        // default — most products first
+  highest_price: { fromPrice: -1, _id: 1 },
+  lowest_price: { fromPrice: 1, _id: 1 },
+  latest: { latestProductAt: -1, _id: 1 },      // newest product listed first
+  alphabetical: { name: 1, _id: 1 },
+};
+const SORT_ALIASES = {
+  price_desc: "highest_price",
+  price_asc: "lowest_price",
+  newest: "latest",
+  latest_product: "latest",
+  name: "alphabetical",
+  name_asc: "alphabetical",
+};
+const resolveSort = (raw) => {
+  const key = String(raw || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const name = SORT_ALIASES[key] || key;
+  return SORTS[name] ? name : "popular";
+};
 
 const TTL = 1800; // 30 minutes — categories and their product counts change infrequently
 
@@ -13,10 +40,13 @@ const TTL = 1800; // 30 minutes — categories and their product counts change i
  *              Results are cached in Redis for 30 minutes; any category
  *              write clears them (utils/categoryCache).
  * @query {number} [limit=12] - Number of categories to return (max 24)
+ * @query {string} [sort=popular] - popular | highest_price | lowest_price |
+ *                                   latest | alphabetical
  */
 const getHomeCategories = asyncHandler(async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 12, 24);
-  const cacheKey = `home:categories:v${await categoryCacheVersion()}:${limit}`;
+  const sort = resolveSort(req.query.sort);
+  const cacheKey = `home:categories:v${await categoryCacheVersion()}:s2:${sort}:${limit}`;
 
   // ── Cache read ────────────────────────────────────────────────────────────
   try {
@@ -29,6 +59,9 @@ const getHomeCategories = asyncHandler(async (req, res) => {
   }
 
   // ── DB query ──────────────────────────────────────────────────────────────
+  // Only what a buyer can actually see: unhidden, in-stock products of public shops.
+  const shopFilter = await visibleStoreProductFilter();
+
   const categories = await Category.aggregate([
     {
       $lookup: {
@@ -37,8 +70,8 @@ const getHomeCategories = asyncHandler(async (req, res) => {
         foreignField: "category",
         as: "products",
         pipeline: [
-          { $match: { quantity: { $gt: 0 } } },
-          { $project: { listedPrice: 1 } },
+          { $match: { quantity: { $gt: 0 }, status: { $ne: "hidden" }, ...shopFilter } },
+          { $project: { listedPrice: 1, createdAt: 1 } },
         ],
       },
     },
@@ -49,10 +82,11 @@ const getHomeCategories = asyncHandler(async (req, res) => {
       $addFields: {
         productCount: { $size: "$products" },
         fromPrice: { $min: "$products.listedPrice" },
+        latestProductAt: { $max: "$products.createdAt" },
       },
     },
 
-    { $sort: { productCount: -1 } },
+    { $sort: SORTS[sort] },
     { $limit: limit },
 
     {
@@ -62,11 +96,12 @@ const getHomeCategories = asyncHandler(async (req, res) => {
         image: 1,
         fromPrice: 1,
         productCount: 1,
+        latestProductAt: 1,
       },
     },
-  ]);
+  ], { collation: { locale: "en", strength: 2 } }); // A–Z ignores case
 
-  const payload = { success: true, data: categories };
+  const payload = { success: true, sort, data: categories };
 
   // ── Cache write ───────────────────────────────────────────────────────────
   try {

@@ -216,6 +216,7 @@ const options = {
     "./routes/walletRouter.js",
     "./routes/websocketRouter.js",
     "./routes/wishlistRouter.js",
+    "./routes/favouriteRouter.js",
     "./routes/sellerDiscoveryRouter.js",
     "./routes/mapsRouter.js",
     "./routes/billPaymentRouter.js",

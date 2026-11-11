@@ -54,6 +54,44 @@ const displayStatusFor = (product) => {
     : DISPLAY_STATUS.ACTIVE;
 };
 
+const money = require("./money");
+
+/**
+ * The buyer-facing price block: what the card renders.
+ *
+ *   listedPrice           what the buyer pays — the main price on the card
+ *   listedCompareAtPrice  the slashed "was" price, or null for no discount
+ *   discountPercent       "-15%" badge, whole percent, or null
+ *
+ * A stored compare-at that is not above the current listed price (stale data)
+ * is treated as no discount rather than showing a slashed price that is lower.
+ *
+ * @param {Object} doc - Product or variant with listedPrice / price /
+ *   listedCompareAtPrice.
+ */
+const buyerPricing = (doc) => {
+  const listedPrice = doc?.listedPrice ?? doc?.price ?? 0;
+  const was = doc?.listedCompareAtPrice;
+  if (typeof was !== "number" || !money.gt(was, listedPrice)) {
+    return { listedPrice, listedCompareAtPrice: null, discountPercent: null };
+  }
+  const saving = money.subtract(was, listedPrice);
+  return {
+    listedPrice,
+    listedCompareAtPrice: was,
+    discountPercent: Math.max(1, Math.round((saving / was) * 100)),
+  };
+};
+
+/**
+ * Seller-side figures: the price the seller set, before the platform margin.
+ * Only the product's owner sees these — buyers get listedPrice alone.
+ */
+const sellerPricing = (doc) => ({
+  price: doc?.price ?? 0,
+  compareAtPrice: doc?.compareAtPrice ?? null,
+});
+
 /** images[0] is the display image; entries may be plain URLs or Cloudinary objects. */
 const firstImage = (images) => {
   const img = Array.isArray(images) ? images[0] : null;
@@ -101,11 +139,11 @@ const serializeStore = (store) => {
   };
 };
 
-const serializeVariant = (variant) => ({
+const serializeVariant = (variant, { forOwner = false } = {}) => ({
   id: variant._id,
   sku: variant.sku || null,
-  price: variant.price,
-  listedPrice: variant.listedPrice ?? null,
+  ...buyerPricing(variant),
+  ...(forOwner && sellerPricing(variant)),
   stock: variant.quantity ?? 0,
   sold: variant.sold ?? 0,
   image: variant.image || null,
@@ -136,9 +174,12 @@ const priceRangeFor = (variants) => {
  * @param {boolean} [options.includeVariants=false] - Embed the full variant
  *   list. Off by default so a 50-product storefront page stays small; the
  *   seller's own listing turns it on.
+ * @param {boolean} [options.forOwner=false] - Include the seller-side `price`
+ *   and `compareAtPrice` (before the platform margin). Only for the product's
+ *   own shop — buyers see listedPrice / listedCompareAtPrice only.
  * @returns {Object}
  */
-const serializeProductCard = (product, { includeVariants = false } = {}) => {
+const serializeProductCard = (product, { includeVariants = false, forOwner = false } = {}) => {
   const variants = Array.isArray(product.variants) ? product.variants : [];
   const displayStatus = displayStatusFor(product);
 
@@ -151,10 +192,12 @@ const serializeProductCard = (product, { includeVariants = false } = {}) => {
     description: product.description || null,
     brand: product.brand || null,
 
-    // Money. `price` is what the seller set; `listedPrice` is what the buyer
-    // pays (price + platform margin) and is the figure to render on the card.
-    price: product.price ?? 0,
-    listedPrice: product.listedPrice ?? product.price ?? 0,
+    // Money. `listedPrice` is what the buyer pays (seller's price + platform
+    // margin) and is the figure to render on the card; `listedCompareAtPrice`
+    // is the slashed "was" price (null = no discount). The seller's own
+    // `price`/`compareAtPrice` are added for the owner only.
+    ...buyerPricing(product),
+    ...(forOwner && sellerPricing(product)),
     currency: "NGN",
 
     image: firstImage(product.images),
@@ -171,7 +214,7 @@ const serializeProductCard = (product, { includeVariants = false } = {}) => {
     variantCount: variants.length,
     optionTypes: product.optionTypes || [],
     priceRange: priceRangeFor(variants),
-    ...(includeVariants && { variants: variants.map(serializeVariant) }),
+    ...(includeVariants && { variants: variants.map((v) => serializeVariant(v, { forOwner })) }),
 
     // Stored visibility vs. the pill to render. Filter chips use displayStatus;
     // the hide/unhide toggle writes `status`.
@@ -206,6 +249,87 @@ const serializeProductCards = (products, options) =>
   (products || []).map((p) => serializeProductCard(p, options));
 
 /**
+ * The buyer's product card — what the storefront card renders, and nothing
+ * more. One shape for every buyer listing: get-products (storefront),
+ * home suggested-products, category suggestions, search and saved products.
+ * Tapping a card opens GET /api/product/{id} for the full detail.
+ *
+ * `isInWishlist`, `isInCart` and `cartQuantity` default to false/0 here and
+ * are set per viewer by utils/viewerProductState.markViewerState.
+ *
+ * @param {Object} product - Lean product (or aggregate row) with `store`
+ *   populated as { _id, name }. Needs images (or image), listedPrice,
+ *   listedCompareAtPrice, quantity, productType, rating and, for the
+ *   "from ₦X" range, variants[].listedPrice.
+ * @param {Object} [options]
+ * @param {boolean} [options.includeVariants=false] - Embed buyer-side variants.
+ */
+const serializeBuyerCard = (product, { includeVariants = false } = {}) => {
+  const variants = Array.isArray(product.variants) ? product.variants : [];
+  const stock = product.quantity ?? 0;
+  const store = product.store && typeof product.store === "object" && product.store._id
+    ? { id: product.store._id, name: product.store.name || null }
+    : product.store
+      ? { id: product.store, name: null }
+      : null;
+
+  return {
+    id: product._id,
+    title: product.title,
+    image: firstImage(product.images) ?? product.image ?? null,
+
+    // listedPrice is the price; listedCompareAtPrice the slashed "was" price.
+    ...buyerPricing(product),
+    currency: "NGN",
+    // "from ₦X" for a product with versions; null for a single product.
+    priceRange: priceRangeFor(variants),
+
+    // A product with versions needs a choice (size, colour) before it can go
+    // in the cart — open the product page instead of adding from the card.
+    productType: product.productType || "single",
+    hasVariants: (product.productType || "single") === "variable",
+    ...(includeVariants && {
+      variants: variants.map((v) => serializeVariant(v)),
+    }),
+
+    inStock: stock > 0,
+    stock,
+
+    rating: {
+      average: Math.round((product.rating?.average ?? 0) * 10) / 10,
+      count: product.rating?.count ?? 0,
+    },
+    store,
+
+    isInWishlist: false,
+    isInCart: false,
+    cartQuantity: 0,
+  };
+};
+
+const serializeBuyerCards = (products, options) =>
+  (products || []).map((p) => serializeBuyerCard(p, options));
+
+/**
+ * Projection carrying exactly what serializeBuyerCard reads, for aggregation
+ * pipelines that build cards. Add the store lookup ({ _id, name }) separately.
+ */
+const BUYER_CARD_PROJECTION = {
+  _id: 1,
+  title: 1,
+  images: { $slice: ["$images", 1] },
+  listedPrice: 1,
+  price: 1, // fallback only, for products saved before listedPrice existed
+  listedCompareAtPrice: 1,
+  quantity: 1,
+  productType: 1,
+  "variants.listedPrice": 1,
+  "variants.price": 1,
+  rating: 1,
+  store: 1,
+};
+
+/**
  * Full product detail — everything the seller's product page renders, grouped
  * the way the screen is laid out.
  *
@@ -220,10 +344,14 @@ const serializeProductCards = (products, options) =>
  *   ordered. Requires an Order lookup, so the caller supplies it.
  * @param {Object} [extra.reviews] - { average, count, breakdown } for the
  *   Rating & Reviews panel.
+ * @param {boolean} [extra.forOwner=false] - Include seller-side prices.
  * @returns {Object}
  */
-const serializeProductDetail = (product, { lastOrderedAt = null, reviews = null } = {}) => {
-  const card = serializeProductCard(product, { includeVariants: true });
+const serializeProductDetail = (
+  product,
+  { lastOrderedAt = null, reviews = null, forOwner = false } = {},
+) => {
+  const card = serializeProductCard(product, { includeVariants: true, forOwner });
   const variants = card.variants || [];
 
   // Stock arithmetic. `quantity` is what is left on the shelf, `sold` is what
@@ -263,8 +391,10 @@ const serializeProductDetail = (product, { lastOrderedAt = null, reviews = null 
 
     // ── Pricing & Inventory panel ───────────────────────────────────────────
     inventory: {
-      price: card.price,
+      ...(forOwner && { price: card.price, compareAtPrice: card.compareAtPrice }),
       listedPrice: card.listedPrice,
+      listedCompareAtPrice: card.listedCompareAtPrice,
+      discountPercent: card.discountPercent,
       currency: card.currency,
       priceRange: card.priceRange,
       // Stock ever listed = what is left + what has been sold.
@@ -291,8 +421,12 @@ module.exports = {
   STATUS_LABELS,
   FULFILMENT_LABELS,
   availableForLabel,
+  buyerPricing,
   displayStatusFor,
   serializeProductCard,
   serializeProductCards,
+  serializeBuyerCard,
+  serializeBuyerCards,
+  BUYER_CARD_PROJECTION,
   serializeProductDetail,
 };

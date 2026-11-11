@@ -40,6 +40,35 @@ const COMMISSION_PERCENT = 2;
 const listedPriceFor = (sellersPrice) =>
   money.add(sellersPrice, money.percentage(sellersPrice, COMMISSION_PERCENT));
 
+/**
+ * Validate an optional compare-at ("was") price against the seller's price.
+ *
+ * undefined → not sent (caller keeps whatever is stored); null, "" or 0 →
+ * clear the discount; anything else must be a number strictly greater than
+ * `sellersPrice`, or the slashed price would be a lie.
+ *
+ * @returns {{ provided: boolean, compareAtPrice?: number|null,
+ *             listedCompareAtPrice?: number|null, error?: string }}
+ */
+const parseCompareAtPrice = (raw, sellersPrice) => {
+  if (raw === undefined) return { provided: false };
+  if (raw === null || raw === "" || Number(raw) === 0) {
+    return { provided: true, compareAtPrice: null, listedCompareAtPrice: null };
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    return { provided: true, error: "compareAtPrice must be a positive number, or null to remove the discount" };
+  }
+  const compareAtPrice = money.round(value);
+  if (!money.gt(compareAtPrice, sellersPrice)) {
+    return {
+      provided: true,
+      error: `compareAtPrice (${compareAtPrice}) must be higher than price (${sellersPrice}); send null to remove the discount`,
+    };
+  }
+  return { provided: true, compareAtPrice, listedCompareAtPrice: listedPriceFor(compareAtPrice) };
+};
+
 /** Stable key for a combination, order-independent so option order cannot create a false duplicate. */
 const combinationKey = (options) =>
   options
@@ -243,10 +272,20 @@ const validateVariants = ({ optionTypes, variants }) => {
 
     const sellersPrice = money.round(Number(variant.price));
 
+    const compareAt = parseCompareAtPrice(variant.compareAtPrice, sellersPrice);
+    if (compareAt.error) {
+      errors.push(`${label}: ${compareAt.error}`);
+      return;
+    }
+
     cleanVariants.push({
       ...(variant.sku ? { sku: String(variant.sku).trim() } : {}),
       price: sellersPrice,
       listedPrice: listedPriceFor(sellersPrice),
+      // Variants are replaced wholesale, so a variant sent without
+      // compareAtPrice has no discount.
+      compareAtPrice: compareAt.compareAtPrice ?? null,
+      listedCompareAtPrice: compareAt.listedCompareAtPrice ?? null,
       quantity: Number(variant.quantity),
       sold: 0,
       ...(isNonEmptyString(variant.image) ? { image: variant.image.trim() } : {}),
@@ -274,9 +313,18 @@ const validateVariants = ({ optionTypes, variants }) => {
 const deriveTopLevel = (variants) => {
   const prices = variants.map((v) => v.price);
   const price = money.min(...prices);
+  // The parent's "was" price belongs to the same variant as its "from" price,
+  // so the card never pairs one variant's price with another's discount. Among
+  // equally cheap variants, the largest discount wins.
+  const compareAts = variants
+    .filter((v) => money.equals(v.price, price) && v.compareAtPrice)
+    .map((v) => v.compareAtPrice);
+  const compareAtPrice = compareAts.length ? money.max(...compareAts) : null;
   return {
     price,
     listedPrice: listedPriceFor(price),
+    compareAtPrice,
+    listedCompareAtPrice: compareAtPrice === null ? null : listedPriceFor(compareAtPrice),
     quantity: variants.reduce((sum, v) => sum + v.quantity, 0),
   };
 };
@@ -285,6 +333,7 @@ module.exports = {
   validateVariants,
   deriveTopLevel,
   listedPriceFor,
+  parseCompareAtPrice,
   combinationKey,
   MAX_OPTION_TYPES,
   MAX_OPTION_VALUES,

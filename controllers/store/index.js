@@ -1,5 +1,6 @@
 const createStore = require('./createStore');
 const getAStore = require('./getAStore');
+const getStoreCategories = require('./getStoreCategories');
 const getAllStores = require('./getAllStores');
 const getMyStore = require('./getMyStore');
 const updateBankDetails = require('./updateBankDetails');
@@ -20,6 +21,7 @@ const { getStoreSettings, updateStoreSettings } = require('./storeSettings');
 module.exports = {
   createStore,
   getAStore,
+  getStoreCategories,
   getAllStores,
   getMyStore,
   updateBankDetails,

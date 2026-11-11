@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { authMiddleware } = require("../middleware/authMiddleware");
+const { authMiddleware, optionalAuthMiddleware } = require("../middleware/authMiddleware");
 const {
   globalSearch,
   getSuggestions,
@@ -85,33 +85,13 @@ const {
  *                   properties:
  *                     products:
  *                       type: array
+ *                       description: Buyer product cards — the same object as get-products — plus searchScore.
  *                       items:
- *                         type: object
- *                         properties:
- *                           _id: { type: string }
- *                           title: { type: string }
- *                           slug: { type: string }
- *                           listedPrice: { type: number }
- *                           brand: { type: string }
- *                           images: { type: array, items: { type: string } }
- *                           rating:
- *                             type: object
+ *                         allOf:
+ *                           - $ref: '#/components/schemas/ProductCard'
+ *                           - type: object
  *                             properties:
- *                               average: { type: number }
- *                               count: { type: integer }
- *                           searchScore: { type: number, description: "Atlas relevance score (omitted in regex mode)" }
- *                           storeDetails:
- *                             type: object
- *                             properties:
- *                               _id: { type: string }
- *                               name: { type: string }
- *                               image: { type: string }
- *                               address: { type: string }
- *                           categoryDetails:
- *                             type: object
- *                             properties:
- *                               _id: { type: string }
- *                               name: { type: string }
+ *                               searchScore: { type: number, nullable: true, description: "Relevance score" }
  *                     stores:
  *                       type: array
  *                       maxItems: 5
@@ -123,6 +103,7 @@ const {
  *                           image: { type: string }
  *                           address: { type: string }
  *                           searchScore: { type: number }
+ *                           isFavourite: { type: boolean, description: "Viewer saved this shop (send the bearer token)" }
  *                     pagination:
  *                       type: object
  *                       properties:
@@ -150,7 +131,7 @@ const {
  *           application/json:
  *             schema: { $ref: '#/components/schemas/Error' }
  */
-router.get("/", globalSearch);
+router.get("/", optionalAuthMiddleware, globalSearch);
 
 /**
  * @swagger

@@ -167,7 +167,11 @@ describe("getAProduct — full detail", () => {
     const { inventory } = res.body.data;
 
     expect(inventory.variants).toHaveLength(2);
-    expect(inventory.variants[0]).toMatchObject({ sku: "S-M", price: 7500, stock: 2, sold: 10, inStock: true });
+    expect(inventory.variants[0]).toMatchObject({ sku: "S-M", listedPrice: 7650, stock: 2, sold: 10, inStock: true });
+    // Anonymous viewer: the seller's own price is not part of the response.
+    expect(inventory.variants[0].price).toBeUndefined();
+    expect(inventory.price).toBeUndefined();
+    expect(res.body.data.price).toBeUndefined();
     expect(inventory.priceRange).toEqual({ from: 7650, to: 8160 });
     expect(res.body.data.variantCount).toBe(2);
   });
